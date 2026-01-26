@@ -31,14 +31,61 @@ export async function writeFile(workDir: string, filePath: string, content: stri
     return `Wrote to ${filePath}`;
 }
 
+// Allowlist of safe command patterns for agent execution
+const ALLOWED_COMMAND_PATTERNS = [
+    /^npm\s+(test|run|install|ci|build|lint)/,
+    /^npx\s+[a-zA-Z0-9@/-]+/,
+    /^node\s+[a-zA-Z0-9./_-]+/,
+    /^ls\s+(-[a-zA-Z]+\s+)?[a-zA-Z0-9./_-]*$/,
+    /^cat\s+[a-zA-Z0-9./_-]+$/,
+    /^pwd$/,
+    /^echo\s+/,
+    /^git\s+(status|log|diff|show)/,
+    /^python3?\s+-m\s+pytest/,
+    /^pytest/,
+    /^ruff\s+/,
+    /^mypy\s+/,
+];
+
+const DANGEROUS_PATTERNS = [
+    /[;&|`$()]/,  // Shell metacharacters
+    /rm\s+-rf/,   // Destructive commands
+    />\s*\/dev/,  // Device manipulation
+    /curl.*\|/,   // Piped downloads
+    /wget.*\|/,   // Piped downloads
+];
+
 export async function runCommand(workDir: string, command: string) {
-    // Basic security: prevent breaking out of execution context? 
-    // In Docker container, it's safer, but still good to be careful.
+    // Security: Validate command against allowlist
+    const isAllowed = ALLOWED_COMMAND_PATTERNS.some(pattern => pattern.test(command));
+    const isDangerous = DANGEROUS_PATTERNS.some(pattern => pattern.test(command));
+
+    if (!isAllowed || isDangerous) {
+        return `ERROR: Command not allowed for security reasons. Only whitelisted commands (npm, git, test tools) are permitted.`;
+    }
+
     try {
-        const { stdout, stderr } = await execAsync(command, { cwd: workDir });
-        return `STDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`;
+        const { stdout, stderr } = await execAsync(command, {
+            cwd: workDir,
+            timeout: 60000, // 60s timeout
+            maxBuffer: 1024 * 1024 // 1MB max output
+        });
+
+        // Sanitize output: limit length and remove potential secrets
+        const sanitize = (str: string) => {
+            const maxLen = 5000;
+            return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+        };
+
+        return `STDOUT:\n${sanitize(stdout)}\n\nSTDERR:\n${sanitize(stderr)}`;
     } catch (e: any) {
-        return `ERROR:\n${e.message}\nSTDOUT:\n${e.stdout}\nSTDERR:\n${e.stderr}`;
+        const sanitize = (str: string) => {
+            if (!str) return '';
+            const maxLen = 2000;
+            return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+        };
+
+        return `ERROR: Command failed\n${sanitize(e.stdout || '')}\n${sanitize(e.stderr || '')}`;
     }
 }
 
