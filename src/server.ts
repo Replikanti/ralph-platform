@@ -2,10 +2,17 @@ import express from 'express';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import dotenv from 'dotenv';
+import crypto from 'node:crypto';
 
 dotenv.config();
 const app = express();
-app.use(express.json());
+
+// Middleware to capture raw body for signature verification
+app.use(express.json({
+    verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+    }
+}));
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
     maxRetriesPerRequest: null,
@@ -16,7 +23,34 @@ const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379'
 });
 const ralphQueue = new Queue('ralph-tasks', { connection });
 
+function verifyLinearSignature(req: any): boolean {
+    const secret = process.env.LINEAR_WEBHOOK_SECRET;
+    if (!secret) {
+        console.error("❌ LINEAR_WEBHOOK_SECRET is not set!");
+        return false;
+    }
+
+    const signature = req.headers['linear-signature'];
+    if (!signature || typeof signature !== 'string') return false;
+
+    const hmac = crypto.createHmac('sha256', secret);
+    const digest = hmac.update(req.rawBody || '').digest('hex');
+    
+    const signatureBuffer = Buffer.from(signature);
+    const digestBuffer = Buffer.from(digest);
+
+    if (signatureBuffer.length !== digestBuffer.length) {
+        return false;
+    }
+    
+    return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
+}
+
 app.post('/webhook', async (req, res) => {
+    if (!verifyLinearSignature(req)) {
+        return res.status(401).send('Invalid signature');
+    }
+
     const { action, data, type } = req.body;
     
     // Filter: Only issues with label "Ralph"
