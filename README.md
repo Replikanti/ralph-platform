@@ -24,7 +24,7 @@ graph LR
             Polyglot -.->|TS Types| tsc
             Polyglot -.->|Py| Ruff
             Polyglot -.->|Py Types| mypy
-            Polyglot -.->|Sec| Semgrep
+            Polyglot -.->|Sec| Trivy
         end
     end
     Worker -->|Push PR| GitHub
@@ -38,8 +38,48 @@ graph LR
 3. **Queue**: API validates signature, enqueues task to Redis (BullMQ)
 4. **Planning**: Worker uses Claude Opus to create implementation plan
 5. **Coding**: Worker uses Claude Sonnet to generate code
-6. **Validation**: Polyglot toolchain validates the code (linting, types, security)
+6. **Validation**: Polyglot toolchain (Biome, Ruff, Mypy, TSC, Trivy) validates the code
 7. **Push**: Worker commits and pushes to a feature branch
+
+---
+
+## Security Features
+
+Ralph implements multiple security layers to safely execute AI-generated code in untrusted repositories:
+
+### Agent Tool Execution Security
+
+The agent uses four tools to manipulate code (`list_files`, `read_file`, `write_file`, `run_command`). The `run_command` tool has strict security controls:
+
+**1. Command Allowlist**
+Only whitelisted command patterns are permitted:
+- Build tools: `npm test`, `npm run build`, `npx`, `node`
+- Version control: `git status`, `git log`, `git diff`, `git show`
+- File operations: `ls`, `cat`, `pwd`, `echo`
+- Testing: `pytest`, `python -m pytest`
+- Linters: `ruff`, `mypy`
+
+**2. Dangerous Pattern Blocking**
+Commands containing these patterns are automatically rejected:
+- Shell metacharacters: `;`, `&`, `|`, `` ` ``, `$()`
+- Destructive operations: `rm -rf`
+- Device manipulation: `> /dev/`
+- Piped downloads: `curl ... |`, `wget ... |`
+
+**3. Resource Limits**
+- **Timeout**: 60 seconds maximum
+- **Buffer limit**: 1MB output size
+- **Output sanitization**: Truncated to 5000 chars (stdout) / 2000 chars (stderr)
+
+**4. Path Traversal Protection**
+All file operations validate that resolved paths remain within the ephemeral workspace using `path.resolve()` + `startsWith()` checks.
+
+### Additional Security Layers
+
+- **Webhook Authentication**: HMAC SHA-256 signature verification on Linear webhooks
+- **Workspace Isolation**: Each task runs in a UUID-based ephemeral directory (`/tmp/ralph-workspaces`)
+- **Security Scanning**: Trivy scans all generated code for vulnerabilities, secrets, and misconfigurations
+- **Immutable Guardrails**: Hardcoded security rules prevent secret exposure and sandbox escapes
 
 ---
 
