@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ralph.fullname" . }}-worker-egress
+  labels:
+    {{- include "ralph.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ralph-worker
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow Redis (internal)
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8  # Default VPC CIDR, user might need to adjust this in values or hardcode
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow GitHub API (HTTPS)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
