@@ -28,7 +28,7 @@ describe('runAgent', () => {
         // Re-require mocked modules to get the fresh mock references after resetModules()
         const workspaceModule = require('../src/workspace');
         (workspaceModule.setupWorkspace as jest.Mock).mockResolvedValue({
-            workDir: '/tmp/test',
+            workDir: '/mock/workspace',
             git: mockGit,
             cleanup: mockCleanup,
         });
@@ -38,10 +38,17 @@ describe('runAgent', () => {
             success: true,
             output: 'Validation Passed',
         });
+        // Ensure other tool functions are mocks
+        toolsModule.listFiles.mockResolvedValue('file.txt');
+        toolsModule.readFile.mockResolvedValue('content');
+        toolsModule.writeFile.mockResolvedValue('Wrote to file');
+        toolsModule.runCommand.mockResolvedValue('Command output');
+        // Ensure agentTools is defined
+        toolsModule.agentTools = [];
 
         // Setup Anthropic Mock
         mockMessagesCreate = jest.fn().mockResolvedValue({
-            content: [{ text: 'Generated Plan/Code' }],
+            content: [{ type: 'text', text: 'Generated Plan/Code' }],
         });
 
         jest.doMock('@anthropic-ai/sdk', () => {
@@ -83,7 +90,7 @@ describe('runAgent', () => {
             ticketId: '1',
             title: 'Test Task',
             description: 'Do something',
-            repoUrl: 'http://repo',
+            repoUrl: 'https://repo',
             branchName: 'branch',
         };
 
@@ -96,7 +103,7 @@ describe('runAgent', () => {
         expect(mockMessagesCreate).toHaveBeenCalledTimes(2); // Plan + Execute
         
         const toolsModule = require('../src/tools');
-        expect(toolsModule.runPolyglotValidation).toHaveBeenCalledWith('/tmp/test');
+        expect(toolsModule.runPolyglotValidation).toHaveBeenCalledWith('/mock/workspace');
         
         expect(mockGit.push).toHaveBeenCalledWith('origin', task.branchName);
         expect(mockCleanup).toHaveBeenCalled();
@@ -114,7 +121,7 @@ describe('runAgent', () => {
             ticketId: '1',
             title: 'Test Task',
             description: 'Do something',
-            repoUrl: 'http://repo',
+            repoUrl: 'https://repo',
             branchName: 'branch',
         };
 
@@ -147,7 +154,7 @@ describe('runAgent', () => {
 
     it('should load repo skills if present', async () => {
         // Mock fs to simulate existing skills
-        const fsModule = require('fs/promises');
+        const fsModule = require('node:fs/promises');
         fsModule.access.mockResolvedValue(undefined);
         fsModule.readdir.mockResolvedValue(['react.md', 'ignored.txt']);
         fsModule.readFile.mockImplementation((path: string) => {
@@ -159,7 +166,7 @@ describe('runAgent', () => {
             ticketId: '1',
             title: 'Test Task',
             description: 'Do something',
-            repoUrl: 'http://repo',
+            repoUrl: 'https://repo',
             branchName: 'branch',
         };
 
@@ -169,5 +176,89 @@ describe('runAgent', () => {
         const callArgs = mockMessagesCreate.mock.calls[0][0];
         expect(callArgs.system).toContain('--- REPO SKILL: REACT.MD ---');
         expect(callArgs.system).toContain('Always use functional components.');
+    });
+
+    it('should execute tools in the loop', async () => {
+        const toolsModule = require('../src/tools');
+        
+        // Mock sequence: 
+        // 1. Plan (Opus) -> Text
+        // 2. Execute (Sonnet) Iteration 1 -> Tool Use
+        // 3. Execute (Sonnet) Iteration 2 -> Text (Done)
+        mockMessagesCreate
+            .mockResolvedValueOnce({ 
+                content: [{ type: 'text', text: 'Plan: Create file' }] // Opus
+            })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_1', 
+                    name: 'write_file', 
+                    input: { path: 'test.txt', content: 'hello' } 
+                }] // Sonnet Iter 1
+            })
+            .mockResolvedValueOnce({
+                content: [{ type: 'text', text: 'Done' }] // Sonnet Iter 2
+            });
+
+        const task = {
+            ticketId: '1',
+            title: 'Tool Task',
+            description: 'Write a file',
+            repoUrl: 'https://repo',
+            branchName: 'branch',
+        };
+
+        await runAgent(task);
+
+        // Verify tool execution
+        expect(toolsModule.writeFile).toHaveBeenCalledWith('/mock/workspace', 'test.txt', 'hello');
+        
+        // Verify loop continuation (called Anthropic 3 times: Plan, Iter 1, Iter 2)
+        expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
+    });
+
+    it('should handle tool execution errors gracefully', async () => {
+        const toolsModule = require('../src/tools');
+        toolsModule.writeFile.mockRejectedValue(new Error('Write failed'));
+
+        mockMessagesCreate
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_error', 
+                    name: 'write_file', 
+                    input: { path: 'fail.txt', content: '' } 
+                }]
+            })
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+        await runAgent({ ticketId: 'error-test', title: 'Error Task', repoUrl: 'https://repo', branchName: 'b' });
+
+        // Verify the error result was sent back to the agent
+        const lastCallArgs = mockMessagesCreate.mock.calls[2][0];
+        const toolResult = lastCallArgs.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content)).content[0];
+        expect(toolResult.content).toContain('Error executing tool: Write failed');
+    });
+
+    it('should report unknown tools to the agent', async () => {
+        mockMessagesCreate
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_unknown', 
+                    name: 'mystery_tool', 
+                    input: {} 
+                }]
+            })
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+        await runAgent({ ticketId: 'unknown-test', title: 'Unknown Task', repoUrl: 'https://repo', branchName: 'b' });
+
+        const lastCallArgs = mockMessagesCreate.mock.calls[2][0];
+        const toolResult = lastCallArgs.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content)).content[0];
+        expect(toolResult.content).toContain('Error: Unknown tool mystery_tool');
     });
 });
