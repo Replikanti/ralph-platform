@@ -338,6 +338,46 @@ kubectl logs -l app=ralph-worker --tail=50
 
 ---
 
+## Multi-Repository Setup
+
+Ralph maps **Linear Teams to GitHub repositories**. This follows Linear's philosophy where each team owns their codebase.
+
+### Configuration
+
+Set the `LINEAR_TEAM_REPOS` environment variable as a JSON object mapping Linear team keys to repository URLs:
+
+```bash
+# Kubernetes secret
+kubectl create secret generic ralph-team-repos \
+  --from-literal=mapping='{"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend","INFRA":"https://github.com/org/infrastructure"}'
+
+# Or in .env for local development
+LINEAR_TEAM_REPOS={"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}
+```
+
+### How it works
+
+1. Linear issue is created with label "Ralph" in team "FRONT"
+2. Ralph receives webhook with `team.key = "FRONT"`
+3. Looks up `FRONT` in `LINEAR_TEAM_REPOS` → `https://github.com/org/frontend`
+4. Clones that repository, creates branch, pushes PR
+
+### Fallback behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Team key found in `LINEAR_TEAM_REPOS` | Uses mapped repository |
+| Team key not found, `DEFAULT_REPO_URL` set | Uses default repository |
+| Neither configured | Issue is ignored (logged as warning) |
+
+### Finding your Linear team keys
+
+Team keys are the short prefixes in issue identifiers (e.g., `FRONT-123` → team key is `FRONT`).
+
+You can also find them in Linear: **Settings → Teams → [Team Name] → Team key**
+
+---
+
 ## Configuration Reference
 
 ### Environment Variables

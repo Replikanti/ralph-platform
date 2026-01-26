@@ -7,6 +7,30 @@ import crypto from 'node:crypto';
 dotenv.config();
 const app = express();
 
+// Team → Repository mapping (Linear team key → GitHub repo URL)
+function getTeamRepoMap(): Record<string, string> {
+    try {
+        return JSON.parse(process.env.LINEAR_TEAM_REPOS || '{}');
+    } catch {
+        console.error('❌ Invalid LINEAR_TEAM_REPOS JSON');
+        return {};
+    }
+}
+
+function getRepoForTeam(teamKey: string | undefined): string | null {
+    const teamRepoMap = getTeamRepoMap();
+
+    if (teamKey && teamRepoMap[teamKey]) {
+        return teamRepoMap[teamKey];
+    }
+
+    if (process.env.DEFAULT_REPO_URL) {
+        return process.env.DEFAULT_REPO_URL;
+    }
+
+    return null;
+}
+
 // Middleware to capture raw body for signature verification
 app.use(express.json({
     verify: (req: any, _res, buf) => {
@@ -54,16 +78,23 @@ app.post('/webhook', async (req, res) => {
     const { action, data, type } = req.body;
     
     // Filter: Only issues with label "Ralph"
-    if (type === 'Issue' && (action === 'create' || action === 'update') && 
-        data.labels?.some((l: any) => l.name.toLowerCase() === 'ralph')) {
-        
-        console.log(`📥 [API] Enqueueing Ticket: ${data.title}`);
+    const hasRalphLabel = data.labels?.some((l: any) => l.name.toLowerCase() === 'ralph');
+
+    if (type === 'Issue' && (action === 'create' || action === 'update') && hasRalphLabel) {
+        const teamKey = data.team?.key;
+        const repoUrl = getRepoForTeam(teamKey);
+
+        if (!repoUrl) {
+            console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
+            return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
+        }
+
+        console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
         await ralphQueue.add('coding-task', {
             ticketId: data.id,
             title: data.title,
             description: data.description,
-            // In prod, map Linear Team ID to Repo URL
-            repoUrl: process.env.DEFAULT_REPO_URL || "https://github.com/Replikanti/ralph-platform", 
+            repoUrl,
             branchName: `ralph/feat-${data.identifier}`
         }, {
             attempts: 3,
@@ -71,8 +102,8 @@ app.post('/webhook', async (req, res) => {
                 type: 'exponential',
                 delay: 2000
             },
-            removeOnComplete: true, // Keep DB clean
-            removeOnFail: false     // Keep failed jobs for inspection
+            removeOnComplete: true,
+            removeOnFail: false
         });
         res.status(200).send({ status: 'queued' });
     } else {
