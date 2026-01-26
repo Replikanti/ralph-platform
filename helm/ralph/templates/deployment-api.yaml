@@ -12,12 +12,20 @@ spec:
       labels:
         app: ralph-api
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["node", "dist/server.js"]
           ports:
             - containerPort: 3000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           env:
             - name: REDIS_URL
               value: {{ .Values.redis.url }}

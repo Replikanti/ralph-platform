@@ -1,7 +1,7 @@
-import { exec } from "child_process";
-import { promisify } from "util";
-import fs from "fs";
-import path from "path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import fs from "node:fs";
+import path from "node:path";
 
 const execAsync = promisify(exec);
 
@@ -27,7 +27,7 @@ export async function runPolyglotValidation(workDir: string) {
     // 2. Python: Ruff & Mypy
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
-                      (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
+                      (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false /* Ignore find errors */));
 
     if (hasPython) {
         try {

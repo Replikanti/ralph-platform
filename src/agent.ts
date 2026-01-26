@@ -2,8 +2,8 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { Langfuse } from "langfuse";
 import { setupWorkspace } from "./workspace";
 import { runPolyglotValidation } from "./tools";
-import fs from 'fs/promises';
-import path from 'path';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const anthropic = new Anthropic();
 const langfuse = new Langfuse();
@@ -30,7 +30,7 @@ async function loadRepoSkills(workDir: string): Promise<string> {
                 skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
             }
         }
-    } catch (e) { /* No skills found, ignore */ }
+    } catch (e) { void e; /* No skills found, ignore */ }
     return skillText;
 }
 

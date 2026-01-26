@@ -1,6 +1,6 @@
 image:
   repository: gcr.io/duvo-ai/ralph
-  tag: latest
+  tag: "0.1.0"
 redis:
   url: "redis://ralph-redis-master:6379"
 secrets:

@@ -9,7 +9,7 @@ jest.mock('../src/agent');
 
 describe('Worker', () => {
     it('should create a worker with correct options', () => {
-        const mockWorker = createWorker();
+        createWorker();
         
         expect(Worker).toHaveBeenCalledWith(
             'ralph-tasks', 

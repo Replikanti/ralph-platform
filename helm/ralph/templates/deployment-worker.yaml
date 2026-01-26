@@ -12,12 +12,17 @@ spec:
       labels:
         app: ralph-worker
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["node", "dist/worker.js"]
           resources:
+            requests:
+              cpu: {{ .Values.resources.worker.cpu | default "1000m" }}
+              memory: {{ .Values.resources.worker.memory | default "2Gi" }}
             limits:
+              cpu: "2000m"
               memory: "4Gi"
           env:
             - name: REDIS_URL

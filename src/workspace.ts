@@ -1,7 +1,7 @@
 import simpleGit from 'simple-git';
-import fs from 'fs';
+import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
+import path from 'node:path';
 
 const WORKSPACE_ROOT = '/tmp/ralph-workspaces';
 if (!fs.existsSync(WORKSPACE_ROOT)) fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
