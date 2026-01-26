@@ -23,6 +23,18 @@ spec:
           command: ["node", "dist/server.js"]
           ports:
             - containerPort: 3000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
           resources:
             requests:
               cpu: {{ .Values.resources.api.requests.cpu }}
