@@ -7,7 +7,13 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
+const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
+    maxRetriesPerRequest: null,
+    retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+    }
+});
 const ralphQueue = new Queue('ralph-tasks', { connection });
 
 app.post('/webhook', async (req, res) => {
