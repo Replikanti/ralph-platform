@@ -1,5 +1,5 @@
 image:
-  repository: gcr.io/duvo-ai/ralph
+  repository: gcr.io/replikanti/ralph
   tag: "0.1.0"
 redis:
   url: "redis://ralph-redis-master:6379"
