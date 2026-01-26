@@ -21,7 +21,9 @@ graph LR
             Worker -->|Validate| Polyglot[Toolchain]
             
             Polyglot -.->|TS| Biome
+            Polyglot -.->|TS Types| tsc
             Polyglot -.->|Py| Ruff
+            Polyglot -.->|Py Types| mypy
             Polyglot -.->|Sec| Semgrep
         end
     end
