@@ -2,7 +2,7 @@ import request from 'supertest';
 import { app } from '../src/server';
 import crypto from 'node:crypto';
 
-const TEST_SECRET = 'test-secret';
+const TEST_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.LINEAR_WEBHOOK_SECRET = TEST_SECRET;
 
 // Mock BullMQ and IORedis
