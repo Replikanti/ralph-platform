@@ -224,7 +224,7 @@ helm upgrade --install ralph ./helm/ralph \
   --set image.tag=latest \
   --set redis.existingSecret=ralph-redis-secret \
   --set ingress.enabled=true \
-  --set ingress.hosts[0].host=ralph.your-domain.com \
+  --set ingress.hosts[0].host=ralph.example.com \
   --set ingress.hosts[0].paths[0].path=/ \
   --set ingress.hosts[0].paths[0].pathType=Prefix
 
@@ -253,7 +253,7 @@ Check workflow: `.github/workflows/deploy.yaml`
 kubectl get ingress ralph -w
 
 # Once IP is assigned, configure DNS:
-# ralph.your-domain.com → [INGRESS_IP]
+# ralph.example.com → [INGRESS_IP]
 ```
 
 For GKE managed certificates (HTTPS), add to Helm values:
@@ -270,7 +270,7 @@ ingress:
 
 1. Go to **Linear → Settings → API → Webhooks**
 2. Create new webhook:
-   - **URL**: `https://ralph.your-domain.com/webhook`
+   - **URL**: `https://ralph.example.com/webhook`
    - **Events**: Enable `Issues` (Create, Update)
 3. Copy the **Signing Secret** (should already be in K8s secret from Phase 3)
 
@@ -280,11 +280,11 @@ ingress:
 
 ```bash
 # 1. Health check
-curl https://ralph.your-domain.com/health
+curl https://ralph.example.com/health
 # Expected: {"status":"ok"}
 
 # 2. Webhook test (should return 401 - no signature)
-curl -X POST https://ralph.your-domain.com/webhook
+curl -X POST https://ralph.example.com/webhook
 # Expected: "Invalid signature"
 
 # 3. Check logs
@@ -329,7 +329,7 @@ redis:
 ingress:
   enabled: true
   hosts:
-    - host: ralph.your-domain.com
+    - host: ralph.example.com
 
 scaling:
   workerReplicas: 2
