@@ -19,47 +19,48 @@ describe('runPolyglotValidation', () => {
         execHandler: (cmd: string, cb: any) => void = (cmd, cb) => cb(null, { stdout: '' })
     ) => {
         mockedFsExistsSync.mockImplementation(fileFilter);
-        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
-            if (cmd.startsWith('find')) {
-                // Default find behavior unless overridden by execHandler logic inside it?
-                // Actually simpler: pass execHandler that handles all.
-                // If specific 'find' logic is needed, handle it in the passed handler or a default.
-                execHandler(cmd, cb);
-            } else {
-                execHandler(cmd, cb);
-            }
-        });
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => execHandler(cmd, cb));
     };
 
-    const defaultExecHandler = (cmd: string, cb: any) => {
-        if (cmd.startsWith('find')) cb(null, { stdout: '' });
-        else cb(null, { stdout: '' });
+    const successHandler = (_cmd: string, cb: any) => cb(null, { stdout: '' });
+
+    const runAndAssert = async (
+        expectedStrings: string[],
+        execCalls: string[] = [],
+        expectSuccess = true
+    ) => {
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(expectSuccess);
+
+        for (const str of expectedStrings) {
+            expect(result.output).toContain(str);
+        }
+        for (const call of execCalls) {
+             expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining(call), expect.anything(), expect.anything());
+        }
+        return result;
     };
 
     it('should run biome and tsc if package.json and tsconfig.json exist', async () => {
         setupMocks(
             (p) => p.endsWith('package.json') || p.endsWith('tsconfig.json'),
-            defaultExecHandler
+            successHandler
         );
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.output).toContain('✅ Biome: Passed');
-        expect(result.output).toContain('✅ TSC: Passed');
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('biome check'), expect.anything(), expect.anything());
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('tsc --noEmit'), expect.anything(), expect.anything());
+        await runAndAssert(
+            ['✅ Biome: Passed', '✅ TSC: Passed'],
+            ['biome check', 'tsc --noEmit']
+        );
     });
 
     it('should run ruff and mypy if pyproject.toml exists', async () => {
         setupMocks(
             (p) => p.endsWith('pyproject.toml'),
-            defaultExecHandler
+            successHandler
         );
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.output).toContain('✅ Ruff: Passed');
-        expect(result.output).toContain('✅ Mypy: Passed');
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('ruff check'), expect.anything(), expect.anything());
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('mypy --ignore-missing-imports'), expect.anything(), expect.anything());
+        await runAndAssert(
+            ['✅ Ruff: Passed', '✅ Mypy: Passed'],
+            ['ruff check', 'mypy --ignore-missing-imports']
+        );
     });
 
     it('should run mypy if python files are found via find command', async () => {
@@ -70,18 +71,16 @@ describe('runPolyglotValidation', () => {
                 else cb(null, { stdout: '' });
             }
         );
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.output).toContain('✅ Ruff: Passed');
-        expect(result.output).toContain('✅ Mypy: Passed');
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('mypy --ignore-missing-imports'), expect.anything(), expect.anything());
+        await runAndAssert(
+            ['✅ Ruff: Passed', '✅ Mypy: Passed'],
+            ['mypy --ignore-missing-imports']
+        );
     });
 
     it('should fail if tool execution fails', async () => {
         setupMocks(
             (p) => p.endsWith('package.json'),
             (cmd, cb) => {
-                if (cmd.startsWith('find')) return cb(null, { stdout: '' });
                 if (cmd.includes('biome')) {
                     const err: any = new Error('Biome failed');
                     err.stdout = 'Lint errors';
@@ -91,17 +90,18 @@ describe('runPolyglotValidation', () => {
                 }
             }
         );
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ Biome: Lint errors');
+        await runAndAssert(
+            ['❌ Biome: Lint errors'],
+            [],
+            false
+        );
     });
 
     it('should always run semgrep', async () => {
-        setupMocks(() => false, defaultExecHandler);
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.output).toContain('✅ Semgrep: Secure');
-        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('semgrep scan'), expect.anything(), expect.anything());
+        setupMocks(() => false, successHandler);
+        await runAndAssert(
+            ['✅ Semgrep: Secure'],
+            ['semgrep scan']
+        );
     });
 });
