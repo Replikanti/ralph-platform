@@ -20,6 +20,12 @@ resource "google_compute_subnetwork" "main" {
     range_name    = "services"
     ip_cidr_range = "10.2.0.0/20"
   }
+
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 # Cloud NAT (for private nodes egress)
