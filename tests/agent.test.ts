@@ -1,5 +1,3 @@
-import { runAgent } from '../src/agent';
-
 jest.mock('../src/workspace');
 jest.mock('../src/tools');
 jest.mock('node:fs/promises', () => ({
