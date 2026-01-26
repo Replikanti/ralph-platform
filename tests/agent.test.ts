@@ -217,4 +217,48 @@ describe('runAgent', () => {
         // Verify loop continuation (called Anthropic 3 times: Plan, Iter 1, Iter 2)
         expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
     });
+
+    it('should handle tool execution errors gracefully', async () => {
+        const toolsModule = require('../src/tools');
+        toolsModule.writeFile.mockRejectedValue(new Error('Write failed'));
+
+        mockMessagesCreate
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_error', 
+                    name: 'write_file', 
+                    input: { path: 'fail.txt', content: '' } 
+                }]
+            })
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+        await runAgent({ ticketId: 'error-test', title: 'Error Task', repoUrl: 'url', branchName: 'b' });
+
+        // Verify the error result was sent back to the agent
+        const lastCallArgs = mockMessagesCreate.mock.calls[2][0];
+        const toolResult = lastCallArgs.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content)).content[0];
+        expect(toolResult.content).toContain('Error executing tool: Write failed');
+    });
+
+    it('should report unknown tools to the agent', async () => {
+        mockMessagesCreate
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_unknown', 
+                    name: 'mystery_tool', 
+                    input: {} 
+                }]
+            })
+            .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+        await runAgent({ ticketId: 'unknown-test', title: 'Unknown Task', repoUrl: 'url', branchName: 'b' });
+
+        const lastCallArgs = mockMessagesCreate.mock.calls[2][0];
+        const toolResult = lastCallArgs.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content)).content[0];
+        expect(toolResult.content).toContain('Error: Unknown tool mystery_tool');
+    });
 });

@@ -151,11 +151,11 @@ describe('runPolyglotValidation', () => {
         );
     });
 
-    it('should always run semgrep', async () => {
+    it('should always run trivy', async () => {
         setupMocks(() => false, successHandler);
         await runAndAssert(
-            ['✅ Semgrep: Secure'],
-            ['semgrep scan']
+            ['✅ Trivy: Secure'],
+            ['trivy fs']
         );
     });
 });

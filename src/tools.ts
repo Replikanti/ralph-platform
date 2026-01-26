@@ -131,11 +131,15 @@ export async function runPolyglotValidation(workDir: string) {
         } catch (e: any) { allSuccess = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
     }
 
-    // 3. Security: Semgrep (Universal)
+    // 3. Security: Trivy (Universal - Apache 2.0)
+    // Scans for vulnerabilities, secrets, and misconfigurations
     try {
-        await execAsync('semgrep scan --config auto --error .', { cwd: workDir });
-        outputLog += "✅ Semgrep: Secure\n";
-    } catch (e: any) { allSuccess = false; outputLog += `❌ Semgrep Issues Found\n`; }
+        await execAsync('trivy fs . --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1', { cwd: workDir });
+        outputLog += "✅ Trivy: Secure\n";
+    } catch (e: any) { 
+        allSuccess = false; 
+        outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
+    }
 
     return { success: allSuccess, output: outputLog };
 }

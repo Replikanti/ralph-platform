@@ -24,7 +24,7 @@ graph LR
             Polyglot -.->|TS Types| tsc
             Polyglot -.->|Py| Ruff
             Polyglot -.->|Py Types| mypy
-            Polyglot -.->|Sec| Semgrep
+            Polyglot -.->|Sec| Trivy
         end
     end
     Worker -->|Push PR| GitHub
@@ -38,7 +38,7 @@ graph LR
 3. **Queue**: API validates signature, enqueues task to Redis (BullMQ)
 4. **Planning**: Worker uses Claude Opus to create implementation plan
 5. **Coding**: Worker uses Claude Sonnet to generate code
-6. **Validation**: Polyglot toolchain validates the code (linting, types, security)
+6. **Validation**: Polyglot toolchain (Biome, Ruff, Mypy, TSC, Trivy) validates the code
 7. **Push**: Worker commits and pushes to a feature branch
 
 ---
