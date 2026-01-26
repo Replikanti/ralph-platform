@@ -62,9 +62,9 @@ export const runAgent = async (task: any) => {
             const systemPrompt = `You are Ralph, a Senior Engineer.\n${SECURITY_GUARDRAILS}\n${repoSkills}\nYou have access to tools to read, write, and execute code. Use them to implement the plan.`;
 
             // 1. PLAN (Opus)
-            const planSpan = trace.span({ name: "Planning", model: "claude-3-opus" });
+            const planSpan = trace.span({ name: "Planning", model: "claude-opus-4-5" });
             const planMsg = await anthropic.messages.create({
-                model: "claude-3-opus-20240229", max_tokens: 2000, system: systemPrompt,
+                model: "claude-opus-4-5", max_tokens: 2000, system: systemPrompt,
                 messages: [{ role: "user", content: `Task: ${task.title}\n${task.description}\n\nAnalyze the task and create a step-by-step implementation plan.` }]
             });
             const planBlock = planMsg.content[0];
@@ -72,7 +72,7 @@ export const runAgent = async (task: any) => {
             planSpan.end({ output: plan });
 
             // 2. EXECUTE (Sonnet) - Agentic Loop
-            const execSpan = trace.span({ name: "Coding", model: "claude-3-5-sonnet" });
+            const execSpan = trace.span({ name: "Coding", model: "claude-sonnet-4-5" });
             
             let messages: any[] = [
                 { role: "user", content: `Plan: ${plan}\nWorkspace: ${workDir}\n\nImplement this plan using the available tools.` }
@@ -85,7 +85,7 @@ export const runAgent = async (task: any) => {
                 console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_ITERATIONS}`);
                 
                 const response = await anthropic.messages.create({
-                    model: "claude-3-5-sonnet-20240620",
+                    model: "claude-sonnet-4-5",
                     max_tokens: 4000,
                     system: systemPrompt,
                     tools: agentTools as any,
