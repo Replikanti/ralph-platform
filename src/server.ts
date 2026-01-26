@@ -80,6 +80,10 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+app.get('/health', (_req, res) => {
+    res.status(200).send({ status: 'ok' });
+});
+
 if (require.main === module) {
     app.listen(3000, () => console.log('🚀 API listening on 3000'));
 }
