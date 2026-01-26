@@ -20,26 +20,18 @@ describe('runPolyglotValidation', () => {
     ) => {
         mockedFsExistsSync.mockImplementation(fileFilter);
         mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
-            if (cmd.startsWith('find')) {
-                // Default find behavior unless overridden by execHandler logic inside it?
-                // Actually simpler: pass execHandler that handles all.
-                // If specific 'find' logic is needed, handle it in the passed handler or a default.
-                execHandler(cmd, cb);
-            } else {
-                execHandler(cmd, cb);
-            }
+            // Directly delegate to the handler without redundant conditional checks
+            execHandler(cmd, cb);
         });
     };
 
-    const defaultExecHandler = (cmd: string, cb: any) => {
-        if (cmd.startsWith('find')) cb(null, { stdout: '' });
-        else cb(null, { stdout: '' });
-    };
+    // Simple handler that returns success for everything
+    const successHandler = (_cmd: string, cb: any) => cb(null, { stdout: '' });
 
     it('should run biome and tsc if package.json and tsconfig.json exist', async () => {
         setupMocks(
             (p) => p.endsWith('package.json') || p.endsWith('tsconfig.json'),
-            defaultExecHandler
+            successHandler
         );
 
         const result = await runPolyglotValidation('/mock/workspace');
@@ -52,7 +44,7 @@ describe('runPolyglotValidation', () => {
     it('should run ruff and mypy if pyproject.toml exists', async () => {
         setupMocks(
             (p) => p.endsWith('pyproject.toml'),
-            defaultExecHandler
+            successHandler
         );
 
         const result = await runPolyglotValidation('/mock/workspace');
@@ -66,8 +58,12 @@ describe('runPolyglotValidation', () => {
         setupMocks(
             () => false,
             (cmd, cb) => {
-                if (cmd.startsWith('find')) cb(null, { stdout: './main.py\n' });
-                else cb(null, { stdout: '' });
+                // Only treat find command differently
+                if (cmd.startsWith('find')) {
+                    cb(null, { stdout: './main.py\n' });
+                } else {
+                    cb(null, { stdout: '' });
+                }
             }
         );
 
@@ -81,7 +77,6 @@ describe('runPolyglotValidation', () => {
         setupMocks(
             (p) => p.endsWith('package.json'),
             (cmd, cb) => {
-                if (cmd.startsWith('find')) return cb(null, { stdout: '' });
                 if (cmd.includes('biome')) {
                     const err: any = new Error('Biome failed');
                     err.stdout = 'Lint errors';
@@ -98,7 +93,7 @@ describe('runPolyglotValidation', () => {
     });
 
     it('should always run semgrep', async () => {
-        setupMocks(() => false, defaultExecHandler);
+        setupMocks(() => false, successHandler);
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.output).toContain('✅ Semgrep: Secure');
