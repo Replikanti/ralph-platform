@@ -1,10 +1,9 @@
 import { setupWorkspace } from '../src/workspace';
 import simpleGit from 'simple-git';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
 
 jest.mock('simple-git');
-jest.mock('fs');
+jest.mock('node:fs');
 jest.mock('uuid', () => ({
     v4: () => 'test-uuid'
 }));
@@ -32,7 +31,7 @@ describe('setupWorkspace', () => {
         const repoUrl = 'https://github.com/user/repo';
         const branchName = 'feature/test';
         
-        const { workDir, git, cleanup } = await setupWorkspace(repoUrl, branchName);
+        const { workDir, cleanup } = await setupWorkspace(repoUrl, branchName);
         
         expect(workDir).toContain('test-uuid');
         expect(gitInstance.clone).toHaveBeenCalledWith(

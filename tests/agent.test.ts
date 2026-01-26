@@ -1,9 +1,8 @@
-import { setupWorkspace } from '../src/workspace';
-import { runPolyglotValidation } from '../src/tools';
+import { runAgent } from '../src/agent';
 
 jest.mock('../src/workspace');
 jest.mock('../src/tools');
-jest.mock('fs/promises', () => ({
+jest.mock('node:fs/promises', () => ({
     access: jest.fn().mockRejectedValue(new Error('No skills')),
     readdir: jest.fn(),
     readFile: jest.fn(),
