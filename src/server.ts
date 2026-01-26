@@ -23,8 +23,16 @@ app.post('/webhook', async (req, res) => {
             title: data.title,
             description: data.description,
             // In prod, map Linear Team ID to Repo URL
-            repoUrl: process.env.DEFAULT_REPO_URL || "[https://github.com/duvo-ai/flowlint](https://github.com/duvo-ai/flowlint)", 
+            repoUrl: process.env.DEFAULT_REPO_URL || "https://github.com/Replikanti/ralph-platform", 
             branchName: `ralph/feat-${data.identifier}`
+        }, {
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 2000
+            },
+            removeOnComplete: true, // Keep DB clean
+            removeOnFail: false     // Keep failed jobs for inspection
         });
         res.status(200).send({ status: 'queued' });
     } else {
