@@ -31,6 +31,7 @@ spec:
             limits:
               cpu: {{ .Values.resources.worker.limits.cpu }}
               memory: {{ .Values.resources.worker.limits.memory }}
+              ephemeral-storage: "10Gi"
           env:
             - name: REDIS_URL
               {{- if .Values.redis.existingSecret }}

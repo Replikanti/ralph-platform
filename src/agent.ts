@@ -30,7 +30,12 @@ async function loadRepoSkills(workDir: string): Promise<string> {
                 skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
             }
         }
-    } catch (e) { void e; /* No skills found, ignore */ }
+    } catch (error_) { 
+        if (error_ instanceof Error && (error_ as any).code === 'ENOENT') {
+            return ""; 
+        }
+        console.error("Unexpected error loading repository skills:", error_);
+    }
     return skillText;
 }
 

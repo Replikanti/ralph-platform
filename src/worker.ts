@@ -41,7 +41,7 @@ export const createWorker = () => {
             // Check if this was the final attempt
             if (job.attemptsMade >= (job.opts.attempts || 1)) {
                  console.error(`💀 [Worker] Job ${job.id} FAILED PERMANENTLY. Reporting to Linear...`);
-                 // TODO: Call Linear API to comment on issue with error
+                 console.warn("⚠️ Linear API notification not yet implemented.");
             }
         }
     });
