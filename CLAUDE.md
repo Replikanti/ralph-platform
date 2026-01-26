@@ -84,6 +84,38 @@ The agent (src/agent.ts:12-18) has a two-tier prompt system:
 
 When adding features, preserve this separation - security rules are hardcoded, repo-specific guidance comes from the skills directory.
 
+#### Agent Tool Execution Security
+The agent uses native Claude tool use for code manipulation (src/tools.ts). Four tools are exposed:
+- `list_files`: Directory listing with path traversal protection
+- `read_file`: File reading with path traversal protection
+- `write_file`: File writing with path traversal protection
+- `run_command`: Shell command execution with **strict security controls**
+
+**Command Execution Security (src/tools.ts:34-89)**:
+The `runCommand` tool implements defense-in-depth against command injection:
+
+1. **Allowlist Validation**: Only whitelisted command patterns are permitted:
+   - Build tools: `npm test`, `npm run build`, `npx`, `node`
+   - Version control: `git status`, `git log`, `git diff`, `git show`
+   - File operations: `ls`, `cat`, `pwd`, `echo`
+   - Testing: `pytest`, `python -m pytest`
+   - Linters: `ruff`, `mypy`
+
+2. **Dangerous Pattern Blocking**: Commands containing these patterns are rejected:
+   - Shell metacharacters: `;`, `&`, `|`, `` ` ``, `$()`, `$()`
+   - Destructive operations: `rm -rf`
+   - Device manipulation: `> /dev/`
+   - Piped downloads: `curl ... |`, `wget ... |`
+
+3. **Resource Limits**:
+   - Timeout: 60 seconds maximum execution time
+   - Buffer limit: 1MB maximum output size
+   - Output sanitization: Truncated to 5000 chars (stdout) / 2000 chars (stderr)
+
+4. **Path Traversal Protection**: All file operations validate that resolved paths remain within `workDir` using `path.resolve()` + `startsWith()` checks.
+
+**Critical**: Never bypass these security controls. The agent operates on untrusted repositories and must not execute arbitrary commands or access files outside the workspace.
+
 ### Polyglot Validation
 The tools module (src/tools.ts) auto-detects project type and runs:
 - **TypeScript/JavaScript**: Biome (formatting/linting with auto-fix) + TSC (type checking)
