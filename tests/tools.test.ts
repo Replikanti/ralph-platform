@@ -30,16 +30,7 @@ describe('runPolyglotValidation', () => {
         expectSuccess = true
     ) => {
         const result = await runPolyglotValidation('/mock/workspace');
-        if (expectSuccess) {
-            // Check for success implicitly via checking expected output strings or explicit success flag if needed
-             // But runPolyglotValidation returns { success, output }
-            if (!result.success && expectSuccess) {
-                 // If we expected success but got failure, fail the test with output
-                 expect(result.success).toBe(true); 
-            }
-        } else {
-             expect(result.success).toBe(false);
-        }
+        expect(result.success).toBe(expectSuccess);
 
         for (const str of expectedStrings) {
             expect(result.output).toContain(str);
