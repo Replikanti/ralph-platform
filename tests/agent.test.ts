@@ -38,10 +38,17 @@ describe('runAgent', () => {
             success: true,
             output: 'Validation Passed',
         });
+        // Ensure other tool functions are mocks
+        toolsModule.listFiles.mockResolvedValue('file.txt');
+        toolsModule.readFile.mockResolvedValue('content');
+        toolsModule.writeFile.mockResolvedValue('Wrote to file');
+        toolsModule.runCommand.mockResolvedValue('Command output');
+        // Ensure agentTools is defined
+        toolsModule.agentTools = [];
 
         // Setup Anthropic Mock
         mockMessagesCreate = jest.fn().mockResolvedValue({
-            content: [{ text: 'Generated Plan/Code' }],
+            content: [{ type: 'text', text: 'Generated Plan/Code' }],
         });
 
         jest.doMock('@anthropic-ai/sdk', () => {
@@ -169,5 +176,45 @@ describe('runAgent', () => {
         const callArgs = mockMessagesCreate.mock.calls[0][0];
         expect(callArgs.system).toContain('--- REPO SKILL: REACT.MD ---');
         expect(callArgs.system).toContain('Always use functional components.');
+    });
+
+    it('should execute tools in the loop', async () => {
+        const toolsModule = require('../src/tools');
+        
+        // Mock sequence: 
+        // 1. Plan (Opus) -> Text
+        // 2. Execute (Sonnet) Iteration 1 -> Tool Use
+        // 3. Execute (Sonnet) Iteration 2 -> Text (Done)
+        mockMessagesCreate
+            .mockResolvedValueOnce({ 
+                content: [{ type: 'text', text: 'Plan: Create file' }] // Opus
+            })
+            .mockResolvedValueOnce({
+                content: [{ 
+                    type: 'tool_use', 
+                    id: 'call_1', 
+                    name: 'write_file', 
+                    input: { path: 'test.txt', content: 'hello' } 
+                }] // Sonnet Iter 1
+            })
+            .mockResolvedValueOnce({
+                content: [{ type: 'text', text: 'Done' }] // Sonnet Iter 2
+            });
+
+        const task = {
+            ticketId: '1',
+            title: 'Tool Task',
+            description: 'Write a file',
+            repoUrl: 'http://repo',
+            branchName: 'branch',
+        };
+
+        await runAgent(task);
+
+        // Verify tool execution
+        expect(toolsModule.writeFile).toHaveBeenCalledWith('/tmp/test', 'test.txt', 'hello');
+        
+        // Verify loop continuation (called Anthropic 3 times: Plan, Iter 1, Iter 2)
+        expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
     });
 });
