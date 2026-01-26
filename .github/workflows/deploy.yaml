@@ -24,10 +24,16 @@ jobs:
       uses: actions/checkout@v4
 
     # Setup gcloud CLI
+    # Option 1: Workload Identity (Recommended) - needs GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT
+    # Option 2: Service Account Key - needs GCP_CREDENTIALS
     - id: 'auth'
       uses: 'google-github-actions/auth@v2'
       with:
-        credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+        # Note: Exactly one of workload_identity_provider or credentials_json must be resolved.
+        # If both are empty or both are provided, the action will fail.
 
     - name: 'Set up Cloud SDK'
       uses: 'google-github-actions/setup-gcloud@v2'
