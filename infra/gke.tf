@@ -23,6 +23,15 @@ resource "google_container_cluster" "primary" {
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
 
+  # Explicitly allow public access for GitHub Actions (required for hosted runners)
+  # Security is handled via Workload Identity (IAM) instead of network IP allowlisting.
+  master_authorized_networks_config {
+    cidr_blocks {
+      cidr_block   = "0.0.0.0/0"
+      display_name = "Public (GitHub Actions)"
+    }
+  }
+
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
