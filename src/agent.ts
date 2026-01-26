@@ -30,7 +30,9 @@ async function loadRepoSkills(workDir: string): Promise<string> {
                 skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
             }
         }
-    } catch (_e) { /* No skills found, ignore */ }
+    } catch (error_) { 
+        console.log("Informational: No repository-specific skills found or accessible.");
+    }
     return skillText;
 }
 
