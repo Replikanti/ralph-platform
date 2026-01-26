@@ -13,19 +13,23 @@ spec:
         app: ralph-api
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: api
+          securityContext:
+            readOnlyRootFilesystem: true
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["node", "dist/server.js"]
           ports:
             - containerPort: 3000
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: {{ .Values.resources.api.requests.cpu }}
+              memory: {{ .Values.resources.api.requests.memory }}
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: {{ .Values.resources.api.limits.cpu }}
+              memory: {{ .Values.resources.api.limits.memory }}
           env:
             - name: REDIS_URL
               {{- if .Values.redis.existingSecret }}
@@ -36,3 +40,8 @@ spec:
               {{- else }}
               value: {{ .Values.redis.url }}
               {{- end }}
+            - name: LINEAR_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.linearWebhook }}
+                  key: webhook-secret

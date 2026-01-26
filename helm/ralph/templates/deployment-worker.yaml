@@ -13,17 +13,24 @@ spec:
         app: ralph-worker
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: worker
+          securityContext:
+            readOnlyRootFilesystem: true
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["node", "dist/worker.js"]
+          volumeMounts:
+            - name: workspaces
+              mountPath: /tmp/ralph-workspaces
           resources:
             requests:
-              cpu: {{ .Values.resources.worker.cpu | default "1000m" }}
-              memory: {{ .Values.resources.worker.memory | default "2Gi" }}
+              cpu: {{ .Values.resources.worker.requests.cpu }}
+              memory: {{ .Values.resources.worker.requests.memory }}
             limits:
-              cpu: "2000m"
-              memory: "4Gi"
+              cpu: {{ .Values.resources.worker.limits.cpu }}
+              memory: {{ .Values.resources.worker.limits.memory }}
           env:
             - name: REDIS_URL
               {{- if .Values.redis.existingSecret }}
@@ -44,3 +51,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.anthropicKey }}
                   key: key
+      volumes:
+        - name: workspaces
+          emptyDir:
+            sizeLimit: 10Gi
