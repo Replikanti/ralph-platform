@@ -31,7 +31,10 @@ async function loadRepoSkills(workDir: string): Promise<string> {
             }
         }
     } catch (error_) { 
-        console.log("Informational: No repository-specific skills found or accessible.");
+        if (error_ instanceof Error && (error_ as any).code === 'ENOENT') {
+            return ""; 
+        }
+        console.error("Unexpected error loading repository skills:", error_);
     }
     return skillText;
 }
