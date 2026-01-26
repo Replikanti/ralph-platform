@@ -11,7 +11,13 @@ export const jobProcessor = async (job: any) => {
 };
 
 export const createWorker = () => {
-    const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
+    const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
+        maxRetriesPerRequest: null,
+        retryStrategy(times) {
+            const delay = Math.min(times * 50, 2000);
+            return delay;
+        }
+    });
 
     console.log("👷 Ralph Worker Started");
 

@@ -28,4 +28,11 @@ spec:
               memory: "512Mi"
           env:
             - name: REDIS_URL
+              {{- if .Values.redis.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.existingSecret }}
+                  key: {{ .Values.redis.existingSecretKey | default "redis-url" }}
+              {{- else }}
               value: {{ .Values.redis.url }}
+              {{- end }}
