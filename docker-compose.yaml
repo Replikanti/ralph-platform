@@ -1,8 +1,11 @@
 services:
   redis:
     image: redis:alpine
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
   api:
     build: .
@@ -28,3 +31,6 @@ services:
       - redis
     volumes:
       - /tmp/ralph-workspaces:/tmp/ralph-workspaces
+
+volumes:
+  redis_data:

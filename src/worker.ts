@@ -24,6 +24,22 @@ export const createWorker = () => {
         }
     });
 
+    worker.on('completed', (job) => {
+        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
+    });
+
+    worker.on('failed', (job, err) => {
+        if (job) {
+            console.error(`❌ [Worker] Job ${job.id} failed (Attempt ${job.attemptsMade}/${job.opts.attempts}): ${err.message}`);
+            
+            // Check if this was the final attempt
+            if (job.attemptsMade >= (job.opts.attempts || 1)) {
+                 console.error(`💀 [Worker] Job ${job.id} FAILED PERMANENTLY. Reporting to Linear...`);
+                 // TODO: Call Linear API to comment on issue with error
+            }
+        }
+    });
+
     return worker;
 };
 
