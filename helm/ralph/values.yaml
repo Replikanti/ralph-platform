@@ -1,0 +1,16 @@
+image:
+  repository: gcr.io/duvo-ai/ralph
+  tag: latest
+redis:
+  url: "redis://ralph-redis-master:6379"
+secrets:
+  # Map these to your existing K8s secrets
+  githubToken: "ralph-github-token"
+  anthropicKey: "ralph-anthropic-key"
+  langfuse: "ralph-langfuse"
+resources:
+  worker:
+    memory: "2Gi" # Needed for Semgrep/TSC
+    cpu: "1000m"
+scaling:
+  workerReplicas: 2

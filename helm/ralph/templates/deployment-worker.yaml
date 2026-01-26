@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+spec:
+  replicas: {{ .Values.scaling.workerReplicas }}
+  selector:
+    matchLabels:
+      app: ralph-worker
+  template:
+    metadata:
+      labels:
+        app: ralph-worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["node", "dist/worker.js"]
+          resources:
+            limits:
+              memory: "4Gi"
+          env:
+            - name: REDIS_URL
+              value: {{ .Values.redis.url }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.githubToken }}
+                  key: token
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.anthropicKey }}
+                  key: key
