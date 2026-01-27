@@ -9,6 +9,12 @@ variable "region" {
   default     = "europe-west1"
 }
 
+variable "zone" {
+  description = "GCP Zone for GKE cluster (e.g., europe-west1-a)"
+  type        = string
+  default     = "europe-west1-a"
+}
+
 variable "github_owner" {
   description = "GitHub Organization or User name (e.g., Replikanti)"
   type        = string

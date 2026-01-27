@@ -13,17 +13,18 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   reserved_peering_ranges = [google_compute_global_address.private_ip_alloc.name]
 }
 
-# Redis Instance
+# Redis Instance (Google Cloud Memorystore)
 resource "google_redis_instance" "cache" {
   name           = "ralph-redis"
-  memory_size_gb = 1
+  tier           = "BASIC"        # BASIC tier pro free tier (no replication)
+  memory_size_gb = 1              # Minimum 1GB
   region         = var.region
 
   authorized_network = google_compute_network.main.id
   connect_mode       = "PRIVATE_SERVICE_ACCESS"
 
-  redis_version     = "REDIS_6_X"
-  display_name      = "Ralph Redis"
+  redis_version = "REDIS_7_0"    # Novější verze
+  display_name  = "Ralph Redis"
 
   depends_on = [google_service_networking_connection.private_vpc_connection]
 }

@@ -28,17 +28,12 @@ resource "google_compute_subnetwork" "main" {
   }
 }
 
-# Cloud NAT (for private nodes egress)
+# Cloud Router (needed for VPC peering with Redis)
 resource "google_compute_router" "main" {
   name    = "ralph-router"
   region  = var.region
   network = google_compute_network.main.id
 }
 
-resource "google_compute_router_nat" "main" {
-  name                               = "ralph-nat"
-  router                             = google_compute_router.main.name
-  region                             = var.region
-  nat_ip_allocate_option             = "AUTO_ONLY"
-  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
-}
+# Cloud NAT is NOT needed because GKE nodes have public IPs (enable_private_nodes = false)
+# Keeping only the router for VPC peering with managed services like Redis

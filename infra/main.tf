@@ -12,8 +12,8 @@ terraform {
   }
   backend "gcs" {
     # Bucket name will be passed via CLI or config
-    # bucket = "ralph-terraform-state"
-    # prefix = "prod"
+    bucket = "ralph-poc"
+    prefix = "prod"
   }
 }
 

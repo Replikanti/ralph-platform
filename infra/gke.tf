@@ -110,7 +110,6 @@ resource "google_project_iam_member" "gke_sa_roles" {
     "roles/monitoring.viewer",
     "roles/stackdriver.resourceMetadata.writer",
     "roles/artifactregistry.reader",
-    # Přidáno pro jistotu, aby nody mohly tahat images z Container Registry/Artifact Registry
     "roles/storage.objectViewer"
   ])
   role    = each.key

@@ -48,33 +48,41 @@ resource "google_service_account_iam_member" "workload_identity_user" {
 }
 
 # --- GitHub Secrets Configuration ---
+# Commented out: requires GitHub token with 'repo' scope
+# Manually set these secrets in GitHub repo settings if needed
 
-resource "github_actions_secret" "gcp_project_id" {
-  repository      = var.github_repo
-  secret_name     = "GCP_PROJECT_ID"
-  plaintext_value = var.project_id
-}
+# resource "github_actions_secret" "gcp_project_id" {
+#   repository      = var.github_repo
+#   secret_name     = "GCP_PROJECT_ID"
+#   plaintext_value = var.project_id
+# }
 
-resource "github_actions_secret" "gcp_workload_identity_provider" {
-  repository      = var.github_repo
-  secret_name     = "GCP_WORKLOAD_IDENTITY_PROVIDER"
-  plaintext_value = google_iam_workload_identity_pool_provider.github_provider.name
-}
+# resource "github_actions_secret" "gcp_workload_identity_provider" {
+#   repository      = var.github_repo
+#   secret_name     = "GCP_WORKLOAD_IDENTITY_PROVIDER"
+#   plaintext_value = google_iam_workload_identity_pool_provider.github_provider.name
+# }
 
-resource "github_actions_secret" "gcp_service_account" {
-  repository      = var.github_repo
-  secret_name     = "GCP_SERVICE_ACCOUNT"
-  plaintext_value = google_service_account.github_actions.email
-}
+# resource "github_actions_secret" "gcp_service_account" {
+#   repository      = var.github_repo
+#   secret_name     = "GCP_SERVICE_ACCOUNT"
+#   plaintext_value = google_service_account.github_actions.email
+# }
 
-resource "github_actions_secret" "gke_cluster_name" {
-  repository      = var.github_repo
-  secret_name     = "GKE_CLUSTER_NAME"
-  plaintext_value = google_container_cluster.primary.name
-}
+# resource "github_actions_secret" "gke_cluster_name" {
+#   repository      = var.github_repo
+#   secret_name     = "GKE_CLUSTER_NAME"
+#   plaintext_value = google_container_cluster.primary.name
+# }
 
-resource "github_actions_secret" "gke_zone" {
-  repository      = var.github_repo
-  secret_name     = "GKE_ZONE"
-  plaintext_value = var.region # Using region for regional cluster
-}
+# resource "github_actions_secret" "gke_zone" {
+#   repository      = var.github_repo
+#   secret_name     = "GKE_ZONE"
+#   plaintext_value = var.zone
+# }
+
+# resource "github_actions_secret" "redis_url" {
+#   repository      = var.github_repo
+#   secret_name     = "REDIS_URL"
+#   plaintext_value = "redis://${google_redis_instance.cache.host}:${google_redis_instance.cache.port}"
+# }

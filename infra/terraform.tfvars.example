@@ -1,0 +1,9 @@
+# Příklad konfigurace pro Terraform
+# Zkopíruj tento soubor jako terraform.tfvars a vyplň hodnoty
+
+project_id   = "tvuj-gcp-project-id"
+region       = "europe-west1"
+zone         = "europe-west1-a"
+github_owner = "Replikanti"
+github_repo  = "ralph-platform"
+github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
