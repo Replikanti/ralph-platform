@@ -11,8 +11,7 @@ terraform {
     }
   }
   backend "gcs" {
-    # Bucket name will be passed via CLI or config
-    bucket = "ralph-poc"
+    bucket = "langfuse-platform-terraform-state"
     prefix = "prod"
   }
 }
