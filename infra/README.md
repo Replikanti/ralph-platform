@@ -287,18 +287,97 @@ terraform output -raw gke_cluster_name
 terraform output redis_url  # Note: marked as sensitive
 ```
 
+## Create Kubernetes Secrets
+
+Before deploying the Ralph application, you need to create Kubernetes secrets in the GKE cluster. These secrets contain sensitive credentials required by the application.
+
+### Step 1: Connect to GKE Cluster
+
+```bash
+# Get cluster credentials
+gcloud container clusters get-credentials ralph-cluster --zone=europe-west1-b --project=YOUR_PROJECT_ID
+
+# Verify connection
+kubectl get nodes
+```
+
+### Step 2: Create Required Secrets
+
+The following secrets need to be created in the default namespace:
+
+| Secret Name | Keys | Description |
+|-------------|------|-------------|
+| `ralph-github-token` | `token` | GitHub PAT for cloning repositories |
+| `ralph-anthropic-key` | `key` | Anthropic API key for Claude |
+| `ralph-langfuse` | `public-key`, `secret-key`, `host` | Langfuse credentials for tracing |
+| `ralph-linear-secret` | `secret` | Linear webhook secret for HMAC verification |
+| `ralph-redis-secret` | `redis-url` | Redis connection URL |
+
+### Step 3: Create Secrets with Real Values
+
+```bash
+# 1. GitHub Token (for cloning repos)
+kubectl create secret generic ralph-github-token \
+  --from-literal=token=ghp_YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
+
+# 2. Anthropic API Key (for Claude API)
+kubectl create secret generic ralph-anthropic-key \
+  --from-literal=key=sk-ant-YOUR_ANTHROPIC_API_KEY
+
+# 3. Langfuse (for tracing - optional but recommended)
+kubectl create secret generic ralph-langfuse \
+  --from-literal=public-key=pk-lf-YOUR_PUBLIC_KEY \
+  --from-literal=secret-key=sk-lf-YOUR_SECRET_KEY \
+  --from-literal=host=https://cloud.langfuse.com
+
+# 4. Linear Webhook Secret (from Linear webhook settings)
+kubectl create secret generic ralph-linear-secret \
+  --from-literal=secret=YOUR_LINEAR_WEBHOOK_SECRET
+
+# 5. Redis URL (from Terraform output)
+REDIS_URL=$(cd infra && terraform output -raw redis_url)
+kubectl create secret generic ralph-redis-secret \
+  --from-literal=redis-url=$REDIS_URL
+```
+
+### Step 4: Update Existing Secrets
+
+If secrets already exist and you need to update them, use this pattern:
+
+```bash
+# Update a secret (replace with new values)
+kubectl create secret generic ralph-anthropic-key \
+  --from-literal=key=sk-ant-YOUR_NEW_KEY \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### Step 5: Verify Secrets
+
+```bash
+# List all secrets
+kubectl get secrets
+
+# Verify a specific secret exists (without revealing values)
+kubectl get secret ralph-anthropic-key -o jsonpath='{.data}' | jq 'keys'
+```
+
 ## What's Next?
 
-After successful deployment:
+After successful deployment and secret creation:
 
-1. **Deploy application** using GitHub Actions or kubectl:
+1. **Deploy application** using GitHub Actions:
 ```bash
-# Using kubectl (if you have manifests)
-kubectl apply -f k8s/
+# Push to main branch to trigger deployment
+git push origin main
 
-# Or wait for GitHub Actions workflow
-# The workflow should now authenticate using Workload Identity
+# Or manually trigger deployment workflow in GitHub Actions
 ```
+
+The deployment workflow will:
+- Build Docker image
+- Push to GCR (Google Container Registry)
+- Deploy to GKE using Helm
+- Use the secrets you created above
 
 2. **Connect to Redis** from pods in GKE:
 ```bash
