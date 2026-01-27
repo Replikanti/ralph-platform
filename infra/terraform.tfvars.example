@@ -1,0 +1,9 @@
+# Terraform configuration example
+# Copy this file as terraform.tfvars and fill in values
+
+project_id   = "your-gcp-project-id"
+region       = "europe-west1"
+zone         = "europe-west1-a"
+github_owner = "Replikanti"
+github_repo  = "ralph-platform"
+github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
