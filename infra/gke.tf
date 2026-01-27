@@ -6,19 +6,18 @@
 resource "google_container_cluster" "primary" {
   name = "ralph-cluster"
 
-  # DŮLEŽITÉ: Použij konkrétní ZÓNU (např. us-central1-a), ne region.
-  # Pokud použiješ region, Google naúčtuje management fee za HA cluster.
-  # Předpokládám, že máš proměnnou var.zone, nebo sem napiš "us-central1-a".
+  # IMPORTANT: Use specific ZONE (e.g. us-central1-a), not region.
+  # If you use region, Google charges management fee for HA cluster.
   location = var.zone
 
-  # Smažeme defaultní pool a vytvoříme vlastní níže
+  # Remove default pool and create custom one below
   remove_default_node_pool = true
   initial_node_count       = 1
 
-  # Vypnutí ochrany proti smazání (pro dev/test, aby šel cluster snadno zničit)
+  # Disable deletion protection (for dev/test, allows easy cluster destruction)
   deletion_protection = false
 
-  # Odkazy na síť (musí být definovány v network.tf nebo main.tf)
+  # Network references (must be defined in vpc.tf)
   network    = google_compute_network.main.id
   subnetwork = google_compute_subnetwork.main.id
 
@@ -27,19 +26,20 @@ resource "google_container_cluster" "primary" {
     services_secondary_range_name = "services"
   }
 
-  # PRIVÁTNÍ CLUSTER CONFIG (Optimalizováno pro cenu)
+  # PRIVATE CLUSTER CONFIG (Secure configuration)
   private_cluster_config {
-    # DŮLEŽITÉ PRO FREE TIER / LOW COST:
-    # Musíme povolit veřejné IP pro nody (enable_private_nodes = false).
-    # Pokud by byly nody privátní, nemají přístup na internet a musel bys platit Cloud NAT ($30+/měs).
-    enable_private_nodes = false
+    # SECURITY: Enable private nodes (no public IPs on nodes)
+    # Nodes will use Cloud NAT for internet access (~$30-50/month cost)
+    # This prevents direct internet access to worker nodes
+    enable_private_nodes = true
 
-    # Master endpoint zůstává veřejný, aby ses k němu připojil z PC/GitHubu
+    # Master endpoint remains public for CI/CD and kubectl access
     enable_private_endpoint = false
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
 
-  # Povolení přístupu k Masteru (Control Plane) z internetu
+  # Allow access to Master (Control Plane) from internet
+  # TODO: For production, restrict to specific IPs/CIDR ranges
   master_authorized_networks_config {
     cidr_blocks {
       cidr_block   = "0.0.0.0/0"
@@ -56,31 +56,31 @@ resource "google_container_cluster" "primary" {
 # NODE POOL (Worker Nodes)
 # -----------------------------------------------------------------------------
 resource "google_container_node_pool" "primary_nodes" {
-  name = "ralph-node-pool"
-  # Musí být ve stejné zóně jako cluster!
-  location = var.zone
+  name     = "ralph-node-pool"
+  location = var.zone  # Must be in same zone as cluster
   cluster  = google_container_cluster.primary.name
 
-  # Autoscaling: 0-3 nody. 
-  # Min 0 je fajn, že se to může úplně vypnout, ale start trvá déle.
+  # Autoscaling: 1-3 nodes
+  # Min 1 ensures cluster is always available (can set to 0 to save costs)
   autoscaling {
     min_node_count = 1
     max_node_count = 3
   }
 
   node_config {
-    # e2-small (2 vCPU, 2GB RAM) je absolutní minimum pro funkční GKE.
-    # e2-micro (1GB RAM) NEPOUŽÍVAT - neutáhne systémové pody.
+    # e2-small (2 vCPU, 2GB RAM) is minimum for functional GKE
+    # e2-micro (1GB RAM) DOES NOT WORK - insufficient memory for system pods
     machine_type = "e2-small"
 
-    # DŮLEŽITÉ PRO CENU: Spot instance (sleva 60-91%)
+    # COST OPTIMIZATION: Spot instances (60-91% discount)
+    # Can be preempted with 30 seconds notice
     spot = true
 
-    # DŮLEŽITÉ PRO CENU: Standardní HDD disk (levnější než SSD/Balanced)
+    # COST OPTIMIZATION: Standard HDD disk (cheaper than SSD/Balanced)
     disk_type    = "pd-standard"
-    disk_size_gb = 30 # 30GB bohatě stačí
+    disk_size_gb = 30  # 30GB is sufficient for most workloads
 
-    # Service Account a oprávnění
+    # Service Account and permissions
     service_account = google_service_account.gke_sa.email
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -90,7 +90,7 @@ resource "google_container_node_pool" "primary_nodes" {
       mode = "GKE_METADATA"
     }
 
-    # Tagy pro firewall
+    # Tags for firewall rules
     tags = ["gke-node", "ralph-cluster"]
   }
 }

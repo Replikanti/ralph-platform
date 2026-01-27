@@ -1,7 +1,7 @@
-# Příklad konfigurace pro Terraform
-# Zkopíruj tento soubor jako terraform.tfvars a vyplň hodnoty
+# Terraform configuration example
+# Copy this file as terraform.tfvars and fill in values
 
-project_id   = "tvuj-gcp-project-id"
+project_id   = "your-gcp-project-id"
 region       = "europe-west1"
 zone         = "europe-west1-a"
 github_owner = "Replikanti"

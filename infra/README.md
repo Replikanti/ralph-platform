@@ -2,13 +2,14 @@
 
 ## What Gets Created
 
-1. **GKE Cluster** (Optimized for free tier / low cost)
+1. **GKE Cluster** (Secure configuration with private nodes)
    - **Zonal cluster** (not regional) - no management fee
    - 1-3 nodes with autoscaling (min: 1, max: 3)
    - **e2-small instances** (2 vCPU, 2GB RAM) - cheapest functional option
    - **Spot instances** (60-91% discount vs on-demand)
    - **Standard HDD disks** (30GB, cheaper than SSD)
-   - **Public IPs for nodes** (`enable_private_nodes = false`) - avoids Cloud NAT costs (~$30+/month)
+   - **Private nodes** (`enable_private_nodes = true`) - no public IPs on worker nodes
+   - **Cloud NAT** for internet access (~$30-50/month for security)
    - Workload Identity enabled for secure access
 
 2. **Google Cloud Memorystore Redis** (Managed Redis)
@@ -20,7 +21,8 @@
 3. **VPC Network**
    - Custom VPC with subnet (`10.0.0.0/20`)
    - Secondary ranges for pods (`10.1.0.0/16`) and services (`10.2.0.0/20`)
-   - Cloud Router (for VPC peering with Redis)
+   - Cloud Router (for Cloud NAT and VPC peering)
+   - Cloud NAT Gateway (for private node internet access)
    - Flow logs (5s interval, 50% sampling)
 
 4. **GitHub Workload Identity** (Keyless authentication)
@@ -335,13 +337,15 @@ terraform apply
 
 ### Cost Monitoring
 ```bash
-# Daily costs should be ~$2-3/day:
+# Daily costs should be ~$3-4/day:
 # - GKE cluster: $0 (free tier for 1 zonal cluster)
 # - e2-small node (spot): ~$0.005/hr ($0.12/day)
 # - e2-small node (preemptible uptime ~80%): ~$0.40/day
 # - Redis 1GB BASIC: ~$0.03/hr ($0.72/day)
+# - Cloud NAT Gateway: ~$1.30/day ($40/month)
+# - Cloud NAT data processing: ~$0.10-0.50/day (depends on usage)
 # - Network: ~$0.10/day
-# - Total: ~$1.50-2.50/day ($45-75/month)
+# - Total: ~$3-4/day ($90-120/month)
 ```
 
 **Monitor actual costs:**
@@ -455,6 +459,8 @@ gcloud iam workload-identity-pools providers describe github-provider \
 
 ✅ **GitHub Workload Identity** (no long-lived secrets, keyless authentication)
 ✅ **Private Redis** (only accessible from VPC, not from internet)
+✅ **Private GKE nodes** (no public IPs, internet via Cloud NAT)
+✅ **Cloud NAT** for controlled internet egress from nodes
 ✅ **GKE Workload Identity** (pods have granular permissions)
 ✅ **Terraform state in GCS** with versioning
 ✅ **Repository restriction** on Workload Identity (only `Replikanti/ralph-platform` can authenticate)
@@ -463,37 +469,20 @@ gcloud iam workload-identity-pools providers describe github-provider \
 ### Security Considerations
 
 ⚠️ **Master endpoint is public** (for CI/CD access)
-   - For production: Consider authorized networks to restrict access
+   - Allows kubectl and CI/CD from any IP
+   - For higher security: Restrict to specific IPs via authorized networks
    - Command: `gcloud container clusters update --enable-master-authorized-networks`
 
-⚠️ **Nodes have public IPs** (to save on Cloud NAT costs)
-   - For production: Consider private nodes + Cloud NAT for better isolation
-   - Trade-off: ~$30-50/month additional cost for NAT Gateway
-
 ⚠️ **Spot instances can be preempted** (for cost savings)
-   - For production: Consider regular nodes or use node affinity for critical workloads
-   - Spot instances have ~60-91% discount but can be terminated with 30s notice
+   - Can be terminated with 30 seconds notice
+   - For production critical workloads: Consider regular nodes or node affinity
+   - Current setup: ~60-91% discount vs on-demand pricing
 
 ### Hardening for Production
 
 If moving to production, consider:
 
-1. **Private GKE nodes + Cloud NAT:**
-```hcl
-# In gke.tf:
-enable_private_nodes = true
-
-# Add NAT gateway in vpc.tf:
-resource "google_compute_router_nat" "nat" {
-  name   = "ralph-nat"
-  router = google_compute_router.main.name
-  region = var.region
-  nat_ip_allocate_option = "AUTO_ONLY"
-  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
-}
-```
-
-2. **Authorized networks for master endpoint:**
+1. **Restrict master endpoint access** (currently allows 0.0.0.0/0):
 ```hcl
 # In gke.tf:
 master_authorized_networks_config {
@@ -508,14 +497,14 @@ master_authorized_networks_config {
 }
 ```
 
-3. **Standard tier Redis with replica:**
+2. **Standard tier Redis with replica:**
 ```hcl
 # In redis.tf:
 tier           = "STANDARD_HA"
 replica_count  = 1
 ```
 
-4. **Regular nodes instead of Spot:**
+3. **Regular nodes instead of Spot:**
 ```hcl
 # In gke.tf:
 spot = false
@@ -524,18 +513,19 @@ spot = false
 
 ## Architecture Details
 
-### Free Tier Optimizations
+### Security & Cost Optimizations
 
-This infrastructure is optimized for minimal cost while maintaining functionality:
+This infrastructure balances security and cost:
 
 1. **Zonal cluster (not regional):**
    - Saves ~$0.10/hr ($73/month) management fee
    - Single zone = single point of failure (acceptable for dev/test)
 
-2. **Public node IPs:**
-   - Saves ~$30-50/month on Cloud NAT Gateway
-   - Nodes can reach internet directly without NAT
-   - Trade-off: Nodes are accessible from internet (protected by GKE firewall rules)
+2. **Private nodes with Cloud NAT:**
+   - Nodes have no public IPs (secure)
+   - Internet access via Cloud NAT Gateway
+   - Cost: ~$40/month for NAT Gateway + data processing
+   - Security benefit: Prevents direct internet access to worker nodes
 
 3. **Spot instances:**
    - 60-91% discount vs on-demand pricing
@@ -574,9 +564,14 @@ Internet
     |       |-- Secondary: 10.1.0.0/16 (pods)
     |       |-- Secondary: 10.2.0.0/20 (services)
     |
-    +-- [GKE Nodes] (public IPs, outbound internet via public IP)
+    +-- [Cloud NAT Gateway] (outbound internet access)
+    |       |-- NAT IP allocation
+    |       |-- Error logging enabled
+    |
+    +-- [GKE Nodes] (private IPs only, internet via NAT)
     |       |-- e2-small spot instances
     |       |-- 1-3 nodes (autoscaling)
+    |       |-- No direct public IP
     |
     +-- [VPC Peering] --> [Google Managed: Redis]
             |-- Private connection
@@ -628,13 +623,14 @@ GitHub Actions Workflow
 
 ## Cost Optimization Tips
 
-1. **Use preemptible/spot instances for all dev/test workloads**
+1. **Use preemptible/spot instances for all dev/test workloads** (already configured)
 2. **Set aggressive autoscaling** - scale to 0 nodes when not in use (min_node_count = 0)
 3. **Use committed use discounts** for production (1 or 3 year commitment = 37-57% discount)
 4. **Use sustained use discounts** automatically applied for long-running VMs
 5. **Monitor with budgets and alerts** to catch unexpected costs
 6. **Delete unused resources** regularly (old disks, IPs, snapshots)
 7. **Use e2-micro CloudShell** for maintenance instead of leaving a bastion host running
+8. **Optimize Cloud NAT** - monitor data processing charges, consider VPC peering for internal services
 
 ## Additional Resources
 
