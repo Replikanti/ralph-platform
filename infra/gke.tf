@@ -33,7 +33,29 @@ resource "google_container_cluster" "primary" {
     # This prevents direct internet access to worker nodes
     enable_private_nodes = true
 
-    # Master endpoint remains public for CI/CD and kubectl access
+    # SECURITY JUSTIFICATION for public master endpoint:
+    # Master endpoint is public (enable_private_endpoint = false) to allow:
+    # 1. CI/CD access from GitHub Actions (Workload Identity authenticated)
+    # 2. kubectl access from developer workstations
+    # 3. Automated deployments without VPN/bastion host requirement
+    #
+    # Security controls in place:
+    # - Authentication required via GCP IAM (service accounts, user accounts)
+    # - Kubernetes RBAC enforces authorization
+    # - TLS encryption for all API server communication
+    # - Optional: master_authorized_networks can restrict source IPs
+    # - No anonymous access possible
+    #
+    # Private endpoint would require:
+    # - Bastion host in VPC (~$15-30/month + management overhead)
+    # - VPN connection to VPC (complexity + cost)
+    # - Cloud Build for CI/CD (additional setup)
+    #
+    # Trade-off: Public endpoint with strong authentication is acceptable
+    # for non-production environments. For production, consider:
+    # - Restricting master_authorized_networks to specific IPs
+    # - Enabling Binary Authorization
+    # - Using Private Google Access
     enable_private_endpoint = false
     master_ipv4_cidr_block  = "172.16.0.0/28"
   }
