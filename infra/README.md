@@ -1,29 +1,38 @@
-# Ralph Platform - Terraform Infrastruktura
+# Ralph Platform - Terraform Infrastructure
 
-## Co se vytvoří
+## What Gets Created
 
-1. **GKE Cluster** (Kubernetes cluster v zóně pro nízkou cenu)
-   - 1-3 nody s autoscalingem
-   - e2-small instance (2 vCPU, 2GB RAM)
-   - Spot instance (sleva 60-91%)
-   - Veřejné IP pro nody (bez nákladů na Cloud NAT)
+1. **GKE Cluster** (Optimized for free tier / low cost)
+   - **Zonal cluster** (not regional) - no management fee
+   - 1-3 nodes with autoscaling (min: 1, max: 3)
+   - **e2-small instances** (2 vCPU, 2GB RAM) - cheapest functional option
+   - **Spot instances** (60-91% discount vs on-demand)
+   - **Standard HDD disks** (30GB, cheaper than SSD)
+   - **Public IPs for nodes** (`enable_private_nodes = false`) - avoids Cloud NAT costs (~$30+/month)
+   - Workload Identity enabled for secure access
 
 2. **Google Cloud Memorystore Redis** (Managed Redis)
-   - BASIC tier (bez replikace)
-   - 1GB paměť (minimum)
-   - Privátní připojení přes VPC peering
+   - **BASIC tier** (no replication, for dev/test)
+   - **1GB memory** (minimum)
+   - **Private connection** via VPC peering (not accessible from internet)
+   - Redis 7.0
 
-3. **VPC síť**
-   - Vlastní VPC s podsítí
-   - Sekundární rozsahy pro pody a služby
+3. **VPC Network**
+   - Custom VPC with subnet (`10.0.0.0/20`)
+   - Secondary ranges for pods (`10.1.0.0/16`) and services (`10.2.0.0/20`)
+   - Cloud Router (for VPC peering with Redis)
+   - Flow logs (5s interval, 50% sampling)
 
-4. **GitHub Workload Identity**
-   - Bezpečné nasazení z GitHub Actions bez secrets
-   - Automatická konfigurace GitHub secrets
+4. **GitHub Workload Identity** (Keyless authentication)
+   - Service Account for GitHub Actions (`github-deployer`)
+   - Workload Identity Pool + Provider
+   - **Security condition**: Only from `Replikanti/ralph-platform` repository
+   - Permissions: GKE access, Artifact Registry write, Storage admin
 
-## Požadavky
+## Prerequisites
 
-### 1. Nainstalované nástroje
+### 1. Install Required Tools
+
 ```bash
 # Terraform
 sudo snap install terraform --classic
@@ -39,19 +48,19 @@ gcloud components install kubectl
 
 ### 2. GCP Setup
 
-**a) Vytvoř nový projekt nebo vyber existující:**
+**a) Create or select a project:**
 ```bash
-# Seznam projektů
+# List existing projects
 gcloud projects list
 
-# Vytvoř nový projekt (volitelné)
-gcloud projects create tvuj-projekt-id --name="Ralph Platform"
+# Create new project (optional)
+gcloud projects create your-project-id --name="Ralph Platform"
 
-# Nastav jako aktivní
-gcloud config set project tvuj-projekt-id
+# Set as active
+gcloud config set project your-project-id
 ```
 
-**b) Povol potřebné API:**
+**b) Enable required APIs:**
 ```bash
 gcloud services enable compute.googleapis.com
 gcloud services enable container.googleapis.com
@@ -62,148 +71,261 @@ gcloud services enable iamcredentials.googleapis.com
 gcloud services enable cloudresourcemanager.googleapis.com
 ```
 
-**c) Vytvoř bucket pro Terraform state:**
+**c) Link billing account:**
 ```bash
-# Vytvoř bucket (použij unikátní název, například tvuj-projekt-id-tf-state)
-gsutil mb -p tvoj-projekt-id -l europe-west1 gs://tvoj-projekt-id-tf-state
-
-# Zapni versioning (důležité pro bezpečnost)
-gsutil versioning set on gs://tvoj-projekt-id-tf-state
-```
-
-**d) Nastav billing účet:**
-```bash
-# Seznam billing účtů
+# List billing accounts
 gcloud billing accounts list
 
-# Propoj projekt s billing účtem
-gcloud billing projects link tvuj-projekt-id --billing-account=BILLING_ACCOUNT_ID
+# Link project to billing account
+gcloud billing projects link your-project-id --billing-account=BILLING_ACCOUNT_ID
 ```
 
-### 3. GitHub Personal Access Token
+### 3. GitHub Personal Access Token (Optional)
 
-Vytvoř GitHub PAT s těmito oprávněními:
+**Note:** GitHub token is only needed if you want Terraform to automatically create GitHub secrets. You can also set secrets manually (see "Configure GitHub Secrets" section below).
+
+If using Terraform for secrets:
 - `repo` (full repository access)
 - `admin:repo_hook` (manage repository webhooks and hooks)
 
 ```bash
-# Vytvoř na: https://github.com/settings/tokens/new
-# Ulož token - už ho neuvidíš!
+# Create at: https://github.com/settings/tokens/new
+# Save the token - you won't see it again!
 ```
 
-## Nasazení
+**For this installation:** Token is in `terraform.tfvars.example`, but GitHub secrets resources are commented out in the code. You'll set secrets manually after Terraform apply.
 
-### 1. Konfigurace
+## Deployment - Step by Step Guide
 
-```bash
-cd infra
+### Step 1: Configure Terraform Backend
 
-# Zkopíruj příklad a vyplň hodnoty
-cp terraform.tfvars.example terraform.tfvars
-nano terraform.tfvars
-```
-
-Vyplň v `terraform.tfvars`:
-```hcl
-project_id   = "tvuj-gcp-project-id"
-region       = "europe-west1"
-zone         = "europe-west1-a"
-github_owner = "Replikanti"
-github_repo  = "ralph-platform"
-github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-### 2. Konfigurace Terraform Backend
-
-Uprav `main.tf` a vyplň bucket name:
+**IMPORTANT:** The backend bucket is hardcoded in `main.tf`:
 ```hcl
 backend "gcs" {
-  bucket = "tvoj-projekt-id-tf-state"
+  bucket = "langfuse-platform-terraform-state"
   prefix = "prod"
 }
 ```
 
-### 3. Autentizace
+**You have two options:**
+
+**A) Use your own bucket** (recommended for new installation):
+```bash
+# 1. Create bucket for Terraform state
+gsutil mb -p YOUR_PROJECT_ID -l europe-west1 gs://YOUR_PROJECT_ID-tf-state
+
+# 2. Enable versioning (important for safety)
+gsutil versioning set on gs://YOUR_PROJECT_ID-tf-state
+
+# 3. Edit main.tf (line 14)
+nano main.tf
+# Change: bucket = "YOUR_PROJECT_ID-tf-state"
+```
+
+**B) Use existing bucket** (if you have access to `langfuse-platform-terraform-state`):
+```bash
+# Don't change main.tf, bucket already exists
+```
+
+### Step 2: Configure Variables
 
 ```bash
-# Přihlaš se do GCP
+cd infra
+
+# Copy example and fill in values
+cp terraform.tfvars.example terraform.tfvars
+nano terraform.tfvars
+```
+
+Fill in `terraform.tfvars`:
+```hcl
+project_id   = "your-gcp-project-id"         # REQUIRED: Your GCP project
+region       = "europe-west1"                 # Can change (us-central1 is cheaper)
+zone         = "europe-west1-a"               # Must be in region above
+github_owner = "Replikanti"                   # GitHub organization/user
+github_repo  = "ralph-platform"               # Repository name
+github_token = "ghp_xxxxx"                    # GitHub PAT (optional, secrets set manually)
+```
+
+### Step 3: Authenticate to GCP
+
+```bash
+# Login to GCP (opens browser)
 gcloud auth application-default login
 
-# Ověř, že jsi ve správném projektu
+# Set active project
+gcloud config set project YOUR_PROJECT_ID
+
+# Verify you're in the correct project
 gcloud config get-value project
 ```
 
-### 4. Spuštění Terraform
+### Step 4: Initialize Terraform
 
 ```bash
-# Inicializace (stáhne providery a nastaví backend)
+# Initialize (downloads providers and connects backend)
 terraform init
 
-# Náhled změn
+# You should see:
+# Initializing the backend...
+# Successfully configured the backend "gcs"!
+# Terraform has been successfully initialized!
+```
+
+**If terraform init fails:**
+- Check backend bucket exists: `gsutil ls gs://YOUR_BUCKET_NAME/`
+- Check you have permissions: `gcloud projects get-iam-policy YOUR_PROJECT_ID`
+
+### Step 5: Preview Changes
+
+```bash
+# Preview what will be created (DRY RUN)
 terraform plan
 
-# Aplikuj infrastrukturu (cca 10-15 minut)
-terraform apply
+# You should see plan to create ~20 resources:
+# - VPC, subnet, router
+# - GKE cluster + node pool
+# - Redis instance
+# - Service accounts
+# - IAM bindings
+# - Workload Identity pool + provider
 ```
 
-**Poznámky:**
-- První spuštění trvá 10-15 minut (GKE cluster se vytváří pomalu)
-- Terraform se zeptá na potvrzení - napiš `yes`
-- Redis Memorystore může trvat 5-10 minut
-
-### 5. Ověření
+### Step 6: Apply Infrastructure
 
 ```bash
-# Zobraz výstupy
+# Apply changes (CREATES INFRASTRUCTURE)
+terraform apply
+
+# Terraform will ask:
+# Do you want to perform these actions?
+# Enter a value: yes
+```
+
+**Time estimates:**
+- VPC and network: ~1 minute
+- GKE cluster: ~10-12 minutes (slowest)
+- Redis Memorystore: ~5-8 minutes
+- IAM and service accounts: ~1-2 minutes
+- **Total: 15-20 minutes**
+
+**Monitor progress during creation:**
+```bash
+# In another terminal
+watch -n 10 'gcloud container clusters list'
+watch -n 10 'gcloud redis instances list --region=europe-west1'
+```
+
+### Step 7: Verify Deployment
+
+```bash
+# Display outputs
 terraform output
 
-# Připoj se ke clusteru
+# You should see:
+# - gke_cluster_name
+# - gke_cluster_endpoint
+# - redis_host, redis_port
+# - workload_identity_provider
+# - github_service_account
+# - github_secrets_guide (with values to set manually)
+```
+
+**Connect to GKE cluster:**
+```bash
+# Get credentials
 gcloud container clusters get-credentials ralph-cluster --zone=europe-west1-a
 
-# Ověř připojení
+# Verify connection
 kubectl get nodes
 kubectl get pods --all-namespaces
+
+# You should see 1-3 nodes in Ready state
 ```
 
-## Co dál?
-
-Po úspěšném nasazení:
-
-1. **GitHub Secrets** jsou automaticky nakonfigurovány:
-   - `GCP_PROJECT_ID`
-   - `GCP_WORKLOAD_IDENTITY_PROVIDER`
-   - `GCP_SERVICE_ACCOUNT`
-   - `GKE_CLUSTER_NAME`
-   - `GKE_ZONE`
-   - `REDIS_URL`
-
-2. **Nasaď aplikaci** pomocí GitHub Actions nebo kubectl:
+**Test Redis connectivity:**
 ```bash
-# Pomocí kubectl (pokud máš manifesty)
+# Get Redis IP
+REDIS_HOST=$(terraform output -raw redis_host)
+REDIS_PORT=$(terraform output -raw redis_port)
+
+# Create test pod
+kubectl run redis-test --image=redis:7.0 --rm -it -- redis-cli -h $REDIS_HOST -p $REDIS_PORT ping
+# Should return: PONG
+```
+
+## Configure GitHub Secrets (Manual)
+
+GitHub secrets resources are commented out in `iam_github.tf`. Set them manually:
+
+```bash
+# Get values from Terraform output
+terraform output github_secrets_guide
+```
+
+Go to GitHub repo: `https://github.com/Replikanti/ralph-platform/settings/secrets/actions`
+
+Add these secrets:
+
+| Secret Name | Value | Source |
+|------------|-------|--------|
+| `GCP_PROJECT_ID` | Your GCP project ID | `terraform output -raw project_id` (or from tfvars) |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider resource name | `terraform output -raw workload_identity_provider` |
+| `GCP_SERVICE_ACCOUNT` | Service account email | `terraform output -raw github_service_account` |
+| `GKE_CLUSTER_NAME` | Cluster name | `terraform output -raw gke_cluster_name` |
+| `GKE_ZONE` | Cluster zone | From your tfvars (e.g., `europe-west1-a`) |
+| `REDIS_URL` | Redis connection URL | `terraform output -raw redis_url` |
+
+**Example commands:**
+```bash
+# Copy these values from terraform output
+terraform output -raw workload_identity_provider
+terraform output -raw github_service_account
+terraform output -raw gke_cluster_name
+terraform output redis_url  # Note: marked as sensitive
+```
+
+## What's Next?
+
+After successful deployment:
+
+1. **Deploy application** using GitHub Actions or kubectl:
+```bash
+# Using kubectl (if you have manifests)
 kubectl apply -f k8s/
 
-# Nebo počkej na GitHub Actions workflow
+# Or wait for GitHub Actions workflow
+# The workflow should now authenticate using Workload Identity
 ```
 
-3. **Připoj se k Redis** z podů v GKE:
+2. **Connect to Redis** from pods in GKE:
 ```bash
-# Redis je dostupný na privátní IP
+# Redis is available on private IP
 # Connection string: redis://REDIS_IP:6379
 terraform output redis_url
 ```
 
-## Údržba
-
-### Aktualizace infrastruktury
+3. **Set up monitoring and alerting** (recommended for production):
 ```bash
-# Změň konfiguraci v .tf souborech
+# Enable Cloud Monitoring
+gcloud services enable monitoring.googleapis.com
+
+# View metrics
+gcloud monitoring dashboards list
+```
+
+## Maintenance
+
+### Update Infrastructure
+```bash
+# Change configuration in .tf files
 terraform plan
 terraform apply
 ```
 
-### Škálování
+### Scaling
 ```bash
-# Uprav v gke.tf:
+# Edit in gke.tf:
 # - autoscaling.min_node_count
 # - autoscaling.max_node_count
 # - node_config.machine_type
@@ -211,83 +333,313 @@ terraform apply
 terraform apply
 ```
 
-### Monitorování nákladů
+### Cost Monitoring
 ```bash
-# Denní náklady by měly být < $2-3/den:
-# - GKE cluster: $0 (free tier do 1 zónového clusteru)
-# - e2-small node: ~$0.02/hod ($0.48/den)
-# - Redis 1GB BASIC: ~$0.03/hod ($0.72/den)
-# - Síť: ~$0.10/den
+# Daily costs should be ~$2-3/day:
+# - GKE cluster: $0 (free tier for 1 zonal cluster)
+# - e2-small node (spot): ~$0.005/hr ($0.12/day)
+# - e2-small node (preemptible uptime ~80%): ~$0.40/day
+# - Redis 1GB BASIC: ~$0.03/hr ($0.72/day)
+# - Network: ~$0.10/day
+# - Total: ~$1.50-2.50/day ($45-75/month)
 ```
 
-## Odstranění
+**Monitor actual costs:**
+```bash
+# View billing
+gcloud billing accounts list
+gcloud billing projects describe YOUR_PROJECT_ID
+
+# Check in console: https://console.cloud.google.com/billing
+```
+
+## Cleanup / Destroy
 
 ```bash
-# POZOR: Smaže všechnu infrastrukturu!
+# WARNING: Deletes all infrastructure!
 terraform destroy
 
-# Manuálně smaž bucket (Terraform ho nezruší)
-gsutil rm -r gs://tvoj-projekt-id-tf-state
+# Terraform will ask for confirmation
+# Enter: yes
+
+# Manually delete backend bucket (Terraform doesn't remove it)
+gsutil rm -r gs://YOUR_PROJECT_ID-tf-state
 ```
 
-## Řešení problémů
+## Troubleshooting
 
-### Chyba: "API not enabled"
+### Error: "API not enabled"
 ```bash
-# Povol chybějící API
+# Enable the missing API
 gcloud services enable [API_NAME]
 ```
 
-### Chyba: "Insufficient permissions"
+### Error: "Insufficient permissions"
 ```bash
-# Zkontroluj oprávnění
-gcloud projects get-iam-policy tvuj-projekt-id
+# Check permissions
+gcloud projects get-iam-policy YOUR_PROJECT_ID
 
-# Přidej roli Owner (pro setup)
-gcloud projects add-iam-policy-binding tvuj-projekt-id \
-  --member="user:tvuj-email@example.com" \
+# Add Owner role (for setup)
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="user:your-email@example.com" \
   --role="roles/owner"
 ```
 
-### Chyba: "Quota exceeded"
+### Error: "Quota exceeded"
 ```bash
-# Zkontroluj kvóty
-gcloud compute project-info describe --project=tvuj-projekt-id
+# Check quotas
+gcloud compute project-info describe --project=YOUR_PROJECT_ID
 
-# Požádej o navýšení na: https://console.cloud.google.com/iam-admin/quotas
+# Request increase: https://console.cloud.google.com/iam-admin/quotas
 ```
 
-### GKE cluster se nevytvoří
+### GKE cluster fails to create
 ```bash
-# Zkontroluj, že máš billing účet
-gcloud billing projects describe tvuj-projekt-id
+# Check billing account is linked
+gcloud billing projects describe YOUR_PROJECT_ID
 
-# Zkontroluj dostupnost zóny
+# Check zone availability
 gcloud compute zones list | grep europe-west1
+
+# Check GKE API is enabled
+gcloud services list --enabled | grep container
 ```
 
-### Redis se nemůže připojit k VPC
+### Redis cannot connect to VPC
 ```bash
-# Zkontroluj Service Networking API
+# Check Service Networking API
 gcloud services list --enabled | grep servicenetworking
 
-# Zkontroluj VPC peering
+# Check VPC peering
 gcloud services vpc-peerings list --network=ralph-vpc
+
+# Check private IP allocation
+gcloud compute addresses list --global
 ```
 
-## Bezpečnost
+### "Error 403: The caller does not have permission"
+```bash
+# Ensure you're authenticated
+gcloud auth application-default login
 
-- ✅ GitHub Workload Identity (bez dlouhodobých secrets)
-- ✅ Privátní Redis (pouze z VPC)
-- ✅ GKE Workload Identity (pody mají granulární oprávnění)
-- ✅ Terraform state v GCS s versioningem
-- ⚠️  Master endpoint je veřejný (pro CI/CD) - pro produkci zvážit autorizované sítě
-- ⚠️  Nody mají veřejné IP (pro úsporu na NAT) - pro produkci zvážit privátní nody
+# Check active account
+gcloud auth list
 
-## Další kroky
+# Verify project permissions
+gcloud projects get-iam-policy YOUR_PROJECT_ID --flatten="bindings[].members" \
+  --format="table(bindings.role)" \
+  --filter="bindings.members:$(gcloud config get-value account)"
+```
 
-1. Nastav monitoring a alerting (Cloud Monitoring)
-2. Konfiguraj backup (Redis snapshots)
-3. Nastav log aggregaci (Cloud Logging)
-4. Vytvoř staging prostředí (zkopíruj infra s jinými názvy)
-5. Nastav autoscaling na základě metrik
+### Workload Identity authentication fails in GitHub Actions
+```bash
+# Verify provider exists
+gcloud iam workload-identity-pools providers list \
+  --location=global \
+  --workload-identity-pool=github-pool
+
+# Check service account IAM binding
+gcloud iam service-accounts get-iam-policy github-deployer@YOUR_PROJECT_ID.iam.gserviceaccount.com
+
+# Verify attribute condition
+gcloud iam workload-identity-pools providers describe github-provider \
+  --location=global \
+  --workload-identity-pool=github-pool \
+  --format="value(attributeCondition)"
+# Should show: assertion.repository == 'Replikanti/ralph-platform'
+```
+
+## Security
+
+### Implemented Security Features
+
+✅ **GitHub Workload Identity** (no long-lived secrets, keyless authentication)
+✅ **Private Redis** (only accessible from VPC, not from internet)
+✅ **GKE Workload Identity** (pods have granular permissions)
+✅ **Terraform state in GCS** with versioning
+✅ **Repository restriction** on Workload Identity (only `Replikanti/ralph-platform` can authenticate)
+✅ **Service account isolation** (separate SAs for GKE nodes and GitHub Actions)
+
+### Security Considerations
+
+⚠️ **Master endpoint is public** (for CI/CD access)
+   - For production: Consider authorized networks to restrict access
+   - Command: `gcloud container clusters update --enable-master-authorized-networks`
+
+⚠️ **Nodes have public IPs** (to save on Cloud NAT costs)
+   - For production: Consider private nodes + Cloud NAT for better isolation
+   - Trade-off: ~$30-50/month additional cost for NAT Gateway
+
+⚠️ **Spot instances can be preempted** (for cost savings)
+   - For production: Consider regular nodes or use node affinity for critical workloads
+   - Spot instances have ~60-91% discount but can be terminated with 30s notice
+
+### Hardening for Production
+
+If moving to production, consider:
+
+1. **Private GKE nodes + Cloud NAT:**
+```hcl
+# In gke.tf:
+enable_private_nodes = true
+
+# Add NAT gateway in vpc.tf:
+resource "google_compute_router_nat" "nat" {
+  name   = "ralph-nat"
+  router = google_compute_router.main.name
+  region = var.region
+  nat_ip_allocate_option = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
+```
+
+2. **Authorized networks for master endpoint:**
+```hcl
+# In gke.tf:
+master_authorized_networks_config {
+  cidr_blocks {
+    cidr_block   = "YOUR_OFFICE_IP/32"
+    display_name = "Office"
+  }
+  cidr_blocks {
+    cidr_block   = "GITHUB_ACTIONS_IP_RANGE"
+    display_name = "GitHub Actions"
+  }
+}
+```
+
+3. **Standard tier Redis with replica:**
+```hcl
+# In redis.tf:
+tier           = "STANDARD_HA"
+replica_count  = 1
+```
+
+4. **Regular nodes instead of Spot:**
+```hcl
+# In gke.tf:
+spot = false
+# Remove spot = true
+```
+
+## Architecture Details
+
+### Free Tier Optimizations
+
+This infrastructure is optimized for minimal cost while maintaining functionality:
+
+1. **Zonal cluster (not regional):**
+   - Saves ~$0.10/hr ($73/month) management fee
+   - Single zone = single point of failure (acceptable for dev/test)
+
+2. **Public node IPs:**
+   - Saves ~$30-50/month on Cloud NAT Gateway
+   - Nodes can reach internet directly without NAT
+   - Trade-off: Nodes are accessible from internet (protected by GKE firewall rules)
+
+3. **Spot instances:**
+   - 60-91% discount vs on-demand pricing
+   - Can be preempted with 30 seconds notice
+   - GKE autoscaler will create new nodes if needed
+
+4. **Standard HDD disks:**
+   - ~50% cheaper than SSD or balanced disks
+   - Sufficient for most workloads (lower IOPS)
+
+5. **e2-small instances:**
+   - 2 vCPU, 2GB RAM - minimum for functional GKE
+   - e2-micro (1GB RAM) doesn't work - not enough memory for system pods
+   - Cost: ~$0.02/hr on-demand, ~$0.005/hr spot
+
+6. **Redis BASIC tier:**
+   - No replication = single instance
+   - 1GB minimum size
+   - ~$0.03/hr (~$22/month)
+
+### Network Architecture
+
+```
+Internet
+    |
+    v
+[GKE Master] (public endpoint: 0.0.0.0/0)
+    |
+    | Control plane: 172.16.0.0/28
+    |
+    v
+[VPC: ralph-vpc 10.0.0.0/20]
+    |
+    +-- [Subnet: ralph-subnet]
+    |       |-- Primary: 10.0.0.0/20 (nodes)
+    |       |-- Secondary: 10.1.0.0/16 (pods)
+    |       |-- Secondary: 10.2.0.0/20 (services)
+    |
+    +-- [GKE Nodes] (public IPs, outbound internet via public IP)
+    |       |-- e2-small spot instances
+    |       |-- 1-3 nodes (autoscaling)
+    |
+    +-- [VPC Peering] --> [Google Managed: Redis]
+            |-- Private connection
+            |-- Internal IP only
+            |-- redis-vpc peering
+```
+
+### Workload Identity Flow
+
+```
+GitHub Actions Workflow
+    |
+    | (1) OIDC token with repository claim
+    v
+[GitHub OIDC Provider]
+    |
+    | (2) Token verification + attribute condition check
+    v
+[GCP Workload Identity Pool]
+    |
+    | (3) assertion.repository == 'Replikanti/ralph-platform'
+    v
+[Workload Identity Provider: github-provider]
+    |
+    | (4) Map to service account
+    v
+[Service Account: github-deployer@PROJECT.iam.gserviceaccount.com]
+    |
+    | (5) Impersonate with roles:
+    |     - container.developer
+    |     - storage.admin
+    |     - artifactregistry.writer
+    v
+[GKE API / GCR / Artifact Registry]
+```
+
+**Security:** Only workflows from `Replikanti/ralph-platform` can impersonate the service account due to `attribute_condition` in `iam_github.tf:38`.
+
+## Next Steps
+
+1. Set up monitoring and alerting (Cloud Monitoring, Prometheus)
+2. Configure Redis backups (snapshots)
+3. Set up log aggregation (Cloud Logging, Loki)
+4. Create staging environment (copy infra with different names)
+5. Set up autoscaling based on custom metrics
+6. Configure CI/CD pipeline in GitHub Actions
+7. Set up SSL/TLS certificates (cert-manager + Let's Encrypt)
+8. Configure ingress controller (nginx-ingress, GKE Ingress)
+
+## Cost Optimization Tips
+
+1. **Use preemptible/spot instances for all dev/test workloads**
+2. **Set aggressive autoscaling** - scale to 0 nodes when not in use (min_node_count = 0)
+3. **Use committed use discounts** for production (1 or 3 year commitment = 37-57% discount)
+4. **Use sustained use discounts** automatically applied for long-running VMs
+5. **Monitor with budgets and alerts** to catch unexpected costs
+6. **Delete unused resources** regularly (old disks, IPs, snapshots)
+7. **Use e2-micro CloudShell** for maintenance instead of leaving a bastion host running
+
+## Additional Resources
+
+- [GKE pricing calculator](https://cloud.google.com/products/calculator)
+- [Redis pricing](https://cloud.google.com/memorystore/docs/redis/pricing)
+- [Workload Identity setup guide](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
+- [Spot VMs documentation](https://cloud.google.com/compute/docs/instances/spot)
+- [GKE free tier details](https://cloud.google.com/kubernetes-engine/pricing#cluster_management_fee_and_free_tier)
