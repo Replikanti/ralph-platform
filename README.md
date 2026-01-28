@@ -418,42 +418,39 @@ kubectl create secret generic ralph-team-repos \
 LINEAR_TEAM_REPOS={"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}
 ```
 
-### Dynamic Mapping (Redis)
+### Dynamic Mapping (Redis + ConfigMap)
 
-You can manage repository mappings at runtime without redeploying or restarting the platform by using Redis.
+Ralph uses a hybrid configuration system for repository mappings:
+1. **ConfigMap (Persistent):** Mounted at `/etc/ralph/config/repos.json`. Updates here are persistent and survive restarts.
+2. **Redis (Cache):** Used for fast lookups. Refreshed automatically when the ConfigMap file changes.
 
-1. **Find your Redis connection string**:
-   ```bash
-   kubectl exec deployment/ralph-api -- printenv REDIS_URL
-   # Example output: redis://10.x.x.x:6379
-   ```
+#### How to update configuration
 
-2. **Launch a temporary debug pod**:
-   ```bash
-   kubectl run redis-client --rm -it --image=redis:alpine -- /bin/sh
-   ```
+**Option A: Update via Helm (Persistent)**
+Update `teamRepos` in your `values.yaml` and run `helm upgrade`:
+```yaml
+teamRepos:
+  FRONT: "https://github.com/org/frontend.git"
+  BACK: "https://github.com/org/backend.git"
+```
+Ralph will detect the change in the mounted ConfigMap and update Redis automatically without a restart.
 
-3. **Connect and set the mapping**:
-   Inside the debug pod shell, use `redis-cli` with the IP/hostname from step 1:
-   ```bash
-   redis-cli -h 10.x.x.x
-   
-   # Set the mapping key (Single team)
-   SET ralph:config:repos '{"TEAM_KEY":"https://github.com/org/repo_url"}'
+**Option B: Manual Redis Override (Temporary)**
+You can force a configuration change immediately via Redis (will be overwritten if ConfigMap changes):
+```bash
+# 1. Connect to Redis (via debug pod)
+kubectl run redis-client --rm -it --image=redis:alpine -- /bin/sh
+redis-cli -h ralph-redis-master
 
-   # Set the mapping key (Multiple teams)
-   SET ralph:config:repos '{"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}'
-   
-   # Verify
-   GET ralph:config:repos
-   exit
-   ```
+# 2. Set config manually
+SET ralph:config:repos '{"FRONT":"https://github.com/new/frontend"}'
+```
 
-4. **Precedence**:
-   Ralph resolves repositories in this order:
-   1. Redis key `ralph:config:repos`
-   2. Environment variable `LINEAR_TEAM_REPOS`
-   3. Environment variable `DEFAULT_REPO_URL`
+#### Precedence
+1. Redis Cache (checked first)
+2. ConfigMap File (checked if Redis empty or file changed)
+3. Environment Variable `LINEAR_TEAM_REPOS` (Legacy fallback)
+4. Environment Variable `DEFAULT_REPO_URL` (Final fallback)
 
 ### How it works
 

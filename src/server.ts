@@ -3,33 +3,72 @@ import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 
 dotenv.config();
 const app = express();
 
-// Team → Repository mapping (Linear team key → GitHub repo URL)
+const CONFIG_PATH = process.env.REPO_CONFIG_PATH || '/etc/ralph/config/repos.json';
+const REDIS_CONFIG_KEY = 'ralph:config:repos';
+const REDIS_VERSION_KEY = 'ralph:config:version';
+
+// Team → Repository mapping logic
 async function getRepoForTeam(teamKey: string | undefined): Promise<string | null> {
-    // 1. Try Redis dynamic config first
     try {
-        const redisMap = await connection.get('ralph:config:repos');
-        if (redisMap) {
-            const map = JSON.parse(redisMap);
-            if (teamKey && map[teamKey]) {
-                return map[teamKey];
+        // 1. Check Redis
+        const [redisMap, redisVersion] = await Promise.all([
+            connection.get(REDIS_CONFIG_KEY),
+            connection.get(REDIS_VERSION_KEY)
+        ]);
+
+        let config: Record<string, string> = {};
+        let currentVersion = '';
+
+        // Check file version (mtime as simple version)
+        try {
+            const stats = await fs.stat(CONFIG_PATH);
+            currentVersion = stats.mtimeMs.toString();
+        } catch {
+            // File might not exist in local dev, ignore
+        }
+
+        // If Redis is stale or empty, refresh from file
+        if (!redisMap || redisVersion !== currentVersion) {
+            try {
+                const fileContent = await fs.readFile(CONFIG_PATH, 'utf-8');
+                config = JSON.parse(fileContent);
+                
+                // Update Redis
+                await Promise.all([
+                    connection.set(REDIS_CONFIG_KEY, JSON.stringify(config)),
+                    connection.set(REDIS_VERSION_KEY, currentVersion)
+                ]);
+                console.log("🔄 Configuration refreshed from ConfigMap");
+            } catch (e) {
+                console.warn("⚠️ Failed to refresh config from file, using Redis fallback:", e);
+                // If file read fails (e.g. locally), fallback to Redis content if available
+                if (redisMap) config = JSON.parse(redisMap);
             }
+        } else {
+            config = JSON.parse(redisMap);
+        }
+
+        // 2. Look up in config
+        if (teamKey && config[teamKey]) {
+            return config[teamKey];
         }
     } catch (e) {
-        console.warn("⚠️ Failed to read repo config from Redis:", e);
+        console.warn("⚠️ Error resolving repo config:", e);
     }
 
-    // 2. Fallback to Env Var
+    // 3. Fallback to Env Var (Legacy)
     try {
         const envMap = JSON.parse(process.env.LINEAR_TEAM_REPOS || '{}');
         if (teamKey && envMap[teamKey]) {
             return envMap[teamKey];
         }
-    } catch {
-        console.error('❌ Invalid LINEAR_TEAM_REPOS JSON');
+    } catch (e) {
+        console.error('❌ Invalid LINEAR_TEAM_REPOS JSON', e);
     }
 
     if (process.env.DEFAULT_REPO_URL) {
