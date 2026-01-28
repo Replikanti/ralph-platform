@@ -210,7 +210,7 @@ async function handleToolCall(workDir: string, block: any, iterTracker: any) {
     });
 
     return {
-        type: "tool_result" as const,
+        type: "tool_result",
         tool_use_id: block.id,
         content: result
     };
@@ -329,7 +329,7 @@ export const runAgent = async (task: any) => {
 
             // 2. EXECUTE (Sonnet) - Agentic Loop with Telemetry
             const collector = createTelemetryCollector();
-            const finalOutput = await runCodingLoop(trace, systemPrompt, workDir, plan, collector);
+            await runCodingLoop(trace, systemPrompt, workDir, plan, collector);
 
             // 3. VALIDATE (Polyglot)
             const valSpan = trace.span({ name: "Validation" });
