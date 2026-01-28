@@ -92,6 +92,7 @@ describe('runAgent', () => {
             add: jest.fn(),
             commit: jest.fn(),
             push: jest.fn(),
+            status: jest.fn().mockResolvedValue({ staged: ['README.md'] }),
         };
         mockCleanup = jest.fn();
 
