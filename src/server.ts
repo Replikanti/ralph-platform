@@ -4,9 +4,13 @@ import IORedis from 'ioredis';
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import morgan from 'morgan';
 
 dotenv.config();
 const app = express();
+
+// HTTP Request Logging
+app.use(morgan('combined'));
 
 const CONFIG_PATH = process.env.REPO_CONFIG_PATH || '/etc/ralph/config/repos.json';
 const REDIS_CONFIG_KEY = 'ralph:config:repos';
@@ -119,6 +123,7 @@ function verifyLinearSignature(req: any): boolean {
 
 app.post('/webhook', async (req, res) => {
     if (!verifyLinearSignature(req)) {
+        console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
         return res.status(401).send('Invalid signature');
     }
 
