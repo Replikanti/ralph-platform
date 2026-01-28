@@ -438,8 +438,11 @@ You can manage repository mappings at runtime without redeploying or restarting 
    ```bash
    redis-cli -h 10.x.x.x
    
-   # Set the mapping key
+   # Set the mapping key (Single team)
    SET ralph:config:repos '{"TEAM_KEY":"https://github.com/org/repo_url"}'
+
+   # Set the mapping key (Multiple teams)
+   SET ralph:config:repos '{"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}'
    
    # Verify
    GET ralph:config:repos
