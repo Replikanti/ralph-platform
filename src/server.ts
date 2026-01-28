@@ -45,6 +45,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
                 ]);
                 console.log("🔄 Configuration refreshed from ConfigMap");
             } catch (e) {
+                console.warn("⚠️ Failed to refresh config from file, using Redis fallback:", e);
                 // If file read fails (e.g. locally), fallback to Redis content if available
                 if (redisMap) config = JSON.parse(redisMap);
             }
@@ -66,7 +67,9 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
         if (teamKey && envMap[teamKey]) {
             return envMap[teamKey];
         }
-    } catch { /* ignore */ }
+    } catch (e) {
+        console.error('❌ Invalid LINEAR_TEAM_REPOS JSON', e);
+    }
 
     if (process.env.DEFAULT_REPO_URL) {
         return process.env.DEFAULT_REPO_URL;
