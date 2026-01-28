@@ -1,3 +1,5 @@
+process.env.LINEAR_API_KEY = 'test-key';
+
 import { createWorker, jobProcessor } from '../src/worker';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';

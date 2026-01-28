@@ -4,17 +4,39 @@ import { runPolyglotValidation } from "./tools";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { LinearClient } from "@linear/sdk";
 
 const langfuse = new Langfuse();
+const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
 
 // --- HELPERS ---
+
+async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
+    try {
+        const issue = await linear.issue(issueId);
+        const team = await issue.team;
+        if (!team) return;
+
+        const states = await team.states();
+        const targetState = states.nodes.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase());
+
+        if (targetState) {
+            await linear.updateIssue(issueId, { stateId: targetState.id });
+        }
+
+        if (comment) {
+            await linear.createComment({ issueId, body: comment });
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [Agent] Failed to update Linear issue ${issueId}: ${e.message}`);
+    }
+}
 
 async function createPullRequest(repoUrl: string, branchName: string, title: string, body: string) {
     const { owner, repo } = parseRepoUrl(repoUrl);
     try {
         const { Octokit } = await import("@octokit/rest");
         const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-        
         const response = await octokit.rest.pulls.create({
             owner,
             repo,
@@ -182,6 +204,9 @@ export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
+            // Update Linear to "In Progress"
+            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph has started working on this task.");
+
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
@@ -191,7 +216,7 @@ export const runAgent = async (task: any) => {
                 console.log(`🤖 [Agent] Iteration ${iteration}/${MAX_RETRIES}`);
 
                 // 1. PLAN (Opus)
-                const planSpan = trace.span({
+                const planSpan = trace.span({ 
                     name: `Planning-Opus-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -199,7 +224,7 @@ export const runAgent = async (task: any) => {
                 planSpan.end({ output: plan });
 
                 // 2. EXECUTE (Sonnet)
-                const execSpan = trace.span({
+                const execSpan = trace.span({ 
                     name: `Execution-Sonnet-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -207,7 +232,7 @@ export const runAgent = async (task: any) => {
                 execSpan.end();
 
                 // 3. VALIDATE
-                const valSpan = trace.span({
+                const valSpan = trace.span({ 
                     name: `Validation-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -218,11 +243,15 @@ export const runAgent = async (task: any) => {
                     console.log("✅ [Agent] Validation passed!");
                     await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName, ['--force']);
                     
-                    // Create Pull Request
+                    // Update Linear to "Done" (or "In Review") and post PR link
+                    await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
+
+                    // Create Pull Request (Awaited to ensure it finishes)
                     const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
                     if (prUrl) {
                         console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
                     }
+                    
                     return;
                 }
 
@@ -232,8 +261,9 @@ export const runAgent = async (task: any) => {
 
             // Final fallback if all retries fail
             await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName, ['--force']);
+            await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
             
-            // Create WIP Pull Request even if validation failed
+            // Create WIP Pull Request even if validation failed (Awaited)
             const prUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after multiple attempts.\n\nErrors:\n${previousErrors}`);
             if (prUrl) {
                 console.log(`🚀 [Agent] WIP Pull Request created: ${prUrl}`);
