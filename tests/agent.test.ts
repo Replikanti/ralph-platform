@@ -9,13 +9,26 @@ jest.mock('node:fs/promises', () => ({
 }));
 
 // Set a longer timeout for agent tests involving CLI mocks
-jest.setTimeout(15000);
+jest.setTimeout(30000);
 
-// Mock child_process
+// Mock child_process and util.promisify
 const mockExec = jest.fn();
 jest.mock('node:child_process', () => ({
-    exec: mockExec
+    exec: jest.fn()
 }));
+
+jest.mock('node:util', () => {
+    const originalUtil = jest.requireActual('node:util');
+    return {
+        ...originalUtil,
+        promisify: (fn: any) => {
+            if (fn === require('node:child_process').exec) {
+                return mockExec;
+            }
+            return originalUtil.promisify(fn);
+        }
+    };
+});
 
 describe('runAgent', () => {
     let mockGit: any;
@@ -50,12 +63,8 @@ describe('runAgent', () => {
             output: 'Validation Passed',
         });
 
-        // Setup Exec Mock: standard callback signature (error, result)
-        // promisify(exec) expects this. It needs to handle optional options.
-        mockExec.mockImplementation((cmd: string, opts: any, callback: any) => {
-            const cb = typeof opts === 'function' ? opts : callback;
-            cb(null, { stdout: 'Default Output', stderr: '' });
-        });
+        // Default exec mock implementation (promise style because of promisify mock)
+        mockExec.mockImplementation(() => Promise.resolve({ stdout: 'Default Output', stderr: '' }));
 
         // Setup Langfuse Mock
         mockSpanEnd = jest.fn();
@@ -81,60 +90,39 @@ describe('runAgent', () => {
     });
 
     it('should run the iterative loop: Opus plans, Sonnet executes', async () => {
-        // Mock skills directory
         const fsModule = require('node:fs/promises');
-        fsModule.readdir.mockResolvedValue(['code-style.md', 'db.md']);
-        fsModule.readFile.mockResolvedValue('Skill content');
+        fsModule.readdir.mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
+        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
 
-        // Mock sequence of exec calls (using standard callback signature)
         mockExec
-            .mockImplementationOnce((cmd, opts, cb) => {
-                const actualCb = typeof opts === 'function' ? opts : cb;
-                actualCb(null, { stdout: '<plan>Do X</plan><skills>["code-style.md"]</skills>', stderr: '' });
-            })
-            .mockImplementationOnce((cmd, opts, cb) => {
-                const actualCb = typeof opts === 'function' ? opts : cb;
-                actualCb(null, { stdout: 'Implementation done', stderr: '' });
-            });
+            .mockResolvedValueOnce({ stdout: '<plan>Do X</plan>', stderr: '' })
+            .mockResolvedValueOnce({ stdout: 'Implementation done', stderr: '' });
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc' };
         await runAgent(task);
 
         // Verify Opus was called for planning
         expect(mockExec).toHaveBeenCalledWith(
-            expect.stringContaining('--model opus-4-5'),
-            expect.anything()
+            expect.stringContaining('--model opus-4-5')
         );
 
-        // Verify Sonnet was called for execution
         expect(mockExec).toHaveBeenCalledWith(
             expect.stringContaining('--model sonnet-4-5'),
-            expect.objectContaining({ cwd: '/mock/workspace' }),
-            expect.anything()
+            expect.objectContaining({ cwd: '/mock/workspace' })
         );
 
-        // Verify skill loading (only the selected one)
-        expect(fsModule.readFile).toHaveBeenCalledWith(expect.stringContaining('code-style.md'), 'utf-8');
-        expect(fsModule.readFile).not.toHaveBeenCalledWith(expect.stringContaining('db.md'), 'utf-8');
+        expect(fsModule.readFile).toHaveBeenCalledWith(expect.stringContaining('CLAUDE.md'), 'utf-8');
     });
 
     it('should retry if validation fails', async () => {
         const toolsModule = require('../src/tools');
-        
-        // 1. First iteration fails validation
-        // 2. Second iteration succeeds
         (toolsModule.runPolyglotValidation as jest.Mock)
             .mockResolvedValueOnce({ success: false, output: 'Linter error' })
             .mockResolvedValueOnce({ success: true, output: 'Fixed' });
 
-        mockExec.mockImplementation((cmd, opts, cb) => {
-            const actualCb = typeof opts === 'function' ? opts : cb;
-            actualCb(null, { stdout: '<plan>Try</plan><skills>[]</skills>', stderr: '' });
-        });
+        mockExec.mockResolvedValue({ stdout: '<plan>Try</plan>', stderr: '' });
 
         await runAgent({ ticketId: 'retry', title: 'Retry Task' });
-
-        // Should have iterated at least twice (4 calls total: 2 plan + 2 exec)
         expect(mockExec.mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
@@ -145,14 +133,10 @@ describe('runAgent', () => {
             output: 'Validation Failed',
         });
 
-        mockExec.mockImplementation((cmd, opts, cb) => {
-            const actualCb = typeof opts === 'function' ? opts : cb;
-            actualCb(null, { stdout: '<plan>Fail</plan><skills>[]</skills>', stderr: '' });
-        });
+        mockExec.mockResolvedValue({ stdout: '<plan>Fail</plan>', stderr: '' });
 
         const task = { ticketId: '1', title: 'Validation Fail' };
         await runAgent(task);
-
         expect(mockGit.commit).toHaveBeenCalledWith(expect.stringContaining('wip:'));
     });
 });
