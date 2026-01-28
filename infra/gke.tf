@@ -15,7 +15,13 @@ resource "google_container_cluster" "primary" {
   initial_node_count       = 1
 
   # Disable deletion protection (for dev/test, allows easy cluster destruction)
+  # GOVERNANCE GUARDRAIL: In production, set this to true to prevent accidental deletion.
   deletion_protection = false
+
+  # FinOps: Enable GKE Cost Allocation to see cost breakdown by namespace/label in Billing
+  cost_management_config {
+    enabled = true
+  }
 
   # Network references (must be defined in vpc.tf)
   network    = google_compute_network.main.id
