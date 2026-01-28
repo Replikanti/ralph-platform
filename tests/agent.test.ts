@@ -30,6 +30,33 @@ jest.mock('node:child_process', () => ({
     exec: mockExec
 }));
 
+// Mock util.promisify
+jest.mock('node:util', () => {
+    const originalUtil = jest.requireActual('node:util');
+    return {
+        ...originalUtil,
+        promisify: (fn: any) => {
+            if (fn === mockExec) return mockExec;
+            return originalUtil.promisify(fn);
+        }
+    };
+});
+
+// Mock Octokit
+const mockPullsCreate = jest.fn().mockResolvedValue({ data: { html_url: 'https://github.com/pr/1' } });
+const mockPullsList = jest.fn().mockResolvedValue({ data: [] });
+
+jest.mock('@octokit/rest', () => ({
+    Octokit: jest.fn().mockImplementation(() => ({
+        rest: {
+            pulls: {
+                create: mockPullsCreate,
+                list: mockPullsList,
+            }
+        }
+    }))
+}));
+
 describe('runAgent', () => {
     let mockGit: any;
     let mockCleanup: any;
@@ -56,6 +83,10 @@ describe('runAgent', () => {
             git: mockGit,
             cleanup: mockCleanup,
         });
+        (workspaceModule.parseRepoUrl as jest.Mock).mockReturnValue({
+            owner: 'owner',
+            repo: 'repo'
+        });
 
         const toolsModule = require('../src/tools');
         (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
@@ -74,7 +105,8 @@ describe('runAgent', () => {
         // Default exec behavior
         mockExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
-            callback(null, { stdout: '', stderr: '' });
+            if (callback) callback(null, { stdout: '', stderr: '' });
+            return Promise.resolve({ stdout: '', stderr: '' });
         });
 
         // Setup Langfuse Mock
@@ -112,7 +144,7 @@ describe('runAgent', () => {
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
 
-        const task = { ticketId: '123', title: 'Test', description: 'Desc' };
+        const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
 
         expect(mockSpawn).toHaveBeenCalledWith(
@@ -120,6 +152,8 @@ describe('runAgent', () => {
             expect.arrayContaining(['--model', 'opus-4-5']),
             expect.anything()
         );
+        
+        expect(mockPullsCreate).toHaveBeenCalled();
     });
 
     it('should use CLAUDE_BIN_PATH from environment if provided', async () => {
@@ -133,7 +167,7 @@ describe('runAgent', () => {
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>X</plan>')); })
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Y')); });
 
-        await runAgent({ ticketId: 'custom', title: 'Custom Path' });
+        await runAgent({ ticketId: 'custom', title: 'Custom Path', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
         expect(mockSpawn).toHaveBeenCalledWith(
             '/custom/path/claude',
@@ -154,7 +188,7 @@ describe('runAgent', () => {
             if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
         });
 
-        await runAgent({ ticketId: 'retry', title: 'Retry Task' });
+        await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
         expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
@@ -169,8 +203,11 @@ describe('runAgent', () => {
             if (event === 'data') cb(Buffer.from('<plan>Fail</plan>'));
         });
 
-        const task = { ticketId: '1', title: 'Validation Fail' };
+        const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
         expect(mockGit.commit).toHaveBeenCalledWith(expect.stringContaining('wip:'));
+        expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
+            title: expect.stringContaining('wip:')
+        }));
     });
 });
