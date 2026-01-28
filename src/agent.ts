@@ -9,38 +9,35 @@ import { promisify } from 'node:util';
 const execAsync = promisify(exec);
 const langfuse = new Langfuse();
 
-// --- IMMUTABLE SECURITY LAYER ---
+// --- SECURITY GUARDRAILS ---
 const SECURITY_GUARDRAILS = `
-### 🛡️ CRITICAL SECURITY RULES (OVERRIDE ALL)
-1. NO SECRETS: Never output API keys or tokens.
-2. NO DESTRUCTION: Do not delete config files or infrastructure.
-3. SANDBOX: Only modify files inside the workspace.
-4. DEPENDENCIES: Do not install unverified packages.
-`;
+### 🛡️ SECURITY RULES
+1. NO SECRETS: Never output API keys.
+2. SANDBOX: Only modify files inside the workspace.
+`.trim();
 
-// --- MUTABLE SKILL LAYER ---
-async function loadRepoSkills(workDir: string): Promise<string> {
+// --- SKILLS MANAGEMENT ---
+async function getAvailableSkills(workDir: string): Promise<string[]> {
     const skillsDir = path.join(workDir, '.ralph', 'skills');
-    let skillText = "";
     try {
-        await fs.access(skillsDir);
         const files = await fs.readdir(skillsDir);
-        for (const file of files) {
-            if (file.endsWith('.md')) {
-                const content = await fs.readFile(path.join(skillsDir, file), 'utf-8');
-                skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
-            }
-        }
-    } catch (error_: any) { 
-        if (error_.code === 'ENOENT') {
-            return ""; 
-        }
-        console.error("Unexpected error loading repository skills:", error_);
+        return files.filter(f => f.endsWith('.md'));
+    } catch { return []; }
+}
+
+async function loadSelectedSkills(workDir: string, selectedFiles: string[]): Promise<string> {
+    let skillText = "";
+    const skillsDir = path.join(workDir, '.ralph', 'skills');
+    for (const file of selectedFiles) {
+        try {
+            const content = await fs.readFile(path.join(skillsDir, file), 'utf-8');
+            skillText += `\n\n--- SKILL: ${file.toUpperCase()} ---\n${content}`;
+        } catch { /* ignore missing */ }
     }
     return skillText;
 }
 
-// Trace Wrapper
+// --- TRACING ---
 async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Promise<T>) {
     const trace = langfuse.trace({ name, metadata });
     try { return await fn(trace); } 
@@ -48,64 +45,101 @@ async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Prom
     finally { await langfuse.flushAsync(); }
 }
 
+// --- AGENT PHASES ---
+
+async function planPhase(workDir: string, task: any, availableSkills: string[], previousErrors?: string) {
+    const prompt = `
+You are the Planner (Claude Opus 4.5). 
+Task: ${task.title}
+Description: ${task.description}
+
+Available Skills (select only what you need):
+${availableSkills.join('\n')}
+
+${previousErrors ? `Previous implementation failed with these errors:\n${previousErrors}` : ''}
+
+Requirement:
+1. Create a step-by-step implementation plan.
+2. Output a JSON list of required skill files.
+3. Do NOT modify any files.
+
+Output format:
+<plan>Your plan here</plan>
+<skills>["file1.md", "file2.md"]</skills>
+    `.trim();
+
+    const { stdout } = await execAsync(`claude -p "${prompt.replace(/"/g, '\\"')}" --model opus-4-5`);
+    
+    const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+    const skillsMatch = stdout.match(/<skills>([\s\S]*?)<\/skills>/);
+    
+    return {
+        plan: planMatch ? planMatch[1].trim() : "No plan",
+        selectedSkills: skillsMatch ? JSON.parse(skillsMatch[1].trim()) : []
+    };
+}
+
+async function executePhase(workDir: string, task: any, plan: string, skillsContent: string) {
+    const prompt = `
+You are the Executor (Claude Sonnet 4.5).
+Your task is to implement the following plan:
+${plan}
+
+Context/Skills:
+${skillsContent}
+
+${SECURITY_GUARDRAILS}
+
+Instructions:
+1. Use available tools to modify the code.
+2. Verify your work.
+3. Do NOT commit.
+    `.trim();
+
+    // Sonnet handles the actual work using its toolbelt
+    return await execAsync(`claude -p "${prompt.replace(/"/g, '\\"')}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
+}
+
 export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
-            const repoSkills = await loadRepoSkills(workDir);
-            
-            // Construct the prompt for Claude Code CLI
-            const prompt = `
-Task: ${task.title}
-${task.description}
+            const availableSkills = await getAvailableSkills(workDir);
+            let previousErrors = "";
+            const MAX_RETRIES = 3;
 
-${SECURITY_GUARDRAILS}
+            for (let i = 0; i < MAX_RETRIES; i++) {
+                console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_RETRIES}`);
 
-${repoSkills}
+                // 1. PLAN (Opus)
+                const planSpan = trace.span({ name: "Planning-Opus" });
+                const { plan, selectedSkills } = await planPhase(workDir, task, availableSkills, previousErrors);
+                planSpan.end({ output: plan, metadata: { selectedSkills } });
 
-Instructions:
-1. Analyze the codebase.
-2. Implement the requested changes.
-3. Run tests if available to verify your changes.
-4. Do NOT commit changes, just modify the files.
-            `.trim();
+                // 2. EXECUTE (Sonnet)
+                const execSpan = trace.span({ name: "Execution-Sonnet" });
+                const skillsContent = await loadSelectedSkills(workDir, selectedSkills);
+                await executePhase(workDir, task, plan, skillsContent);
+                execSpan.end();
 
-            // Execute Claude Code in headless mode (-p)
-            const execSpan = trace.span({ name: "Claude-CLI-Execution" });
-            console.log(`🤖 [Agent] Starting Claude Code CLI...`);
-            
-            try {
-                // Using -p for non-interactive mode (print output)
-                // --allowedTools limits what it can do (security)
-                // We pass the prompt as an argument
-                const { stdout, stderr } = await execAsync(
-                    `claude -p "${prompt.replace(/"/g, '\\"')}" --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, 
-                    { 
-                        cwd: workDir,
-                        timeout: 300000, // 5 minutes timeout
-                        env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-                    }
-                );
-                
-                console.log("✅ [Agent] Claude CLI finished.");
-                execSpan.end({ output: stdout, stderr: stderr });
-            } catch (e: any) {
-                console.error("❌ [Agent] Claude CLI failed:", e);
-                execSpan.end({ error: e.message, stderr: e.stderr });
-                throw e; // Rethrow to mark task as failed
+                // 3. VALIDATE
+                const valSpan = trace.span({ name: "Validation" });
+                const check = await runPolyglotValidation(workDir);
+                valSpan.end({ output: check });
+
+                if (check.success) {
+                    console.log("✅ [Agent] Validation passed!");
+                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
+                    return; // Success
+                }
+
+                console.warn("⚠️ [Agent] Validation failed, retrying...");
+                previousErrors = check.output;
             }
 
-            // 3. VALIDATE (Polyglot) - Double check with our tools
-            const valSpan = trace.span({ name: "Validation" });
-            const check = await runPolyglotValidation(workDir);
-            valSpan.end({ output: check });
+            // Final fallback if all retries fail
+            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName);
 
-            // 4. PUSH
-            if (check.success) {
-                await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
-            } else {
-                await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation)`); await git.push('origin', task.branchName);
-            }
         } finally { cleanup(); }
     });
 };
