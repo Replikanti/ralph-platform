@@ -32,7 +32,8 @@ async function updateLinearIssue(issueId: string, statusName: string, comment?: 
             console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
             await linear.updateIssue(issueId, { stateId: targetState.id });
         } else {
-            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}`);
+            const availableStates = states.nodes.map((s: any) => s.name).join(", ");
+            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}. Available: ${availableStates}`);
         }
 
         if (comment) {
@@ -49,16 +50,23 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
     try {
         const { Octokit } = await import("@octokit/rest");
         const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+        
+        // Check if there are actually commits to PR
+        // This prevents the "No commits between main and branch" error
         const response = await octokit.rest.pulls.create({
             owner,
             repo,
             title,
             body,
             head: branchName,
-            base: 'main', // Assuming main is the default branch
+            base: 'main', 
         });
         return response.data.html_url;
     } catch (e: any) {
+        if (e.message?.includes('No commits between')) {
+            console.warn("⚠️ [Agent] Skipping PR creation: No changes detected between branches.");
+            return null;
+        }
         if (e.message?.includes('A pull request already exists')) {
             const { Octokit } = await import("@octokit/rest");
             const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
@@ -253,33 +261,34 @@ export const runAgent = async (task: any) => {
 
                 if (check.success) {
                     console.log("✅ [Agent] Validation passed!");
-                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName, ['--force']);
                     
-                    // Update Linear to "Done" (or "In Review") and post PR link
-                    await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
-
-                    // Create Pull Request (Awaited to ensure it finishes)
-                    const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
-                    if (prUrl) {
-                        console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
+                    await git.add('.');
+                    const status = await git.status();
+                    if (status.staged.length > 0) {
+                        await git.commit(`feat: ${task.title}`);
+                        await git.push('origin', task.branchName, ['--force']);
+                        await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
+                        const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
+                        if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
+                    } else {
+                        console.warn("⚠️ [Agent] Validation passed but no files were changed.");
                     }
-                    
                     return;
                 }
 
-                console.warn("⚠️ [Agent] Validation failed, retrying...");
+                console.warn(`⚠️ [Agent] Validation failed (Iter ${iteration}):\n${check.output}`);
                 previousErrors = check.output;
             }
 
             // Final fallback if all retries fail
-            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName, ['--force']);
-            await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
-            
-            // Create WIP Pull Request even if validation failed (Awaited)
-            const prUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after multiple attempts.\n\nErrors:\n${previousErrors}`);
-            if (prUrl) {
-                console.log(`🚀 [Agent] WIP Pull Request created: ${prUrl}`);
+            await git.add('.');
+            const finalStatus = await git.status();
+            if (finalStatus.staged.length > 0) {
+                await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
+                await git.push('origin', task.branchName, ['--force']);
+                await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
             }
+            await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
 
         } finally { cleanup(); }
     });
