@@ -160,8 +160,8 @@ async function loadRepoSkills(workDir: string): Promise<string> {
                 skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
             }
         }
-    } catch (error_) { 
-        if (error_ instanceof Error && (error_ as any).code === 'ENOENT') {
+    } catch (error_: any) { 
+        if (error_.code === 'ENOENT') {
             return ""; 
         }
         console.error("Unexpected error loading repository skills:", error_);
@@ -170,7 +170,7 @@ async function loadRepoSkills(workDir: string): Promise<string> {
 }
 
 async function handleToolCall(workDir: string, block: any, iterTracker: any) {
-    const input = block.input as any;
+    const input = block.input;
     let result = "";
     const toolStart = Date.now();
     let success = true;
@@ -292,10 +292,10 @@ async function runCodingLoop(
             metadata: {
                 iterations_used: collector.telemetry.totalIterations,
                 finish_reason: collector.telemetry.finishReason,
-                tool_calls_total: Object.values(collector.telemetry.toolCallsByName).reduce((a: any, b: any) => (a as number) + (b as number), 0),
+                tool_calls_total: Object.values(collector.telemetry.toolCallsByName).reduce((a: any, b: any) => a + b, 0),
                 tool_calls_by_name: collector.telemetry.toolCallsByName,
-                repeated_reads_count: Object.values(collector.telemetry.repeatedReads).filter((c: any) => (c as number) > 1).length,
-                repeated_commands_count: Object.values(collector.telemetry.repeatedCommands).filter((c: any) => (c as number) > 1).length
+                repeated_reads_count: Object.values(collector.telemetry.repeatedReads).filter((c: any) => c > 1).length,
+                repeated_commands_count: Object.values(collector.telemetry.repeatedCommands).filter((c: any) => c > 1).length
             }
         });
     }
