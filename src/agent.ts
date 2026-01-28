@@ -220,11 +220,82 @@ Instructions:
     );
 }
 
+async function runIteration(iteration: number, trace: any, workDir: string, task: any, availableSkills: string, previousErrors: string, git: any) {
+    console.log(`🤖 [Agent] Iteration ${iteration}`);
+
+    // 1. PLAN (Opus)
+    const planSpan = trace.span({ 
+        name: `Planning-Opus-Iter-${iteration}`,
+        metadata: { iteration }
+    });
+    const plan = await planPhase(workDir, task, availableSkills, previousErrors);
+    planSpan.end({ output: plan });
+
+    // 2. EXECUTE (Sonnet)
+    const execSpan = trace.span({ 
+        name: `Execution-Sonnet-Iter-${iteration}`,
+        metadata: { iteration }
+    });
+    await executePhase(workDir, plan);
+    execSpan.end();
+
+    // 3. VALIDATE
+    const valSpan = trace.span({ 
+        name: `Validation-Iter-${iteration}`,
+        metadata: { iteration }
+    });
+    const check = await runPolyglotValidation(workDir);
+    valSpan.end({ output: check });
+
+    if (check.success) {
+        console.log("✅ [Agent] Validation passed!");
+        
+        await git.add('.');
+        const status = await git.status();
+        if (status.staged.length > 0) {
+            await git.commit(`feat: ${task.title}`);
+            await git.push('origin', task.branchName, ['--force']);
+            
+            const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
+            const successComment = prUrl 
+                ? `✅ Task completed successfully.\n\nPull Request: ${prUrl}`
+                : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${task.branchName}`;
+            
+            await updateLinearIssue(task.ticketId, "In Review", successComment);
+            if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
+        } else {
+            console.warn("⚠️ [Agent] Validation passed but no files were changed.");
+            await updateLinearIssue(task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary or made.");
+        }
+        return { success: true };
+    }
+
+    console.warn(`⚠️ [Agent] Validation failed (Iter ${iteration}):\n${check.output}`);
+    return { success: false, output: check.output };
+}
+
+async function handleFailureFallback(workDir: string, task: any, git: any, previousErrors: string, MAX_RETRIES: number) {
+    await git.add('.');
+    const finalStatus = await git.status();
+    if (finalStatus.staged.length > 0) {
+        await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
+        await git.push('origin', task.branchName, ['--force']);
+        const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
+        
+        const failComment = wipPrUrl
+            ? `❌ Task failed validation after ${MAX_RETRIES} attempts. Changes pushed for inspection.\n\nPull Request: ${wipPrUrl}`
+            : `❌ Task failed validation after ${MAX_RETRIES} attempts. Errors:\n${previousErrors}`;
+        
+        await updateLinearIssue(task.ticketId, "Todo", failComment);
+    } else {
+        await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
+    }
+}
+
 export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
-            // Update Linear to "In Progress"
             await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph has started working on this task.");
 
             const availableSkills = await listAvailableSkills(workDir);
@@ -232,79 +303,12 @@ export const runAgent = async (task: any) => {
             const MAX_RETRIES = 3;
 
             for (let i = 0; i < MAX_RETRIES; i++) {
-                const iteration = i + 1;
-                console.log(`🤖 [Agent] Iteration ${iteration}/${MAX_RETRIES}`);
-
-                // 1. PLAN (Opus)
-                const planSpan = trace.span({ 
-                    name: `Planning-Opus-Iter-${iteration}`,
-                    metadata: { iteration }
-                });
-                const plan = await planPhase(workDir, task, availableSkills, previousErrors);
-                planSpan.end({ output: plan });
-
-                // 2. EXECUTE (Sonnet)
-                const execSpan = trace.span({ 
-                    name: `Execution-Sonnet-Iter-${iteration}`,
-                    metadata: { iteration }
-                });
-                await executePhase(workDir, plan);
-                execSpan.end();
-
-                // 3. VALIDATE
-                const valSpan = trace.span({ 
-                    name: `Validation-Iter-${iteration}`,
-                    metadata: { iteration }
-                });
-                const check = await runPolyglotValidation(workDir);
-                valSpan.end({ output: check });
-
-                if (check.success) {
-                    console.log("✅ [Agent] Validation passed!");
-                    
-                    await git.add('.');
-                    const status = await git.status();
-                    if (status.staged.length > 0) {
-                        await git.commit(`feat: ${task.title}`);
-                        await git.push('origin', task.branchName, ['--force']);
-                        
-                        // Create Pull Request
-                        const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
-                        
-                        // Update Linear to "In Review" and post PR link
-                        const successComment = prUrl 
-                            ? `✅ Task completed successfully.\n\nPull Request: ${prUrl}`
-                            : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${task.branchName}`;
-                        
-                        await updateLinearIssue(task.ticketId, "In Review", successComment);
-                        if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
-                    } else {
-                        console.warn("⚠️ [Agent] Validation passed but no files were changed.");
-                        await updateLinearIssue(task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary or made.");
-                    }
-                    return;
-                }
-
-                console.warn(`⚠️ [Agent] Validation failed (Iter ${iteration}):\n${check.output}`);
-                previousErrors = check.output;
+                const result = await runIteration(i + 1, trace, workDir, task, availableSkills, previousErrors, git);
+                if (result.success) return;
+                previousErrors = result.output || "";
             }
 
-            // Final fallback if all retries fail
-            await git.add('.');
-            const finalStatus = await git.status();
-            if (finalStatus.staged.length > 0) {
-                await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
-                await git.push('origin', task.branchName, ['--force']);
-                const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
-                
-                const failComment = wipPrUrl
-                    ? `❌ Task failed validation after ${MAX_RETRIES} attempts. Changes pushed for inspection.\n\nPull Request: ${wipPrUrl}`
-                    : `❌ Task failed validation after ${MAX_RETRIES} attempts. Errors:\n${previousErrors}`;
-                
-                await updateLinearIssue(task.ticketId, "Todo", failComment);
-            } else {
-                await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
-            }
+            await handleFailureFallback(workDir, task, git, previousErrors, MAX_RETRIES);
 
         } finally { cleanup(); }
     });
