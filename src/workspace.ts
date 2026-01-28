@@ -6,6 +6,13 @@ import path from 'node:path';
 const WORKSPACE_ROOT = '/tmp/ralph-workspaces';
 if (!fs.existsSync(WORKSPACE_ROOT)) fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
+export function parseRepoUrl(repoUrl: string) {
+    // Expected format: https://github.com/owner/repo or https://github.com/owner/repo.git
+    const match = repoUrl.match(/github\.com\/([^/]+)\/([^.]+)(\.git)?/);
+    if (!match) throw new Error(`Invalid GitHub URL: ${repoUrl}`);
+    return { owner: match[1], repo: match[2] };
+}
+
 export async function setupWorkspace(repoUrl: string, branchName: string) {
     const id = uuidv4();
     const workDir = path.join(WORKSPACE_ROOT, id);
