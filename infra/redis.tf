@@ -26,5 +26,9 @@ resource "google_redis_instance" "cache" {
   redis_version = "REDIS_7_0"    # Latest stable version
   display_name  = "Ralph Redis"
 
+  redis_configs = {
+    maxmemory-policy = "noeviction"
+  }
+
   depends_on = [google_service_networking_connection.private_vpc_connection]
 }
