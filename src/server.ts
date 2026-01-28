@@ -8,20 +8,28 @@ dotenv.config();
 const app = express();
 
 // Team → Repository mapping (Linear team key → GitHub repo URL)
-function getTeamRepoMap(): Record<string, string> {
+async function getRepoForTeam(teamKey: string | undefined): Promise<string | null> {
+    // 1. Try Redis dynamic config first
     try {
-        return JSON.parse(process.env.LINEAR_TEAM_REPOS || '{}');
+        const redisMap = await connection.get('ralph:config:repos');
+        if (redisMap) {
+            const map = JSON.parse(redisMap);
+            if (teamKey && map[teamKey]) {
+                return map[teamKey];
+            }
+        }
+    } catch (e) {
+        console.warn("⚠️ Failed to read repo config from Redis:", e);
+    }
+
+    // 2. Fallback to Env Var
+    try {
+        const envMap = JSON.parse(process.env.LINEAR_TEAM_REPOS || '{}');
+        if (teamKey && envMap[teamKey]) {
+            return envMap[teamKey];
+        }
     } catch {
         console.error('❌ Invalid LINEAR_TEAM_REPOS JSON');
-        return {};
-    }
-}
-
-function getRepoForTeam(teamKey: string | undefined): string | null {
-    const teamRepoMap = getTeamRepoMap();
-
-    if (teamKey && teamRepoMap[teamKey]) {
-        return teamRepoMap[teamKey];
     }
 
     if (process.env.DEFAULT_REPO_URL) {
@@ -82,7 +90,7 @@ app.post('/webhook', async (req, res) => {
 
     if (type === 'Issue' && (action === 'create' || action === 'update') && hasRalphLabel) {
         const teamKey = data.team?.key;
-        const repoUrl = getRepoForTeam(teamKey);
+        const repoUrl = await getRepoForTeam(teamKey);
 
         if (!repoUrl) {
             console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
