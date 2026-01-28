@@ -48,7 +48,7 @@ async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Prom
 // --- AGENT PHASES ---
 
 async function planPhase(workDir: string, task: any, availableSkills: string[], previousErrors?: string) {
-    const prompt = `
+    const prompt = String.raw`
 You are the Architect/Planner (Claude Opus 4.5). 
 Task: ${task.title}
 Description: ${task.description}
@@ -68,7 +68,7 @@ OUTPUT FORMAT (Must use tags):
 <skills>["relevant-skill.md"]</skills>
     `.trim();
 
-    const { stdout } = await execAsync(`claude -p "${prompt.replace(/"/g, '\\"')}" --model opus-4-5`);
+    const { stdout } = await execAsync(`claude -p "${prompt.replaceAll(/"/g, '\\"')}" --model opus-4-5`);
     
     const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
     const skillsMatch = stdout.match(/<skills>([\s\S]*?)<\/skills>/);
@@ -80,7 +80,7 @@ OUTPUT FORMAT (Must use tags):
 }
 
 async function executePhase(workDir: string, task: any, plan: string, skillsContent: string) {
-    const prompt = `
+    const prompt = String.raw`
 You are the Executor (Claude Sonnet 4.5).
 Your task is to implement the following plan:
 ${plan}
@@ -97,7 +97,7 @@ Instructions:
     `.trim();
 
     // Sonnet handles the actual work using its toolbelt
-    return await execAsync(`claude -p "${prompt.replace(/"/g, '\\"')}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
+    return await execAsync(`claude -p "${prompt.replaceAll(/"/g, '\\"')}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
 }
 
 export const runAgent = async (task: any) => {
