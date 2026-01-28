@@ -12,6 +12,8 @@ jest.mock('node:fs/promises', () => ({
 // Set a longer timeout for agent tests involving CLI mocks
 jest.setTimeout(30000);
 
+process.env.LINEAR_API_KEY = 'test-key';
+
 // Mock child_process for spawn and exec
 const mockSpawnOn = jest.fn();
 const mockStdoutOn = jest.fn();

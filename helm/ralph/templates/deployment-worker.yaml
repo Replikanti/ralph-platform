@@ -68,6 +68,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.langfuse }}
                   key: host
+            - name: LINEAR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.linearWebhook }}
+                  key: api-key
             - name: REPO_CONFIG_PATH
               value: /etc/ralph/config/repos.json
       volumes:

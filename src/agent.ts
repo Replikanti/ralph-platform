@@ -7,28 +7,40 @@ import { spawn } from 'node:child_process';
 import { LinearClient } from "@linear/sdk";
 
 const langfuse = new Langfuse();
-const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
 
 // --- HELPERS ---
 
 async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
+    if (!process.env.LINEAR_API_KEY) {
+        console.warn("⚠️ LINEAR_API_KEY is missing, skipping status update.");
+        return;
+    }
+    
     try {
+        const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
         const issue = await linear.issue(issueId);
         const team = await issue.team;
-        if (!team) return;
+        if (!team) {
+            console.warn(`⚠️ [Agent] No team found for issue ${issueId}`);
+            return;
+        }
 
         const states = await team.states();
         const targetState = states.nodes.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase());
 
         if (targetState) {
+            console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
             await linear.updateIssue(issueId, { stateId: targetState.id });
+        } else {
+            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}`);
         }
 
         if (comment) {
+            console.log(`💬 [Agent] Adding comment to Linear issue ${issueId}`);
             await linear.createComment({ issueId, body: comment });
         }
     } catch (e: any) {
-        console.warn(`⚠️ [Agent] Failed to update Linear issue ${issueId}: ${e.message}`);
+        console.error(`❌ [Agent] Failed to update Linear issue ${issueId}: ${e.message}`);
     }
 }
 
