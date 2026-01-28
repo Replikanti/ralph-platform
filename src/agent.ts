@@ -216,7 +216,7 @@ export const runAgent = async (task: any) => {
 
                 if (check.success) {
                     console.log("✅ [Agent] Validation passed!");
-                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
+                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName, ['--force']);
                     
                     // Create Pull Request
                     const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
@@ -231,7 +231,7 @@ export const runAgent = async (task: any) => {
             }
 
             // Final fallback if all retries fail
-            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName);
+            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName, ['--force']);
             
             // Create WIP Pull Request even if validation failed
             const prUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after multiple attempts.\n\nErrors:\n${previousErrors}`);

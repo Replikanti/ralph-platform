@@ -24,8 +24,14 @@ export async function setupWorkspace(repoUrl: string, branchName: string) {
     await git.addConfig('user.name', 'Ralph Bot');
     await git.addConfig('user.email', 'ralph@duvo.ai');
     
-    try { await git.checkout(branchName); } 
-    catch { await git.checkoutLocalBranch(branchName); }
+    // Improved branch handling:
+    // 1. Try to checkout existing branch (local or remote)
+    // 2. If it fails, create a new local branch
+    try { 
+        await git.checkout(branchName); 
+    } catch { 
+        await git.checkoutLocalBranch(branchName); 
+    }
 
     return { workDir, git, cleanup: () => fs.rmSync(workDir, { recursive: true, force: true }) };
 }
