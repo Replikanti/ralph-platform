@@ -18,7 +18,8 @@ secrets:
 # Map Linear Teams to GitHub Repositories
 # Key: Linear Team Key (e.g., "FRONT")
 # Value: GitHub Repository URL
-teamRepos: {}
+teamRepos:
+  RAL: "https://github.com/Replikanti/ralph-platform"
   # FRONT: "https://github.com/org/frontend.git"
   # BACK: "https://github.com/org/backend.git"
 
