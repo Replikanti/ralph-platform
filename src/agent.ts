@@ -267,11 +267,20 @@ export const runAgent = async (task: any) => {
                     if (status.staged.length > 0) {
                         await git.commit(`feat: ${task.title}`);
                         await git.push('origin', task.branchName, ['--force']);
-                        await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
+                        
+                        // Create Pull Request
                         const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
+                        
+                        // Update Linear to "In Review" and post PR link
+                        const successComment = prUrl 
+                            ? `✅ Task completed successfully.\n\nPull Request: ${prUrl}`
+                            : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${task.branchName}`;
+                        
+                        await updateLinearIssue(task.ticketId, "In Review", successComment);
                         if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
                     } else {
                         console.warn("⚠️ [Agent] Validation passed but no files were changed.");
+                        await updateLinearIssue(task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary or made.");
                     }
                     return;
                 }
@@ -286,9 +295,16 @@ export const runAgent = async (task: any) => {
             if (finalStatus.staged.length > 0) {
                 await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
                 await git.push('origin', task.branchName, ['--force']);
-                await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
+                const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
+                
+                const failComment = wipPrUrl
+                    ? `❌ Task failed validation after ${MAX_RETRIES} attempts. Changes pushed for inspection.\n\nPull Request: ${wipPrUrl}`
+                    : `❌ Task failed validation after ${MAX_RETRIES} attempts. Errors:\n${previousErrors}`;
+                
+                await updateLinearIssue(task.ticketId, "Todo", failComment);
+            } else {
+                await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
             }
-            await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
 
         } finally { cleanup(); }
     });
