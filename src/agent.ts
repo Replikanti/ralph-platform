@@ -4,10 +4,33 @@ import { runPolyglotValidation } from "./tools";
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { LinearClient } from "@linear/sdk";
 
 const langfuse = new Langfuse();
+const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
 
 // --- HELPERS ---
+
+async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
+    try {
+        const issue = await linear.issue(issueId);
+        const team = await issue.team;
+        if (!team) return;
+
+        const states = await team.states();
+        const targetState = states.nodes.find(s => s.name.toLowerCase() === statusName.toLowerCase());
+
+        if (targetState) {
+            await linear.updateIssue(issueId, { stateId: targetState.id });
+        }
+
+        if (comment) {
+            await linear.createComment({ issueId, body: comment });
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [Agent] Failed to update Linear issue ${issueId}: ${e.message}`);
+    }
+}
 
 /**
  * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
@@ -150,6 +173,9 @@ export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
+            // Update Linear to "In Progress"
+            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph has started working on this task.");
+
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
@@ -159,7 +185,7 @@ export const runAgent = async (task: any) => {
                 console.log(`🤖 [Agent] Iteration ${iteration}/${MAX_RETRIES}`);
 
                 // 1. PLAN (Opus)
-                const planSpan = trace.span({
+                const planSpan = trace.span({ 
                     name: `Planning-Opus-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -167,7 +193,7 @@ export const runAgent = async (task: any) => {
                 planSpan.end({ output: plan });
 
                 // 2. EXECUTE (Sonnet)
-                const execSpan = trace.span({
+                const execSpan = trace.span({ 
                     name: `Execution-Sonnet-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -175,7 +201,7 @@ export const runAgent = async (task: any) => {
                 execSpan.end();
 
                 // 3. VALIDATE
-                const valSpan = trace.span({
+                const valSpan = trace.span({ 
                     name: `Validation-Iter-${iteration}`,
                     metadata: { iteration }
                 });
@@ -184,7 +210,12 @@ export const runAgent = async (task: any) => {
 
                 if (check.success) {
                     console.log("✅ [Agent] Validation passed!");
-                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
+                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName, ['--force']);
+                    
+                    // Update Linear to "Done" (or "In Review") and post PR link
+                    // Note: branch name is used here, but in a real scenario we'd use the PR URL
+                    await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
+                    
                     return;
                 }
 
@@ -192,7 +223,9 @@ export const runAgent = async (task: any) => {
                 previousErrors = check.output;
             }
 
-            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName);
+            // Final fallback if all retries fail
+            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName, ['--force']);
+            await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
 
         } finally { cleanup(); }
     });

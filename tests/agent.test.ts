@@ -30,6 +30,25 @@ jest.mock('node:child_process', () => ({
     exec: mockExec
 }));
 
+// Mock Linear
+const mockIssueUpdate = jest.fn();
+const mockCommentCreate = jest.fn();
+const mockStates = jest.fn().mockResolvedValue({ nodes: [{ name: 'In Progress', id: 's1' }, { name: 'Done', id: 's2' }, { name: 'Triage', id: 's3' }] });
+
+jest.mock('@linear/sdk', () => ({
+    LinearClient: jest.fn().mockImplementation(() => ({
+        issue: jest.fn().mockResolvedValue({
+            team: Promise.resolve({
+                states: mockStates
+            })
+        }),
+        updateIssue: mockIssueUpdate,
+        createComment: mockCommentCreate
+    }))
+}));
+
+// Mock util.promisify
+
 describe('runAgent', () => {
     let mockGit: any;
     let mockCleanup: any;
@@ -112,7 +131,7 @@ describe('runAgent', () => {
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
 
-        const task = { ticketId: '123', title: 'Test', description: 'Desc' };
+        const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
 
         expect(mockSpawn).toHaveBeenCalledWith(
@@ -120,6 +139,18 @@ describe('runAgent', () => {
             expect.arrayContaining(['--model', 'opus-4-5']),
             expect.anything()
         );
+
+        expect(mockSpawn).toHaveBeenCalledWith(
+            '/usr/local/bin/claude',
+            expect.arrayContaining(['--model', 'sonnet-4-5']),
+            expect.objectContaining({ cwd: '/mock/workspace' })
+        );
+
+        expect(fsModule.readFile).toHaveBeenCalledWith(expect.stringContaining('CLAUDE.md'), 'utf-8');
+        
+        // Verify Linear calls
+        expect(mockIssueUpdate).toHaveBeenCalled();
+        expect(mockCommentCreate).toHaveBeenCalled();
     });
 
     it('should use CLAUDE_BIN_PATH from environment if provided', async () => {
