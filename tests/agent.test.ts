@@ -268,8 +268,6 @@ describe('runAgent', () => {
 
     describe('Loop Telemetry', () => {
         it('should create per-iteration spans with tool call metadata', async () => {
-            const toolsModule = require('../src/tools');
-
             mockMessagesCreate
                 .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
                 .mockResolvedValueOnce({
@@ -310,8 +308,6 @@ describe('runAgent', () => {
         });
 
         it('should track repeated file reads in telemetry', async () => {
-            const toolsModule = require('../src/tools');
-
             // Simulate reading same file multiple times
             mockMessagesCreate
                 .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Plan' }] })
