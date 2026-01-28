@@ -3,11 +3,52 @@ import { setupWorkspace } from "./workspace";
 import { runPolyglotValidation } from "./tools";
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 
-const execAsync = promisify(exec);
 const langfuse = new Langfuse();
+
+// --- HELPERS ---
+
+/**
+ * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
+ */
+function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+        // SECURITY: Use absolute path from env or fixed default to prevent injection
+        const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
+        
+        const child = spawn(CLAUDE_PATH, args, { 
+            cwd,
+            env: { 
+                ...process.env, 
+                // Fixed PATH for security, but allow common locations
+                PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY 
+            }
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+
+        child.on('close', (code) => {
+            if (code === 0) {
+                resolve({ stdout, stderr });
+            } else {
+                const err = new Error(`Claude CLI exited with code ${code}`);
+                (err as any).stdout = stdout;
+                (err as any).stderr = stderr;
+                reject(err);
+            }
+        });
+
+        child.on('error', (err) => {
+            reject(err);
+        });
+    });
+}
 
 // --- SECURITY GUARDRAILS ---
 const SECURITY_GUARDRAILS = `
@@ -73,10 +114,11 @@ Output format:
 <plan>Your detailed plan here</plan>
     `.trim();
 
-    const escapedPrompt = prompt.replaceAll('"', '\"');
-    const { stdout } = await execAsync(String.raw`claude -p "${escapedPrompt}" --model opus-4-5`);
+    // Planning phase: Opus creates the roadmap
+    const { stdout } = await runClaude(['-p', prompt, '--model', 'opus-4-5']);
     
-    const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+    const planRegex = /<plan>([\s\S]*?)<\/plan>/;
+    const planMatch = planRegex.exec(stdout);
     return planMatch ? planMatch[1].trim() : "No plan";
 }
 
@@ -95,8 +137,11 @@ Instructions:
 4. Do NOT commit.
     `.trim();
 
-    const escapedPrompt = prompt.replaceAll('"', '\"');
-    return await execAsync(String.raw`claude -p "${escapedPrompt}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
+    // Execution phase: Sonnet does the work using native CLI capabilities
+    return await runClaude(
+        ['-p', prompt, '--model', 'sonnet-4-5', '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob'],
+        workDir
+    );
 }
 
 export const runAgent = async (task: any) => {
