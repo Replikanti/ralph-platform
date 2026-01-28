@@ -418,6 +418,40 @@ kubectl create secret generic ralph-team-repos \
 LINEAR_TEAM_REPOS={"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}
 ```
 
+### Dynamic Mapping (Redis)
+
+You can manage repository mappings at runtime without redeploying or restarting the platform by using Redis.
+
+1. **Find your Redis connection string**:
+   ```bash
+   kubectl exec deployment/ralph-api -- printenv REDIS_URL
+   # Example output: redis://10.x.x.x:6379
+   ```
+
+2. **Launch a temporary debug pod**:
+   ```bash
+   kubectl run redis-client --rm -it --image=redis:alpine -- /bin/sh
+   ```
+
+3. **Connect and set the mapping**:
+   Inside the debug pod shell, use `redis-cli` with the IP/hostname from step 1:
+   ```bash
+   redis-cli -h 10.x.x.x
+   
+   # Set the mapping key
+   SET ralph:config:repos '{"TEAM_KEY":"https://github.com/org/repo_url"}'
+   
+   # Verify
+   GET ralph:config:repos
+   exit
+   ```
+
+4. **Precedence**:
+   Ralph resolves repositories in this order:
+   1. Redis key `ralph:config:repos`
+   2. Environment variable `LINEAR_TEAM_REPOS`
+   3. Environment variable `DEFAULT_REPO_URL`
+
 ### How it works
 
 1. Linear issue is created with label "Ralph" in team "FRONT"

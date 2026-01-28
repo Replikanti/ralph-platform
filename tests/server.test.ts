@@ -15,6 +15,7 @@ jest.mock('bullmq', () => ({
 jest.mock('ioredis', () => {
     return jest.fn().mockImplementation(() => ({
         on: jest.fn(),
+        get: jest.fn().mockResolvedValue(null), // Default to null (not found in Redis)
     }));
 });
 
