@@ -59,3 +59,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.linearWebhook }}
                   key: webhook-secret
+            - name: REPO_CONFIG_PATH
+              value: /etc/ralph/config/repos.json
+          volumeMounts:
+            - name: repo-config
+              mountPath: /etc/ralph/config
+              readOnly: true
+      volumes:
+        - name: repo-config
+          configMap:
+            name: {{ .Release.Name }}-repo-config

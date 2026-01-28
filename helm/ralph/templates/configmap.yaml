@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-repo-config
+data:
+  repos.json: |
+    {{- if .Values.teamRepos }}
+    {{- toJson .Values.teamRepos | nindent 4 }}
+    {{- else }}
+    {}
+    {{- end }}

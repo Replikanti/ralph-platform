@@ -92,9 +92,10 @@ resource "google_container_node_pool" "primary_nodes" {
   }
 
   node_config {
-    # e2-small (2 vCPU, 2GB RAM) is minimum for functional GKE
-    # e2-micro (1GB RAM) DOES NOT WORK - insufficient memory for system pods
-    machine_type = "e2-small"
+    # e2-medium (2 vCPU, 4GB RAM) provides enough allocatable memory (>3GB)
+    # for Ralph stack (API + 2 Workers + Redis + System pods)
+    # e2-small (2GB RAM) is insufficient due to system overhead
+    machine_type = "e2-medium"
 
     # COST OPTIMIZATION: Spot instances (60-91% discount)
     # Can be preempted with 30 seconds notice

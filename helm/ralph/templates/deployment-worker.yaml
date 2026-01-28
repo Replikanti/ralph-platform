@@ -68,7 +68,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.langfuse }}
                   key: host
+            - name: REPO_CONFIG_PATH
+              value: /etc/ralph/config/repos.json
       volumes:
         - name: workspaces
           emptyDir:
             sizeLimit: 10Gi
+        - name: repo-config
+          configMap:
+            name: {{ .Release.Name }}-repo-config
+

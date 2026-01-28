@@ -1,9 +1,15 @@
 import request from 'supertest';
-import { app } from '../src/server';
 import crypto from 'node:crypto';
+import { app } from '../src/server';
 
 const TEST_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.LINEAR_WEBHOOK_SECRET = TEST_SECRET;
+
+// Mock fs
+jest.mock('node:fs/promises', () => ({
+    stat: jest.fn().mockResolvedValue({ mtimeMs: 1000 }),
+    readFile: jest.fn().mockResolvedValue('{}')
+}));
 
 // Mock BullMQ and IORedis
 jest.mock('bullmq', () => ({
