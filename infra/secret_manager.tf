@@ -85,6 +85,20 @@ resource "google_secret_manager_secret_version" "linear_secret" {
   secret_data = var.linear_webhook_secret != "" ? var.linear_webhook_secret : "PLACEHOLDER"
 }
 
+# Linear API Key
+resource "google_secret_manager_secret" "linear_api_key" {
+  secret_id = "ralph-linear-api-key"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "linear_api_key" {
+  secret      = google_secret_manager_secret.linear_api_key.id
+  secret_data = var.linear_api_key != "" ? var.linear_api_key : "lin_api_PLACEHOLDER"
+}
+
 # Redis URL (computed from Redis instance)
 resource "google_secret_manager_secret" "redis_url" {
   secret_id = "ralph-redis-url"

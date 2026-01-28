@@ -10,8 +10,8 @@ github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Application secrets (optional - leave empty to use placeholders)
 # You can update these values later in GCP Secret Manager
-anthropic_api_key     = ""  # Anthropic API key for Claude
-langfuse_public_key   = ""  # Langfuse public key for tracing
-langfuse_secret_key   = ""  # Langfuse secret key for tracing
-langfuse_host         = ""  # Langfuse host (defaults to https://cloud.langfuse.com)
-linear_webhook_secret = ""  # Linear webhook HMAC secret
+anthropic_api_key     = "sk-ant-xxxxx"  # or leave empty
+langfuse_public_key   = "pk-lf-xxxxx"   # or leave empty
+langfuse_secret_key   = "sk-lf-xxxxx"   # or leave empty
+linear_webhook_secret = "xxxxx"         # or leave empty
+linear_api_key        = "lin_api_xxxxx" # or leave empty

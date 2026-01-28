@@ -86,6 +86,13 @@ variable "linear_webhook_secret" {
   default     = ""
 }
 
+variable "linear_api_key" {
+  description = "Linear API key for status updates and comments (optional, defaults to placeholder)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "master_authorized_networks" {
   description = "List of CIDR blocks to allow access to the GKE master endpoint"
   type = list(object({
