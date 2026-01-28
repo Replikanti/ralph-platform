@@ -66,3 +66,17 @@ variable "linear_webhook_secret" {
   sensitive   = true
   default     = ""
 }
+
+variable "master_authorized_networks" {
+  description = "List of CIDR blocks to allow access to the GKE master endpoint"
+  type = list(object({
+    cidr_block   = string
+    display_name = string
+  }))
+  default = [
+    {
+      cidr_block   = "0.0.0.0/0"
+      display_name = "Public (All)"
+    }
+  ]
+}

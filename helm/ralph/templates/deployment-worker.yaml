@@ -28,6 +28,7 @@ spec:
             requests:
               cpu: {{ .Values.resources.worker.requests.cpu }}
               memory: {{ .Values.resources.worker.requests.memory }}
+              ephemeral-storage: "1Gi"
             limits:
               cpu: {{ .Values.resources.worker.limits.cpu }}
               memory: {{ .Values.resources.worker.limits.memory }}

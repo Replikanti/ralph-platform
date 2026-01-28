@@ -169,6 +169,139 @@ async function loadRepoSkills(workDir: string): Promise<string> {
     return skillText;
 }
 
+async function handleToolCall(workDir: string, block: any, iterTracker: any) {
+    const input = block.input as any;
+    let result = "";
+    const toolStart = Date.now();
+    let success = true;
+
+    console.log(`🛠️ [Agent] Tool Call: ${block.name}`);
+
+    try {
+        switch (block.name) {
+            case 'list_files':
+                result = await listFiles(workDir, input.path);
+                break;
+            case 'read_file':
+                result = await readFile(workDir, input.path);
+                break;
+            case 'write_file':
+                result = await writeFile(workDir, input.path, input.content);
+                break;
+            case 'run_command':
+                result = await runCommand(workDir, input.command);
+                break;
+            default:
+                result = `Error: Unknown tool ${block.name}`;
+                success = false;
+        }
+    } catch (e: any) {
+        result = `Error executing tool: ${e.message}`;
+        success = false;
+    }
+
+    // Record tool call metrics
+    iterTracker.recordToolCall({
+        name: block.name,
+        path: input.path,
+        command: input.command,
+        durationMs: Date.now() - toolStart,
+        success
+    });
+
+    return {
+        type: "tool_result" as const,
+        tool_use_id: block.id,
+        content: result
+    };
+}
+
+async function runCodingLoop(
+    trace: any, 
+    systemPrompt: string, 
+    workDir: string, 
+    plan: string, 
+    collector: any
+): Promise<string> {
+    const execSpan = trace.span({ name: "Coding", model: "claude-sonnet-4-5" });
+    const MAX_ITERATIONS = 15;
+    let finalOutput = "";
+    let messages: any[] = [
+        { role: "user", content: `Plan: ${plan}\nWorkspace: ${workDir}\n\nImplement this plan using the available tools.` }
+    ];
+
+    try {
+        for (let i = 0; i < MAX_ITERATIONS; i++) {
+            const iterTracker = collector.startIteration(i);
+            const iterSpan = trace.span({
+                name: "LoopIteration",
+                metadata: { iteration: i + 1 }
+            });
+
+            console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_ITERATIONS}`);
+
+            const response = await anthropic.messages.create({
+                model: "claude-sonnet-4-5",
+                max_tokens: 4000,
+                system: systemPrompt,
+                tools: agentTools as any,
+                messages: messages
+            });
+
+            messages.push({ role: "assistant", content: response.content });
+
+            const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+
+            if (toolUseBlocks.length === 0) {
+                const textBlock = response.content.find(b => b.type === 'text');
+                finalOutput = textBlock ? textBlock.text : "No output";
+                console.log("✅ [Agent] Finished execution loop.");
+                collector.setFinishReason('NO_TOOL_USE');
+                iterSpan.end({ metadata: { tool_calls: 0, finish: true } });
+                iterTracker.endIteration();
+                break;
+            }
+
+            const toolResults = [];
+            for (const block of toolUseBlocks) {
+                const result = await handleToolCall(workDir, block, iterTracker);
+                toolResults.push(result);
+            }
+
+            messages.push({ role: "user", content: toolResults });
+
+            iterSpan.end({
+                metadata: {
+                    tool_calls: toolUseBlocks.length,
+                    tool_names: toolUseBlocks.map(b => b.name)
+                }
+            });
+            iterTracker.endIteration();
+
+            if (i === MAX_ITERATIONS - 1) {
+                collector.setFinishReason('MAX_ITERATIONS');
+                console.warn(`⚠️ [Agent] Reached max iterations (${MAX_ITERATIONS})`);
+            }
+        }
+    } catch (loopError: any) {
+        collector.setFinishReason('ERROR');
+        throw loopError;
+    } finally {
+        execSpan.end({
+            output: finalOutput,
+            metadata: {
+                iterations_used: collector.telemetry.totalIterations,
+                finish_reason: collector.telemetry.finishReason,
+                tool_calls_total: Object.values(collector.telemetry.toolCallsByName).reduce((a: any, b: any) => (a as number) + (b as number), 0),
+                tool_calls_by_name: collector.telemetry.toolCallsByName,
+                repeated_reads_count: Object.values(collector.telemetry.repeatedReads).filter((c: any) => (c as number) > 1).length,
+                repeated_commands_count: Object.values(collector.telemetry.repeatedCommands).filter((c: any) => (c as number) > 1).length
+            }
+        });
+    }
+    return finalOutput;
+}
+
 // Trace Wrapper
 async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Promise<T>) {
     const trace = langfuse.trace({ name, metadata });
@@ -195,133 +328,8 @@ export const runAgent = async (task: any) => {
             planSpan.end({ output: plan });
 
             // 2. EXECUTE (Sonnet) - Agentic Loop with Telemetry
-            const execSpan = trace.span({ name: "Coding", model: "claude-sonnet-4-5" });
-
-            let messages: any[] = [
-                { role: "user", content: `Plan: ${plan}\nWorkspace: ${workDir}\n\nImplement this plan using the available tools.` }
-            ];
-
-            const MAX_ITERATIONS = 15;
-            let finalOutput = "";
-
             const collector = createTelemetryCollector();
-
-            try {
-                for (let i = 0; i < MAX_ITERATIONS; i++) {
-                    const iterTracker = collector.startIteration(i);
-
-                    // Create per-iteration span in Langfuse
-                    const iterSpan = trace.span({
-                        name: "LoopIteration",
-                        metadata: { iteration: i + 1 }
-                    });
-
-                    console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_ITERATIONS}`);
-
-                    const response = await anthropic.messages.create({
-                        model: "claude-sonnet-4-5",
-                        max_tokens: 4000,
-                        system: systemPrompt,
-                        tools: agentTools as any,
-                        messages: messages
-                    });
-
-                    messages.push({ role: "assistant", content: response.content });
-
-                    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-
-                    if (toolUseBlocks.length === 0) {
-                        const textBlock = response.content.find(b => b.type === 'text');
-                        finalOutput = textBlock ? textBlock.text : "No output";
-                        console.log("✅ [Agent] Finished execution loop.");
-                        collector.setFinishReason('NO_TOOL_USE');
-                        iterSpan.end({ metadata: { tool_calls: 0, finish: true } });
-                        iterTracker.endIteration();
-                        break;
-                    }
-
-                    const toolResults = [];
-                    for (const block of toolUseBlocks) {
-                        const input = block.input as any;
-                        let result = "";
-                        const toolStart = Date.now();
-                        let success = true;
-
-                        console.log(`🛠️ [Agent] Tool Call: ${block.name}`);
-
-                        try {
-                            switch (block.name) {
-                                case 'list_files':
-                                    result = await listFiles(workDir, input.path);
-                                    break;
-                                case 'read_file':
-                                    result = await readFile(workDir, input.path);
-                                    break;
-                                case 'write_file':
-                                    result = await writeFile(workDir, input.path, input.content);
-                                    break;
-                                case 'run_command':
-                                    result = await runCommand(workDir, input.command);
-                                    break;
-                                default:
-                                    result = `Error: Unknown tool ${block.name}`;
-                                    success = false;
-                            }
-                        } catch (e: any) {
-                            result = `Error executing tool: ${e.message}`;
-                            success = false;
-                        }
-
-                        // Record tool call metrics
-                        iterTracker.recordToolCall({
-                            name: block.name,
-                            path: input.path,
-                            command: input.command,
-                            durationMs: Date.now() - toolStart,
-                            success
-                        });
-
-                        toolResults.push({
-                            type: "tool_result",
-                            tool_use_id: block.id,
-                            content: result
-                        });
-                    }
-
-                    messages.push({ role: "user", content: toolResults });
-
-                    // End iteration span with metrics
-                    iterSpan.end({
-                        metadata: {
-                            tool_calls: toolUseBlocks.length,
-                            tool_names: toolUseBlocks.map(b => b.name)
-                        }
-                    });
-                    iterTracker.endIteration();
-
-                    // Check if we hit max iterations
-                    if (i === MAX_ITERATIONS - 1) {
-                        collector.setFinishReason('MAX_ITERATIONS');
-                        console.warn(`⚠️ [Agent] Reached max iterations (${MAX_ITERATIONS})`);
-                    }
-                }
-            } catch (loopError: any) {
-                collector.setFinishReason('ERROR');
-                throw loopError;
-            }
-
-            // End coding span with telemetry summary
-            execSpan.end({
-                output: finalOutput,
-                metadata: {
-                    iterations_used: collector.telemetry.totalIterations,
-                    finish_reason: collector.telemetry.finishReason,
-                    tool_calls_total: Object.values(collector.telemetry.toolCallsByName).reduce((a, b) => a + b, 0),
-                    tool_calls_by_name: collector.telemetry.toolCallsByName,
-                    repeated_reads_count: Object.values(collector.telemetry.repeatedReads).filter(c => c > 1).length,
-                    repeated_commands_count: Object.values(collector.telemetry.repeatedCommands).filter(c => c > 1).length
-                }
-            });
+            const finalOutput = await runCodingLoop(trace, systemPrompt, workDir, plan, collector);
 
             // 3. VALIDATE (Polyglot)
             const valSpan = trace.span({ name: "Validation" });
