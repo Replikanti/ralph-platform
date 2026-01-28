@@ -75,6 +75,10 @@ describe('runAgent', () => {
             git: mockGit,
             cleanup: mockCleanup,
         });
+        (workspaceModule.parseRepoUrl as jest.Mock).mockReturnValue({
+            owner: 'owner',
+            repo: 'repo'
+        });
 
         const toolsModule = require('../src/tools');
         (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
@@ -93,7 +97,8 @@ describe('runAgent', () => {
         // Default exec behavior
         mockExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
-            callback(null, { stdout: '', stderr: '' });
+            if (callback) callback(null, { stdout: '', stderr: '' });
+            return Promise.resolve({ stdout: '', stderr: '' });
         });
 
         // Setup Langfuse Mock
@@ -164,7 +169,7 @@ describe('runAgent', () => {
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>X</plan>')); })
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Y')); });
 
-        await runAgent({ ticketId: 'custom', title: 'Custom Path' });
+        await runAgent({ ticketId: 'custom', title: 'Custom Path', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
         expect(mockSpawn).toHaveBeenCalledWith(
             '/custom/path/claude',
@@ -185,7 +190,7 @@ describe('runAgent', () => {
             if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
         });
 
-        await runAgent({ ticketId: 'retry', title: 'Retry Task' });
+        await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
         expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
@@ -200,8 +205,11 @@ describe('runAgent', () => {
             if (event === 'data') cb(Buffer.from('<plan>Fail</plan>'));
         });
 
-        const task = { ticketId: '1', title: 'Validation Fail' };
+        const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
         expect(mockGit.commit).toHaveBeenCalledWith(expect.stringContaining('wip:'));
+        expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
+            title: expect.stringContaining('wip:')
+        }));
     });
 });

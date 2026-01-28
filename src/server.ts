@@ -130,9 +130,16 @@ app.post('/webhook', async (req, res) => {
     const { action, data, type } = req.body;
     
     // Filter: Only issues with label "Ralph"
-    const hasRalphLabel = data.labels?.some((l: any) => l.name.toLowerCase() === 'ralph');
+    const labels = data.labels || [];
+    const labelNames = labels.map((l: any) => l.name);
+    const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
 
-    if (type === 'Issue' && (action === 'create' || action === 'update') && hasRalphLabel) {
+    if (type === 'Issue' && (action === 'create' || action === 'update')) {
+        if (!hasRalphLabel) {
+            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`);
+            return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
+        }
+
         const teamKey = data.team?.key;
         const repoUrl = await getRepoForTeam(teamKey);
 
@@ -142,22 +149,31 @@ app.post('/webhook', async (req, res) => {
         }
 
         console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
-        await ralphQueue.add('coding-task', {
-            ticketId: data.id,
-            title: data.title,
-            description: data.description,
-            repoUrl,
-            branchName: `ralph/feat-${data.identifier}`
-        }, {
-            attempts: 3,
-            backoff: {
-                type: 'exponential',
-                delay: 2000
-            },
-            removeOnComplete: true,
-            removeOnFail: false
-        });
-        res.status(200).send({ status: 'queued' });
+        
+        // Use data.id as jobId for deduplication. 
+        // BullMQ will ignore duplicates if a job with this ID is already waiting or active.
+        try {
+            await ralphQueue.add('coding-task', {
+                ticketId: data.id,
+                title: data.title,
+                description: data.description,
+                repoUrl,
+                branchName: `ralph/feat-${data.identifier}`
+            }, {
+                jobId: data.id, 
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 2000
+                },
+                removeOnComplete: true,
+                removeOnFail: false
+            });
+            res.status(200).send({ status: 'queued' });
+        } catch (e) {
+            console.error("❌ [API] Failed to add job to queue:", e);
+            res.status(500).send({ error: 'queue_failed' });
+        }
     } else {
         res.status(200).send({ status: 'ignored' });
     }

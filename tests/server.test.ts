@@ -65,7 +65,10 @@ describe('POST /webhook', () => {
         const body = { 
             type: 'Issue', 
             action: 'create', 
-            data: { labels: [{ name: 'bug' }] } 
+            data: { 
+                identifier: 'TEST-1',
+                labels: [{ name: 'bug' }] 
+            } 
         };
         const res = await request(app)
             .post('/webhook')
@@ -73,7 +76,7 @@ describe('POST /webhook', () => {
             .send(body);
         
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ status: 'ignored' });
+        expect(res.body).toEqual({ status: 'ignored', reason: 'no_ralph_label' });
     });
 
     it('should queue task for valid Ralph issue with DEFAULT_REPO_URL', async () => {
