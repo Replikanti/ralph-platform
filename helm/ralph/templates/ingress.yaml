@@ -25,7 +25,7 @@ spec:
               service:
                 name: {{ include "ralph.fullname" $ }}-api
                 port:
-                  number: 3000
+                  number: 80
           {{- end }}
     {{- end }}
   {{- if .Values.ingress.tls }}
