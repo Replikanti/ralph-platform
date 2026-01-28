@@ -117,7 +117,8 @@ Output format:
     // Planning phase: Opus creates the roadmap
     const { stdout } = await runClaude(['-p', prompt, '--model', 'opus-4-5']);
     
-    const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+    const planRegex = /<plan>([\s\S]*?)<\/plan>/;
+    const planMatch = planRegex.exec(stdout);
     return planMatch ? planMatch[1].trim() : "No plan";
 }
 
