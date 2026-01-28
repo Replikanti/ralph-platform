@@ -1,13 +1,11 @@
+process.env.LINEAR_API_KEY = 'test-key';
+
 import { createWorker, jobProcessor } from '../src/worker';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { runAgent } from '../src/agent';
 
-process.env.LINEAR_API_KEY = 'test-key';
-
 jest.mock('bullmq');
-jest.mock('ioredis');
-jest.mock('../src/agent');
 jest.mock('ioredis');
 jest.mock('../src/agent');
 

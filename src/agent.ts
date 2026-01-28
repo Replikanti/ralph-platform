@@ -18,7 +18,7 @@ async function updateLinearIssue(issueId: string, statusName: string, comment?: 
         if (!team) return;
 
         const states = await team.states();
-        const targetState = states.nodes.find(s => s.name.toLowerCase() === statusName.toLowerCase());
+        const targetState = states.nodes.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase());
 
         if (targetState) {
             await linear.updateIssue(issueId, { stateId: targetState.id });
