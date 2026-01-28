@@ -54,3 +54,14 @@ securityContext:
 
 scaling:
   workerReplicas: 2
+
+# External Secrets Operator configuration
+externalSecrets:
+  enabled: true
+  # GCP project ID where secrets are stored
+  gcpProjectID: "langfuse-platform"
+  # GKE cluster location and name for Workload Identity
+  clusterLocation: "europe-west1-b"
+  clusterName: "ralph-cluster"
+  # Kubernetes service account that ESO uses (must match ESO installation)
+  serviceAccountName: "external-secrets"

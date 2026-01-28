@@ -7,3 +7,11 @@ zone         = "europe-west1-a"
 github_owner = "Replikanti"
 github_repo  = "ralph-platform"
 github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Application secrets (optional - leave empty to use placeholders)
+# You can update these values later in GCP Secret Manager
+anthropic_api_key     = ""  # Anthropic API key for Claude
+langfuse_public_key   = ""  # Langfuse public key for tracing
+langfuse_secret_key   = ""  # Langfuse secret key for tracing
+langfuse_host         = ""  # Langfuse host (defaults to https://cloud.langfuse.com)
+linear_webhook_secret = ""  # Linear webhook HMAC secret

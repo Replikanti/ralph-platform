@@ -47,3 +47,30 @@ output "github_secrets_guide" {
     REDIS_URL: redis://${google_redis_instance.cache.host}:${google_redis_instance.cache.port}
   EOT
 }
+
+# External Secrets Operator outputs
+output "external_secrets_service_account" {
+  description = "The service account email for External Secrets Operator"
+  value       = google_service_account.external_secrets.email
+}
+
+output "external_secrets_setup_guide" {
+  description = "Guide for setting up External Secrets Operator"
+  value = <<-EOT
+    External Secrets Operator Setup:
+
+    1. Install ESO via Helm:
+       helm repo add external-secrets https://charts.external-secrets.io
+       helm repo update
+       helm install external-secrets external-secrets/external-secrets \
+         --namespace external-secrets \
+         --create-namespace \
+         --set serviceAccount.annotations."iam\.gke\.io/gcp-service-account"=${google_service_account.external_secrets.email}
+
+    2. Secrets are automatically created in GCP Secret Manager
+    3. ESO will sync them to Kubernetes as defined in helm/ralph/templates/external-secrets.yaml
+
+    GCP Project: ${var.project_id}
+    ESO Service Account: ${google_service_account.external_secrets.email}
+  EOT
+}
