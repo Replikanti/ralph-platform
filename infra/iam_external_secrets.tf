@@ -16,8 +16,9 @@ resource "google_project_iam_member" "external_secrets_secret_accessor" {
 
 # Allow ESO Kubernetes service account to impersonate GCP service account
 # via Workload Identity
+# Note: ServiceAccount is created by Helm chart in the 'default' namespace
 resource "google_service_account_iam_member" "external_secrets_workload_identity" {
   service_account_id = google_service_account.external_secrets.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[default/external-secrets]"
 }
