@@ -437,14 +437,19 @@ Ralph will detect the change in the mounted ConfigMap and update Redis automatic
 
 **Option B: Manual Redis Override (Temporary)**
 You can force a configuration change immediately via Redis (will be overwritten if ConfigMap changes):
-```bash
-# 1. Connect to Redis (via debug pod)
-kubectl run redis-client --rm -it --image=redis:alpine -- /bin/sh
-redis-cli -h ralph-redis-master
-
-# 2. Set config manually
-SET ralph:config:repos '{"FRONT":"https://github.com/new/frontend"}'
-```
+3. **Connect and set the mapping**:
+   Inside the debug pod shell, use `redis-cli` with the IP/hostname from step 1 (do not use 'localhost', use the internal IP):
+   ```bash
+   redis-cli -h 10.x.x.x
+   
+   # Set the mapping key
+   SET ralph:config:repos '{"FRONT":"https://github.com/new/frontend"}'
+   
+   # Verify configuration
+   GET ralph:config:repos
+   
+   exit
+   ```
 
 #### Precedence
 1. Redis Cache (checked first)
