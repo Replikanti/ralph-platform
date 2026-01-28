@@ -44,16 +44,20 @@ resources:
       storage: "10Gi"
 
 ingress:
-  enabled: false
-  className: ""
-  annotations: {}
+  enabled: true
+  className: "gce"
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: "ralph-static-ip"
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
-    - host: ralph.local
+    - host: "" # Empty host accepts IP address access (for now)
       paths:
-        - path: /
-          pathType: Prefix
+        - path: /*
+          pathType: ImplementationSpecific
+
+service:
+  type: NodePort
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:

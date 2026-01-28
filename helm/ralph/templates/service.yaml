@@ -1,11 +1,16 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-api
+  name: {{ include "ralph.fullname" . }}-api
+  labels:
+    {{- include "ralph.labels" . | nindent 4 }}
+    app: ralph-api
 spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
   selector:
     app: ralph-api
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 3000
