@@ -32,6 +32,37 @@ async function updateLinearIssue(issueId: string, statusName: string, comment?: 
     }
 }
 
+async function createPullRequest(repoUrl: string, branchName: string, title: string, body: string) {
+    const { owner, repo } = parseRepoUrl(repoUrl);
+    try {
+        const { Octokit } = await import("@octokit/rest");
+        const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+        const response = await octokit.rest.pulls.create({
+            owner,
+            repo,
+            title,
+            body,
+            head: branchName,
+            base: 'main', // Assuming main is the default branch
+        });
+        return response.data.html_url;
+    } catch (e: any) {
+        if (e.message?.includes('A pull request already exists')) {
+            const { Octokit } = await import("@octokit/rest");
+            const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+            const prs = await octokit.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${branchName}`,
+                state: 'open'
+            });
+            return prs.data[0]?.html_url;
+        }
+        console.error("❌ [Agent] Failed to create Pull Request:", e.message);
+        return null;
+    }
+}
+
 /**
  * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
  */
@@ -213,8 +244,13 @@ export const runAgent = async (task: any) => {
                     await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName, ['--force']);
                     
                     // Update Linear to "Done" (or "In Review") and post PR link
-                    // Note: branch name is used here, but in a real scenario we'd use the PR URL
                     await updateLinearIssue(task.ticketId, "Done", `✅ Task completed successfully.\n\nChanges pushed to branch: ${task.branchName}`);
+
+                    // Create Pull Request (Awaited to ensure it finishes)
+                    const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
+                    if (prUrl) {
+                        console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
+                    }
                     
                     return;
                 }
@@ -226,6 +262,12 @@ export const runAgent = async (task: any) => {
             // Final fallback if all retries fail
             await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName, ['--force']);
             await updateLinearIssue(task.ticketId, "Triage", `❌ Task failed validation after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
+            
+            // Create WIP Pull Request even if validation failed (Awaited)
+            const prUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after multiple attempts.\n\nErrors:\n${previousErrors}`);
+            if (prUrl) {
+                console.log(`🚀 [Agent] WIP Pull Request created: ${prUrl}`);
+            }
 
         } finally { cleanup(); }
     });
