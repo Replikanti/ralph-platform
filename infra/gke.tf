@@ -23,6 +23,16 @@ resource "google_container_cluster" "primary" {
     enabled = true
   }
 
+  # Addons Configuration
+  addons_config {
+    http_load_balancing {
+      disabled = false
+    }
+    horizontal_pod_autoscaling {
+      disabled = false
+    }
+  }
+
   # Network references (must be defined in vpc.tf)
   network    = google_compute_network.main.id
   subnetwork = google_compute_subnetwork.main.id
