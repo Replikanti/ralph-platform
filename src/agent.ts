@@ -21,8 +21,10 @@ function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stde
             cwd,
             env: { 
                 ...process.env, 
-                // Fixed PATH for security, but allow common locations
+                // Fixed PATH for security
                 PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                // Set HOME to a writable directory for Claude config/cache
+                HOME: '/tmp',
                 ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY 
             }
         });
