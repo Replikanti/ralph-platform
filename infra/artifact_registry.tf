@@ -9,14 +9,20 @@ resource "google_artifact_registry_repository" "gcr" {
   mode          = "STANDARD_REPOSITORY"
 
   # Cleanup policy to avoid unbounded storage costs
+  # Keep only the last 10 versions, delete older untagged images
   cleanup_policies {
-    id     = "keep-last-10-versions"
+    id     = "delete-untagged"
     action = "DELETE"
 
     condition {
       tag_state  = "UNTAGGED"
       older_than = "2592000s"  # 30 days
     }
+  }
+
+  cleanup_policies {
+    id     = "keep-last-versions"
+    action = "KEEP"
 
     most_recent_versions {
       keep_count = 10
