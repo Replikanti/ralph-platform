@@ -8,7 +8,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir --break-system-packages ruff mypy uv && \
     npm install -g @biomejs/biome typescript tsx && \
-    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
+    curl -fsSL https://claude.ai/install.sh | bash && \
+    mv /root/.local/bin/claude /usr/local/bin/claude
 
 # Build App
 COPY package*.json ./

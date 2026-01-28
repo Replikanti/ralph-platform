@@ -1,308 +1,43 @@
-import { Anthropic } from "@anthropic-ai/sdk";
 import { Langfuse } from "langfuse";
 import { setupWorkspace } from "./workspace";
-import { 
-    runPolyglotValidation, 
-    agentTools, 
-    listFiles, 
-    readFile, 
-    writeFile, 
-    runCommand 
-} from "./tools";
+import { runPolyglotValidation } from "./tools";
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 
-const anthropic = new Anthropic();
+const execAsync = promisify(exec);
 const langfuse = new Langfuse();
 
-// --- TELEMETRY TYPES ---
-interface ToolCallMetrics {
-    name: string;
-    path?: string;        // For file operations
-    command?: string;     // For run_command (sanitized)
-    durationMs: number;
-    success: boolean;
-}
-
-interface IterationMetrics {
-    iteration: number;
-    toolCalls: ToolCallMetrics[];
-    durationMs: number;
-}
-
-interface LoopTelemetry {
-    iterations: IterationMetrics[];
-    totalIterations: number;
-    finishReason: 'NO_TOOL_USE' | 'MAX_ITERATIONS' | 'ERROR';
-    toolCallsByName: Record<string, number>;
-    repeatedReads: Record<string, number>;    // path -> count
-    repeatedCommands: Record<string, number>; // command -> count
-    totalDurationMs: number;
-}
-
-// --- TELEMETRY HELPERS ---
-function createTelemetryCollector(): {
-    telemetry: LoopTelemetry;
-    startIteration: (i: number) => { endIteration: () => void; recordToolCall: (metrics: ToolCallMetrics) => void };
-    setFinishReason: (reason: LoopTelemetry['finishReason']) => void;
-} {
-    const telemetry: LoopTelemetry = {
-        iterations: [],
-        totalIterations: 0,
-        finishReason: 'NO_TOOL_USE',
-        toolCallsByName: {},
-        repeatedReads: {},
-        repeatedCommands: {},
-        totalDurationMs: 0
-    };
-
-    const loopStart = Date.now();
-
-    return {
-        telemetry,
-        startIteration: (i: number) => {
-            const iterStart = Date.now();
-            const iterMetrics: IterationMetrics = {
-                iteration: i + 1,
-                toolCalls: [],
-                durationMs: 0
-            };
-
-            return {
-                endIteration: () => {
-                    iterMetrics.durationMs = Date.now() - iterStart;
-                    telemetry.iterations.push(iterMetrics);
-                    telemetry.totalIterations = i + 1;
-                    telemetry.totalDurationMs = Date.now() - loopStart;
-                },
-                recordToolCall: (metrics: ToolCallMetrics) => {
-                    iterMetrics.toolCalls.push(metrics);
-
-                    // Aggregate by tool name
-                    telemetry.toolCallsByName[metrics.name] =
-                        (telemetry.toolCallsByName[metrics.name] || 0) + 1;
-
-                    // Track repeated reads
-                    if (metrics.name === 'read_file' && metrics.path) {
-                        telemetry.repeatedReads[metrics.path] =
-                            (telemetry.repeatedReads[metrics.path] || 0) + 1;
-                    }
-
-                    // Track repeated commands
-                    if (metrics.name === 'run_command' && metrics.command) {
-                        telemetry.repeatedCommands[metrics.command] =
-                            (telemetry.repeatedCommands[metrics.command] || 0) + 1;
-                    }
-                }
-            };
-        },
-        setFinishReason: (reason) => {
-            telemetry.finishReason = reason;
-        }
-    };
-}
-
-async function writeTelemetryArtifact(
-    workDir: string,
-    telemetry: LoopTelemetry,
-    validationSuccess: boolean
-): Promise<void> {
-    const artifactDir = path.join(workDir, '.ralph', 'telemetry');
-    const artifactPath = path.join(artifactDir, 'last_run.json');
-
-    // Filter to top repeated items (no sensitive data)
-    const artifact = {
-        timestamp: new Date().toISOString(),
-        iterations_used: telemetry.totalIterations,
-        finish_reason: telemetry.finishReason,
-        total_duration_ms: telemetry.totalDurationMs,
-        tool_calls_by_name: telemetry.toolCallsByName,
-        top_repeated_reads: Object.entries(telemetry.repeatedReads)
-            .filter(([_, count]) => count > 1)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([path, count]) => ({ path, count })),
-        top_repeated_commands: Object.entries(telemetry.repeatedCommands)
-            .filter(([_, count]) => count > 1)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([command, count]) => ({ command, count })),
-        validation_success: validationSuccess
-    };
-
-    try {
-        await fs.mkdir(artifactDir, { recursive: true });
-        await fs.writeFile(artifactPath, JSON.stringify(artifact, null, 2), 'utf-8');
-    } catch (e) {
-        console.warn(`⚠️ [Agent] Could not write telemetry artifact: ${e}`);
-    }
-}
-
-// --- IMMUTABLE SECURITY LAYER ---
+// --- SECURITY GUARDRAILS ---
 const SECURITY_GUARDRAILS = `
-### 🛡️ CRITICAL SECURITY RULES (OVERRIDE ALL)
-1. NO SECRETS: Never output API keys or tokens.
-2. NO DESTRUCTION: Do not delete config files or infrastructure.
-3. SANDBOX: Only modify files inside the workspace.
-4. DEPENDENCIES: Do not install unverified packages.
-`;
+### 🛡️ SECURITY RULES
+1. NO SECRETS: Never output API keys.
+2. SANDBOX: Only modify files inside the workspace.
+`.trim();
 
-// --- MUTABLE SKILL LAYER ---
-async function loadRepoSkills(workDir: string): Promise<string> {
+// --- SKILLS MANAGEMENT ---
+async function getAvailableSkills(workDir: string): Promise<string[]> {
     const skillsDir = path.join(workDir, '.ralph', 'skills');
-    let skillText = "";
     try {
-        await fs.access(skillsDir);
         const files = await fs.readdir(skillsDir);
-        for (const file of files) {
-            if (file.endsWith('.md')) {
-                const content = await fs.readFile(path.join(skillsDir, file), 'utf-8');
-                skillText += `\n\n--- REPO SKILL: ${file.toUpperCase()} ---\n${content}`;
-            }
-        }
-    } catch (error_: any) { 
-        if (error_.code === 'ENOENT') {
-            return ""; 
-        }
-        console.error("Unexpected error loading repository skills:", error_);
+        return files.filter(f => f.endsWith('.md'));
+    } catch { return []; }
+}
+
+async function loadSelectedSkills(workDir: string, selectedFiles: string[]): Promise<string> {
+    let skillText = "";
+    const skillsDir = path.join(workDir, '.ralph', 'skills');
+    for (const file of selectedFiles) {
+        try {
+            const content = await fs.readFile(path.join(skillsDir, file), 'utf-8');
+            skillText += `\n\n--- SKILL: ${file.toUpperCase()} ---\n${content}`;
+        } catch { /* ignore missing */ }
     }
     return skillText;
 }
 
-async function handleToolCall(workDir: string, block: any, iterTracker: any) {
-    const input = block.input;
-    let result = "";
-    const toolStart = Date.now();
-    let success = true;
-
-    console.log(`🛠️ [Agent] Tool Call: ${block.name}`);
-
-    try {
-        switch (block.name) {
-            case 'list_files':
-                result = await listFiles(workDir, input.path);
-                break;
-            case 'read_file':
-                result = await readFile(workDir, input.path);
-                break;
-            case 'write_file':
-                result = await writeFile(workDir, input.path, input.content);
-                break;
-            case 'run_command':
-                result = await runCommand(workDir, input.command);
-                break;
-            default:
-                result = `Error: Unknown tool ${block.name}`;
-                success = false;
-        }
-    } catch (e: any) {
-        result = `Error executing tool: ${e.message}`;
-        success = false;
-    }
-
-    // Record tool call metrics
-    iterTracker.recordToolCall({
-        name: block.name,
-        path: input.path,
-        command: input.command,
-        durationMs: Date.now() - toolStart,
-        success
-    });
-
-    return {
-        type: "tool_result",
-        tool_use_id: block.id,
-        content: result
-    };
-}
-
-async function runCodingLoop(
-    trace: any, 
-    systemPrompt: string, 
-    workDir: string, 
-    plan: string, 
-    collector: any
-): Promise<string> {
-    const execSpan = trace.span({ name: "Coding", model: "claude-sonnet-4-5" });
-    const MAX_ITERATIONS = 15;
-    let finalOutput = "";
-    let messages: any[] = [
-        { role: "user", content: `Plan: ${plan}\nWorkspace: ${workDir}\n\nImplement this plan using the available tools.` }
-    ];
-
-    try {
-        for (let i = 0; i < MAX_ITERATIONS; i++) {
-            const iterTracker = collector.startIteration(i);
-            const iterSpan = trace.span({
-                name: "LoopIteration",
-                metadata: { iteration: i + 1 }
-            });
-
-            console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_ITERATIONS}`);
-
-            const response = await anthropic.messages.create({
-                model: "claude-sonnet-4-5",
-                max_tokens: 4000,
-                system: systemPrompt,
-                tools: agentTools as any,
-                messages: messages
-            });
-
-            messages.push({ role: "assistant", content: response.content });
-
-            const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-
-            if (toolUseBlocks.length === 0) {
-                const textBlock = response.content.find(b => b.type === 'text');
-                finalOutput = textBlock ? textBlock.text : "No output";
-                console.log("✅ [Agent] Finished execution loop.");
-                collector.setFinishReason('NO_TOOL_USE');
-                iterSpan.end({ metadata: { tool_calls: 0, finish: true } });
-                iterTracker.endIteration();
-                break;
-            }
-
-            const toolResults = [];
-            for (const block of toolUseBlocks) {
-                const result = await handleToolCall(workDir, block, iterTracker);
-                toolResults.push(result);
-            }
-
-            messages.push({ role: "user", content: toolResults });
-
-            iterSpan.end({
-                metadata: {
-                    tool_calls: toolUseBlocks.length,
-                    tool_names: toolUseBlocks.map(b => b.name)
-                }
-            });
-            iterTracker.endIteration();
-
-            if (i === MAX_ITERATIONS - 1) {
-                collector.setFinishReason('MAX_ITERATIONS');
-                console.warn(`⚠️ [Agent] Reached max iterations (${MAX_ITERATIONS})`);
-            }
-        }
-    } catch (loopError: any) {
-        collector.setFinishReason('ERROR');
-        throw loopError;
-    } finally {
-        execSpan.end({
-            output: finalOutput,
-            metadata: {
-                iterations_used: collector.telemetry.totalIterations,
-                finish_reason: collector.telemetry.finishReason,
-                tool_calls_total: Object.values(collector.telemetry.toolCallsByName).reduce((a: any, b: any) => a + b, 0),
-                tool_calls_by_name: collector.telemetry.toolCallsByName,
-                repeated_reads_count: Object.values(collector.telemetry.repeatedReads).filter((c: any) => c > 1).length,
-                repeated_commands_count: Object.values(collector.telemetry.repeatedCommands).filter((c: any) => c > 1).length
-            }
-        });
-    }
-    return finalOutput;
-}
-
-// Trace Wrapper
+// --- TRACING ---
 async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Promise<T>) {
     const trace = langfuse.trace({ name, metadata });
     try { return await fn(trace); } 
@@ -310,41 +45,118 @@ async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Prom
     finally { await langfuse.flushAsync(); }
 }
 
+// --- AGENT PHASES ---
+
+async function planPhase(workDir: string, task: any, availableSkills: string[], previousErrors?: string) {
+    const prompt = String.raw`
+You are the Architect/Planner (Claude Opus 4.5). 
+Task: ${task.title}
+Description: ${task.description}
+
+AVAILABLE SKILLS (Expert project knowledge):
+${availableSkills.join('\n')}
+
+${previousErrors ? `⚠️ PREVIOUS ATTEMPT FAILED. Fix these errors:\n${previousErrors}` : ''}
+
+YOUR GOAL:
+1. Analyze the task and codebase.
+2. Select ONLY the relevant skills from the list above that the Executor will need to succeed.
+3. Create a bullet-proof implementation plan.
+
+OUTPUT FORMAT (Must use tags):
+<plan>Your detailed step-by-step plan here</plan>
+<skills>["relevant-skill.md"]</skills>
+    `.trim();
+
+    const escapedPrompt = prompt.replaceAll('"', '\\"');
+    const { stdout } = await execAsync(`claude -p "${escapedPrompt}" --model opus-4-5`);
+    
+    const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+    const skillsMatch = stdout.match(/<skills>([\s\S]*?)<\/skills>/);
+    
+    return {
+        plan: planMatch ? planMatch[1].trim() : "No plan",
+        selectedSkills: skillsMatch ? JSON.parse(skillsMatch[1].trim()) : []
+    };
+}
+
+async function executePhase(workDir: string, task: any, plan: string, skillsContent: string) {
+    const prompt = String.raw`
+You are the Executor (Claude Sonnet 4.5).
+Your task is to implement the following plan:
+${plan}
+
+Context/Skills:
+${skillsContent}
+
+${SECURITY_GUARDRAILS}
+
+Instructions:
+1. Use available tools to modify the code.
+2. Verify your work.
+3. Do NOT commit.
+    `.trim();
+
+    // Sonnet handles the actual work using its toolbelt
+    const escapedPrompt = prompt.replaceAll('"', '\\"');
+    return await execAsync(`claude -p "${escapedPrompt}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
+}
+
 export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
-            const repoSkills = await loadRepoSkills(workDir);
-            const systemPrompt = `You are Ralph, a Senior Engineer.\n${SECURITY_GUARDRAILS}\n${repoSkills}\nYou have access to tools to read, write, and execute code. Use them to implement the plan.`;
+            const availableSkills = await getAvailableSkills(workDir);
+            let previousErrors = "";
+            const MAX_RETRIES = 3;
 
-            // 1. PLAN (Opus)
-            const planSpan = trace.span({ name: "Planning", model: "claude-opus-4-5" });
-            const planMsg = await anthropic.messages.create({
-                model: "claude-opus-4-5", max_tokens: 2000, system: systemPrompt,
-                messages: [{ role: "user", content: `Task: ${task.title}\n${task.description}\n\nAnalyze the task and create a step-by-step implementation plan.` }]
-            });
-            const planBlock = planMsg.content[0];
-            const plan = planBlock.type === 'text' ? planBlock.text : "No plan generated";
-            planSpan.end({ output: plan });
+            for (let i = 0; i < MAX_RETRIES; i++) {
+                const iteration = i + 1;
+                console.log(`🤖 [Agent] Iteration ${iteration}/${MAX_RETRIES}`);
 
-            // 2. EXECUTE (Sonnet) - Agentic Loop with Telemetry
-            const collector = createTelemetryCollector();
-            await runCodingLoop(trace, systemPrompt, workDir, plan, collector);
+                // 1. PLAN (Opus)
+                const planSpan = trace.span({ 
+                    name: `Planning-Opus-Iter-${iteration}`,
+                    metadata: { iteration }
+                });
+                const { plan, selectedSkills } = await planPhase(workDir, task, availableSkills, previousErrors);
+                planSpan.end({ output: plan, metadata: { selectedSkills } });
 
-            // 3. VALIDATE (Polyglot)
-            const valSpan = trace.span({ name: "Validation" });
-            const check = await runPolyglotValidation(workDir);
-            valSpan.end({ output: check });
+                // 2. EXECUTE (Sonnet)
+                const skillsContent = await loadSelectedSkills(workDir, selectedSkills);
+                const execSpan = trace.span({ 
+                    name: `Execution-Sonnet-Iter-${iteration}`,
+                    metadata: { 
+                        iteration,
+                        selectedSkills,
+                        skillsContentSnippet: skillsContent.substring(0, 1000)
+                    }
+                });
+                
+                await executePhase(workDir, task, plan, skillsContent);
+                execSpan.end();
 
-            // Write telemetry artifact for debugging and skill optimization
-            await writeTelemetryArtifact(workDir, collector.telemetry, check.success);
+                // 3. VALIDATE
+                const valSpan = trace.span({ 
+                    name: `Validation-Iter-${iteration}`,
+                    metadata: { iteration }
+                });
+                const check = await runPolyglotValidation(workDir);
+                valSpan.end({ output: check });
 
-            // 4. PUSH
-            if (check.success) {
-                await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
-            } else {
-                await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation)`); await git.push('origin', task.branchName);
+                if (check.success) {
+                    console.log("✅ [Agent] Validation passed!");
+                    await git.add('.'); await git.commit(`feat: ${task.title}`); await git.push('origin', task.branchName);
+                    return; // Success
+                }
+
+                console.warn("⚠️ [Agent] Validation failed, retrying...");
+                previousErrors = check.output;
             }
+
+            // Final fallback if all retries fail
+            await git.add('.'); await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`); await git.push('origin', task.branchName);
+
         } finally { cleanup(); }
     });
 };
