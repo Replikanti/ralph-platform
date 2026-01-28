@@ -68,7 +68,7 @@ OUTPUT FORMAT (Must use tags):
 <skills>["relevant-skill.md"]</skills>
     `.trim();
 
-    const { stdout } = await execAsync(String.raw`claude -p "${prompt.replaceAll('"', '\"')}" --model opus-4-5`);
+    const { stdout } = await execAsync(String.raw`claude -p "${prompt.replaceAll('"', '\\"')}" --model opus-4-5`);
     
     const planMatch = stdout.match(/<plan>([\s\S]*?)<\/plan>/);
     const skillsMatch = stdout.match(/<skills>([\s\S]*?)<\/skills>/);
@@ -97,7 +97,7 @@ Instructions:
     `.trim();
 
     // Sonnet handles the actual work using its toolbelt
-    return await execAsync(String.raw`claude -p "${prompt.replaceAll('"', '\"')}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
+    return await execAsync(String.raw`claude -p "${prompt.replaceAll('"', '\\"')}" --model sonnet-4-5 --allowedTools "Bash,Read,Edit,FileSearch,Glob"`, { cwd: workDir });
 }
 
 export const runAgent = async (task: any) => {
