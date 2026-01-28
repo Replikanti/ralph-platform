@@ -153,15 +153,17 @@ For local webhook testing, use [ngrok](https://ngrok.com/): `ngrok http 3000`
 
 #### Required API Keys
 
-Before starting, obtain these credentials:
+Before starting, obtain these credentials (you'll add them to `terraform.tfvars`):
 
-| Service | What You Need | Where to Get It |
-|---------|---------------|-----------------|
-| **GCP** | Project with billing enabled | [GCP Console](https://console.cloud.google.com/) |
-| **Anthropic** | API Key | [Anthropic Console](https://console.anthropic.com/) |
-| **GitHub** | Personal Access Token | Settings → Developer settings → PAT (scopes: `repo`, `admin:repo_hook`) |
-| **Linear** | Webhook Signing Secret | Settings → API → Webhooks → Create webhook → Copy signing secret |
-| **Langfuse** | API Keys (optional) | [Langfuse Cloud](https://cloud.langfuse.com/) or self-hosted |
+| Service | What You Need | Where to Get It | When Needed |
+|---------|---------------|-----------------|-------------|
+| **GCP** | Project with billing enabled | [GCP Console](https://console.cloud.google.com/) | Phase 1 |
+| **GitHub** | Personal Access Token | Settings → Developer settings → PAT (scopes: `repo`, `admin:repo_hook`) | Phase 2 (Terraform) |
+| **Anthropic** | API Key | [Anthropic Console](https://console.anthropic.com/) | Phase 2 (Optional in terraform.tfvars) |
+| **Linear** | Webhook Signing Secret | Settings → API → Webhooks → Create webhook → Copy signing secret | Phase 2 (Optional in terraform.tfvars) |
+| **Langfuse** | API Keys (optional) | [Langfuse Cloud](https://cloud.langfuse.com/) or self-hosted | Phase 2 (Optional in terraform.tfvars) |
+
+**Note:** Application secrets (Anthropic, Linear, Langfuse) can be added to `terraform.tfvars` during Phase 2, or updated later in GCP Secret Manager. They're automatically synchronized to Kubernetes via External Secrets Operator.
 
 ---
 
@@ -189,6 +191,7 @@ gcloud services enable \
   servicenetworking.googleapis.com \
   containerregistry.googleapis.com \
   artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com
 ```
@@ -197,7 +200,7 @@ gcloud services enable \
 
 ### Phase 2: Infrastructure with Terraform
 
-Terraform creates: VPC, GKE cluster, Redis (Memorystore), Workload Identity for GitHub Actions, and auto-configures GitHub secrets.
+Terraform creates: VPC, GKE cluster, Redis (Memorystore), Workload Identity for GitHub Actions, GCP Secret Manager secrets, and auto-configures GitHub secrets.
 
 ```bash
 cd infra
@@ -209,6 +212,12 @@ region       = "europe-west1"
 github_owner = "Replikanti"
 github_repo  = "ralph-platform"
 github_token = "ghp_xxxxxxxxxxxx"  # PAT with repo/admin:repo_hook scopes
+
+# Optional: Application secrets (leave empty to use placeholders)
+anthropic_api_key     = "sk-ant-xxxxx"  # or leave empty
+langfuse_public_key   = "pk-lf-xxxxx"   # or leave empty
+langfuse_secret_key   = "sk-lf-xxxxx"   # or leave empty
+linear_webhook_secret = "xxxxx"         # or leave empty
 EOF
 
 # Create GCS bucket for Terraform state (one-time)
@@ -238,7 +247,9 @@ terraform output
 
 ---
 
-### Phase 3: Kubernetes Setup
+### Phase 3: Secrets Management with External Secrets Operator
+
+Ralph uses **External Secrets Operator (ESO)** to automatically sync secrets from GCP Secret Manager to Kubernetes.
 
 ```bash
 # Connect to GKE cluster
@@ -246,39 +257,57 @@ gcloud container clusters get-credentials ralph-cluster --region europe-west1
 
 # Verify connection
 kubectl get nodes
-
-# Create namespace (optional, default uses 'default')
-kubectl create namespace ralph
-kubectl config set-context --current --namespace=ralph
 ```
 
-#### Create Kubernetes Secrets
+#### Install External Secrets Operator
 
 ```bash
-# Get Redis IP from Terraform output
-REDIS_IP=$(cd infra && terraform output -raw redis_host)
+cd infra
 
-# Create secrets
-kubectl create secret generic ralph-redis-secret \
-  --from-literal=redis-url="redis://${REDIS_IP}:6379"
+# Run installation script (installs ESO with Workload Identity)
+chmod +x install-eso.sh
+./install-eso.sh
 
-kubectl create secret generic ralph-github-token \
-  --from-literal=token="ghp_your_github_token"
+# Verify ESO is running
+kubectl get pods -n external-secrets
+```
 
-kubectl create secret generic ralph-anthropic-key \
-  --from-literal=key="sk-ant-your_anthropic_key"
+#### Verify Secret Synchronization
 
-kubectl create secret generic ralph-linear-secret \
-  --from-literal=webhook-secret="your_linear_signing_secret"
+```bash
+# Check ExternalSecret resources
+kubectl get externalsecrets
 
-# Langfuse (optional - for tracing)
-kubectl create secret generic ralph-langfuse \
-  --from-literal=secretKey="sk-lf-xxx" \
-  --from-literal=publicKey="pk-lf-xxx" \
-  --from-literal=host="https://cloud.langfuse.com"
+# Verify Kubernetes secrets were created automatically
+kubectl get secrets | grep ralph
 
-# Verify secrets
-kubectl get secrets
+# You should see:
+# - ralph-github-token
+# - ralph-anthropic-key
+# - ralph-langfuse
+# - ralph-linear-secret
+# - ralph-redis-secret
+```
+
+**No manual `kubectl create secret` commands needed!** Secrets are automatically synchronized from GCP Secret Manager.
+
+#### Update Secrets Later
+
+To update secret values after deployment:
+
+**Option 1: Via GCP Console**
+1. Go to https://console.cloud.google.com/security/secret-manager
+2. Select your secret (e.g., `ralph-anthropic-key`)
+3. Click "New Version" and enter new value
+4. ESO syncs within 1 hour (or immediately with `kubectl annotate`)
+
+**Option 2: Via terraform.tfvars**
+```bash
+# Update secret values in terraform.tfvars
+vim infra/terraform.tfvars
+
+# Apply changes
+cd infra && terraform apply
 ```
 
 ---
