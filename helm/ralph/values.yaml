@@ -57,7 +57,7 @@ securityContext:
   fsGroup: 1000
 
 scaling:
-  workerReplicas: 2
+  workerReplicas: 1
 
 # External Secrets Operator configuration
 externalSecrets:
