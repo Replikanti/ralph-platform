@@ -39,11 +39,11 @@ spec:
             requests:
               cpu: {{ .Values.resources.api.requests.cpu }}
               memory: {{ .Values.resources.api.requests.memory }}
-              ephemeral-storage: "100Mi"
+              ephemeral-storage: {{ .Values.resources.api.requests.storage }}
             limits:
               cpu: {{ .Values.resources.api.limits.cpu }}
               memory: {{ .Values.resources.api.limits.memory }}
-              ephemeral-storage: "500Mi"
+              ephemeral-storage: {{ .Values.resources.api.limits.storage }}
           env:
             - name: REDIS_URL
               {{- if .Values.redis.existingSecret }}
