@@ -10,7 +10,8 @@ RUN apt-get update && \
     npm install -g @biomejs/biome typescript tsx && \
     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
     curl -fsSL https://claude.ai/install.sh | bash && \
-    mv /root/.local/bin/claude /usr/local/bin/claude
+    mv /root/.local/bin/claude /usr/local/bin/claude && \
+    chmod +x /usr/local/bin/claude
 
 # Build App
 COPY package*.json ./
