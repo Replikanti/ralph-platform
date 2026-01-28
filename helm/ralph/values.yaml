@@ -45,10 +45,10 @@ resources:
 
 ingress:
   enabled: true
-  className: "gce"
+  className: ""
   annotations:
+    kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: "ralph-static-ip"
-    # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
     - host: "" # Empty host accepts IP address access (for now)
