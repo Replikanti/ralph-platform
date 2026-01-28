@@ -19,6 +19,10 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
+  
+  # GOVERNANCE: Apply default labels to ALL resources automatically.
+  # This solves the "Mystery Resource" problem and enables FinOps Showback.
+  default_labels = var.resource_labels
 }
 
 provider "github" {

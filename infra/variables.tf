@@ -7,12 +7,31 @@ variable "region" {
   description = "GCP Region (e.g., europe-west1)"
   type        = string
   default     = "europe-west1"
+  validation {
+    condition     = can(regex("^europe-", var.region))
+    error_message = "Compliance Alert: Data Residency Policy requires resources to be located in Europe."
+  }
 }
 
 variable "zone" {
   description = "GCP Zone for GKE cluster (e.g., europe-west1-a)"
   type        = string
   default     = "europe-west1-a"
+}
+
+variable "resource_labels" {
+  description = "Labels to apply to all resources for FinOps and Governance (must include owner)"
+  type        = map(string)
+  default     = {
+    owner       = "platform-team"
+    environment = "production"
+    cost-center = "shared-infrastructure"
+    application = "ralph"
+  }
+  validation {
+    condition     = contains(keys(var.resource_labels), "owner")
+    error_message = "Governance Policy: Resources must have an 'owner' tag for accountability."
+  }
 }
 
 variable "github_owner" {
