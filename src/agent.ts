@@ -14,9 +14,17 @@ const langfuse = new Langfuse();
  */
 function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-        const child = spawn('claude', args, { 
+        // SECURITY: Use absolute path from env or fixed default to prevent injection
+        const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
+        
+        const child = spawn(CLAUDE_PATH, args, { 
             cwd,
-            env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
+            env: { 
+                ...process.env, 
+                // Fixed PATH for security, but allow common locations
+                PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY 
+            }
         });
 
         let stdout = '';

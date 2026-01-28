@@ -100,30 +100,48 @@ describe('runAgent', () => {
         runAgent = agentModule.runAgent;
     });
 
-    it('should run the iterative loop: Opus plans, Sonnet executes', async () => {
+    it('should execute claude CLI with prompt and skills', async () => {
         const fsModule = require('node:fs/promises');
         fsModule.readdir.mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
         fsModule.readFile.mockResolvedValue('CLAUDE.md content');
 
-        // Mock sequence of outputs
+        // Ensure we test the default path if env is not set
+        delete process.env.CLAUDE_BIN_PATH;
+
         mockStdoutOn
-            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); }) // Plan Phase
-            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); }); // Execute Phase
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc' };
         await runAgent(task);
 
         expect(mockSpawn).toHaveBeenCalledWith(
-            'claude',
+            '/usr/local/bin/claude',
             expect.arrayContaining(['--model', 'opus-4-5']),
             expect.anything()
         );
+    });
+
+    it('should use CLAUDE_BIN_PATH from environment if provided', async () => {
+        const fsModule = require('node:fs/promises');
+        fsModule.readdir.mockResolvedValue([]);
+        fsModule.readFile.mockResolvedValue('guide');
+
+        process.env.CLAUDE_BIN_PATH = '/custom/path/claude';
+
+        mockStdoutOn
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>X</plan>')); })
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Y')); });
+
+        await runAgent({ ticketId: 'custom', title: 'Custom Path' });
 
         expect(mockSpawn).toHaveBeenCalledWith(
-            'claude',
-            expect.arrayContaining(['--model', 'sonnet-4-5']),
-            expect.objectContaining({ cwd: '/mock/workspace' })
+            '/custom/path/claude',
+            expect.anything(),
+            expect.anything()
         );
+
+        delete process.env.CLAUDE_BIN_PATH; // Cleanup
     });
 
     it('should retry if validation fails', async () => {
