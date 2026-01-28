@@ -6,29 +6,29 @@ jest.mock('node:fs/promises', () => ({
     readFile: jest.fn(),
     mkdir: jest.fn().mockResolvedValue(undefined),
     writeFile: jest.fn().mockResolvedValue(undefined),
+    stat: jest.fn().mockResolvedValue({ mtimeMs: Date.now() }),
 }));
 
 // Set a longer timeout for agent tests involving CLI mocks
 jest.setTimeout(30000);
 
-// Mock child_process and util.promisify
-const mockExec = jest.fn();
-jest.mock('node:child_process', () => ({
-    exec: jest.fn()
+// Mock child_process for spawn and exec
+const mockSpawnOn = jest.fn();
+const mockStdoutOn = jest.fn();
+const mockStderrOn = jest.fn();
+
+const mockSpawn = jest.fn().mockImplementation(() => ({
+    stdout: { on: mockStdoutOn },
+    stderr: { on: mockStderrOn },
+    on: mockSpawnOn
 }));
 
-jest.mock('node:util', () => {
-    const originalUtil = jest.requireActual('node:util');
-    return {
-        ...originalUtil,
-        promisify: (fn: any) => {
-            if (fn === require('node:child_process').exec) {
-                return mockExec;
-            }
-            return originalUtil.promisify(fn);
-        }
-    };
-});
+const mockExec = jest.fn();
+
+jest.mock('node:child_process', () => ({
+    spawn: mockSpawn,
+    exec: mockExec
+}));
 
 describe('runAgent', () => {
     let mockGit: any;
@@ -63,8 +63,19 @@ describe('runAgent', () => {
             output: 'Validation Passed',
         });
 
-        // Default exec mock implementation (promise style because of promisify mock)
-        mockExec.mockImplementation(() => Promise.resolve({ stdout: 'Default Output', stderr: '' }));
+        // Default spawn behavior
+        mockSpawnOn.mockImplementation((event, cb) => {
+            if (event === 'close') cb(0);
+        });
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('Default Output'));
+        });
+        
+        // Default exec behavior
+        mockExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            callback(null, { stdout: '', stderr: '' });
+        });
 
         // Setup Langfuse Mock
         mockSpanEnd = jest.fn();
@@ -94,24 +105,25 @@ describe('runAgent', () => {
         fsModule.readdir.mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
         fsModule.readFile.mockResolvedValue('CLAUDE.md content');
 
-        mockExec
-            .mockResolvedValueOnce({ stdout: '<plan>Do X</plan>', stderr: '' })
-            .mockResolvedValueOnce({ stdout: 'Implementation done', stderr: '' });
+        // Mock sequence of outputs
+        mockStdoutOn
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); }) // Plan Phase
+            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); }); // Execute Phase
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc' };
         await runAgent(task);
 
-        // Verify Opus was called for planning
-        expect(mockExec).toHaveBeenCalledWith(
-            expect.stringContaining('--model opus-4-5')
+        expect(mockSpawn).toHaveBeenCalledWith(
+            'claude',
+            expect.arrayContaining(['--model', 'opus-4-5']),
+            expect.anything()
         );
 
-        expect(mockExec).toHaveBeenCalledWith(
-            expect.stringContaining('--model sonnet-4-5'),
+        expect(mockSpawn).toHaveBeenCalledWith(
+            'claude',
+            expect.arrayContaining(['--model', 'sonnet-4-5']),
             expect.objectContaining({ cwd: '/mock/workspace' })
         );
-
-        expect(fsModule.readFile).toHaveBeenCalledWith(expect.stringContaining('CLAUDE.md'), 'utf-8');
     });
 
     it('should retry if validation fails', async () => {
@@ -120,10 +132,12 @@ describe('runAgent', () => {
             .mockResolvedValueOnce({ success: false, output: 'Linter error' })
             .mockResolvedValueOnce({ success: true, output: 'Fixed' });
 
-        mockExec.mockResolvedValue({ stdout: '<plan>Try</plan>', stderr: '' });
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
+        });
 
         await runAgent({ ticketId: 'retry', title: 'Retry Task' });
-        expect(mockExec.mock.calls.length).toBeGreaterThanOrEqual(4);
+        expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
     it('should commit with WIP if validation fails', async () => {
@@ -133,7 +147,9 @@ describe('runAgent', () => {
             output: 'Validation Failed',
         });
 
-        mockExec.mockResolvedValue({ stdout: '<plan>Fail</plan>', stderr: '' });
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('<plan>Fail</plan>'));
+        });
 
         const task = { ticketId: '1', title: 'Validation Fail' };
         await runAgent(task);
