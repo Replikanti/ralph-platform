@@ -49,23 +49,23 @@ async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Prom
 
 async function planPhase(workDir: string, task: any, availableSkills: string[], previousErrors?: string) {
     const prompt = `
-You are the Planner (Claude Opus 4.5). 
+You are the Architect/Planner (Claude Opus 4.5). 
 Task: ${task.title}
 Description: ${task.description}
 
-Available Skills (select only what you need):
+AVAILABLE SKILLS (Expert project knowledge):
 ${availableSkills.join('\n')}
 
-${previousErrors ? `Previous implementation failed with these errors:\n${previousErrors}` : ''}
+${previousErrors ? `⚠️ PREVIOUS ATTEMPT FAILED. Fix these errors:\n${previousErrors}` : ''}
 
-Requirement:
-1. Create a step-by-step implementation plan.
-2. Output a JSON list of required skill files.
-3. Do NOT modify any files.
+YOUR GOAL:
+1. Analyze the task and codebase.
+2. Select ONLY the relevant skills from the list above that the Executor will need to succeed.
+3. Create a bullet-proof implementation plan.
 
-Output format:
-<plan>Your plan here</plan>
-<skills>["file1.md", "file2.md"]</skills>
+OUTPUT FORMAT (Must use tags):
+<plan>Your detailed step-by-step plan here</plan>
+<skills>["relevant-skill.md"]</skills>
     `.trim();
 
     const { stdout } = await execAsync(`claude -p "${prompt.replace(/"/g, '\\"')}" --model opus-4-5`);
@@ -109,21 +109,36 @@ export const runAgent = async (task: any) => {
             const MAX_RETRIES = 3;
 
             for (let i = 0; i < MAX_RETRIES; i++) {
-                console.log(`🤖 [Agent] Iteration ${i + 1}/${MAX_RETRIES}`);
+                const iteration = i + 1;
+                console.log(`🤖 [Agent] Iteration ${iteration}/${MAX_RETRIES}`);
 
                 // 1. PLAN (Opus)
-                const planSpan = trace.span({ name: "Planning-Opus" });
+                const planSpan = trace.span({ 
+                    name: `Planning-Opus-Iter-${iteration}`,
+                    metadata: { iteration }
+                });
                 const { plan, selectedSkills } = await planPhase(workDir, task, availableSkills, previousErrors);
                 planSpan.end({ output: plan, metadata: { selectedSkills } });
 
                 // 2. EXECUTE (Sonnet)
-                const execSpan = trace.span({ name: "Execution-Sonnet" });
                 const skillsContent = await loadSelectedSkills(workDir, selectedSkills);
+                const execSpan = trace.span({ 
+                    name: `Execution-Sonnet-Iter-${iteration}`,
+                    metadata: { 
+                        iteration,
+                        selectedSkills,
+                        skillsContentSnippet: skillsContent.substring(0, 1000)
+                    }
+                });
+                
                 await executePhase(workDir, task, plan, skillsContent);
                 execSpan.end();
 
                 // 3. VALIDATE
-                const valSpan = trace.span({ name: "Validation" });
+                const valSpan = trace.span({ 
+                    name: `Validation-Iter-${iteration}`,
+                    metadata: { iteration }
+                });
                 const check = await runPolyglotValidation(workDir);
                 valSpan.end({ output: check });
 
