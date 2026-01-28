@@ -7,12 +7,17 @@ import { spawn } from 'node:child_process';
 import { LinearClient } from "@linear/sdk";
 
 const langfuse = new Langfuse();
-const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
 
 // --- HELPERS ---
 
 async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
+    if (!process.env.LINEAR_API_KEY) {
+        console.warn("⚠️ LINEAR_API_KEY is missing, skipping status update.");
+        return;
+    }
+    
     try {
+        const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
         const issue = await linear.issue(issueId);
         const team = await issue.team;
         if (!team) return;
