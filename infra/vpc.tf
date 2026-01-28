@@ -51,3 +51,16 @@ resource "google_compute_router_nat" "nat" {
     filter = "ERRORS_ONLY"
   }
 }
+
+# GOVERNANCE: Allow health checks from Google Cloud Load Balancer
+resource "google_compute_firewall" "allow_health_check" {
+  name    = "allow-health-check"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+  }
+
+  source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
+  target_tags   = ["gke-node", "ralph-cluster"]
+}

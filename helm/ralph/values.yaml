@@ -49,9 +49,9 @@ ingress:
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: "ralph-static-ip"
-    # kubernetes.io/tls-acme: "true"
+    networking.gke.io/managed-certificates: "ralph-cert"
   hosts:
-    - host: "" # Empty host accepts IP address access (for now)
+    - host: "ralph.replikanti.xyz"
       paths:
         - path: /*
           pathType: ImplementationSpecific
