@@ -5,3 +5,12 @@ coverage/
 .DS_Store
 *.log
 IMPLEMENTATION_PLAN.md
+
+# Terraform
+infra/*.tfvars
+!infra/*.tfvars.example
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/*.out
