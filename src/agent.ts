@@ -354,16 +354,28 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
     await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
-const CLAUDE_CACHE_ROOT = '/tmp/ralph-claude-cache';
-if (!fs.existsSync(CLAUDE_CACHE_ROOT)) fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true });
+const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
+if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
+    try {
+        fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true });
+    } catch (e: any) {
+        console.warn(`[Agent] Could not create cache root at ${CLAUDE_CACHE_ROOT}: ${e.message}`);
+    }
+}
 
 async function seedClaudeCache(targetClaudeDir: string) {
     const projectsCache = path.join(CLAUDE_CACHE_ROOT, 'projects');
     if (fs.existsSync(projectsCache)) {
         const targetProjects = path.join(targetClaudeDir, 'projects');
         await fsPromises.mkdir(targetProjects, { recursive: true });
-        await fsPromises.cp(projectsCache, targetProjects, { recursive: true });
-        console.log("Seeded Claude projects cache from global storage");
+        // Use cp -r to be safe
+        const { execSync } = await import('node:child_process');
+        try {
+            execSync(`cp -r ${projectsCache}/* ${targetProjects}/`);
+            console.log("Seeded Claude projects cache from global storage");
+        } catch (e: any) {
+            console.warn(`[Agent] Seed failed: ${e.message}`);
+        }
     }
 }
 
@@ -371,9 +383,14 @@ async function persistClaudeCache(sourceClaudeDir: string) {
     const projectsSource = path.join(sourceClaudeDir, 'projects');
     if (fs.existsSync(projectsSource)) {
         const targetProjects = path.join(CLAUDE_CACHE_ROOT, 'projects');
-        await fsPromises.mkdir(CLAUDE_CACHE_ROOT, { recursive: true });
-        await fsPromises.cp(projectsSource, targetProjects, { recursive: true });
-        console.log("Persisted Claude projects cache to global storage");
+        await fsPromises.mkdir(targetProjects, { recursive: true });
+        const { execSync } = await import('node:child_process');
+        try {
+            execSync(`cp -r ${projectsSource}/* ${targetProjects}/`);
+            console.log("Persisted Claude projects cache to global storage");
+        } catch (e: any) {
+            console.warn(`[Agent] Persistence failed: ${e.message}`);
+        }
     }
 }
 
@@ -388,57 +405,37 @@ export const runAgent = async (task: Task): Promise<void> => {
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
             
             try {
-                const itemsToCopy = ['.credentials.json', 'settings.json', 'settings.local.json'];
-                for (const item of itemsToCopy) {
-                    const src = path.join(sourceClaudeDir, item);
-                    const dst = path.join(targetClaudeDir, item);
-                    if (fs.existsSync(src)) {
-                        await fsPromises.copyFile(src, dst);
-                    }
+                const itemsToCopy = ['.credentials.json', 'settings.json'];
+                for (const f of itemsToCopy) {
+                    const src = path.join(sourceClaudeDir, f);
+                    if (fs.existsSync(src)) await fsPromises.copyFile(src, path.join(targetClaudeDir, f));
                 }
-                
-                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
                 const credsFile = path.join(targetClaudeDir, '.credentials.json');
                 if (!fs.existsSync(credsFile)) {
-                    await fsPromises.writeFile(credsFile, JSON.stringify({
-                        "token": "sk-ant-dummy-token",
-                        "email": "ralph@duvo.ai"
-                    }));
+                    await fsPromises.writeFile(credsFile, JSON.stringify({ "token": "dummy", "email": "ralph@duvo.ai" }));
                 }
-                
-                // NEW: Seed project cache to save credits on indexing
-                await seedClaudeCache(targetClaudeDir);
+            } catch (e: any) { console.warn("Seed failed: " + e.message); }
 
-                console.log("Seeded isolated Claude config");
-            } catch (e: any) {
-                console.warn("Seed failed: " + e.message);
-            }
+            await seedClaudeCache(targetClaudeDir);
 
-            if (task.attempt > 1) {
-                await updateLinearIssue(task.ticketId, "In Progress", "🔄 Retrying attempt " + task.attempt);
-            } else {
-                await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started.");
-            }
+            if (task.attempt > 1) await updateLinearIssue(task.ticketId, "In Progress", "🔄 Retrying attempt " + task.attempt);
+            else await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started.");
 
             await prepareClaudeSkills(workDir, homeDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
-            const MAX_RETRIES = 3;
+            for (let i = 0; i < 3; i++) {
+                const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
+                
+                // ALWAYS persist cache after iteration to save indexing progress
+                await persistClaudeCache(targetClaudeDir);
 
-            const ctx: IterationContext = { trace, workDir, homeDir, task, availableSkills, git };
-
-            for (let i = 0; i < MAX_RETRIES; i++) {
-                const result = await runIteration(i + 1, ctx, previousErrors);
-                if (result.success) {
-                    // Save warm cache for next tasks
-                    await persistClaudeCache(targetClaudeDir);
-                    return;
-                }
-                previousErrors = result.output || "";
+                if (result.success) return;
+                previousErrors = result.output || "Unknown error";
             }
-
-            await handleFailureFallback(workDir, homeDir, task, git, previousErrors, MAX_RETRIES);
-
+            
+            const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
+            await updateLinearIssue(task.ticketId, "Todo", "❌ Failed: " + explanation);
         } finally { cleanup(); }
     });
 };
