@@ -91,7 +91,7 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
 /**
  * Asks Claude Opus to summarize why the task failed based on the technical errors.
  */
-async function summarizeFailurePhase(task: Task, errors: string): Promise<string> {
+async function summarizeFailurePhase(task: Task, homeDir: string, errors: string): Promise<string> {
     const prompt = `
 You are the Post-Mortem Analyst (Claude Opus 4.5).
 The AI coding agent "Ralph" failed to complete a task. 
@@ -110,7 +110,8 @@ Format your response as a direct comment to the user.
 `.trim();
 
     try {
-        const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101']);
+        // Post-mortem can run in the same isolated homeDir
+        const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], process.cwd(), homeDir);
         return stdout.trim();
     } catch {
         return "Task failed due to persistent validation errors that Ralph couldn't resolve automatically.";
@@ -159,12 +160,13 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
  * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
  * Now supports real-time logging and timeouts.
  */
-function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
+function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
         console.log(`🚀 [Claude CLI] Spawning process: ${CLAUDE_PATH}`);
-        console.log(`📂 [Claude CLI] CWD: ${cwd || process.cwd()}`);
+        console.log(`📂 [Claude CLI] CWD: ${cwd}`);
+        console.log(`🏠 [Claude CLI] HOME: ${homeDir}`);
         console.log(`📝 [Claude CLI] Args: ${args.join(' ')}`);
 
         const child = spawn(CLAUDE_PATH, args, { 
@@ -172,7 +174,7 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
             env: { 
                 ...process.env, 
                 PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-                HOME: '/tmp',
+                HOME: homeDir,
                 ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
                 CI: 'true',
                 DEBUG: 'true',
@@ -272,7 +274,7 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
 
 // --- AGENT PHASES ---
 
-async function planPhase(workDir: string, task: any, availableSkills: string, previousErrors?: string) {
+async function planPhase(workDir: string, homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     // Load CLAUDE.md as the primary project guide
     let projectGuide = "";
     try {
@@ -310,14 +312,14 @@ Output format:
     // Planning phase: Opus creates the roadmap
     // CRITICAL: Must pass workDir so Claude knows the context
     // Using explicit 4.5 model IDs found via search
-    const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], workDir);
+    const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], workDir, homeDir);
     
     const planRegex = /<plan>([\s\S]*?)<\/plan>/;
     const planMatch = planRegex.exec(stdout);
     return planMatch ? planMatch[1].trim() : "No plan";
 }
 
-async function executePhase(workDir: string, plan: string) {
+async function executePhase(workDir: string, homeDir: string, plan: string) {
     const prompt = String.raw`
 You are the Executor (Claude Sonnet 4.5).
 Implement this plan using your native tools and skills:
@@ -337,11 +339,31 @@ Instructions:
     // Execution phase: Sonnet does the work using native CLI capabilities
     return await runClaude(
         ['-p', prompt, '--model', 'claude-sonnet-4-5-20250929', '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob'],
-        workDir
+        workDir,
+        homeDir
     );
 }
 
-async function runIteration(iteration: number, trace: any, workDir: string, task: Task, availableSkills: string, previousErrors: string, git: any): Promise<{ success: boolean, output?: string }> {
+/**
+ * Ensures that skills from the repository are available to the Claude CLI.
+ * Copies skills from the repository's .claude/skills directory to the Claude home directory.
+ */
+async function prepareClaudeSkills(workDir: string, homeDir: string) {
+    const targetSkillsDir = path.join(homeDir, '.claude', 'skills');
+    const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
+
+    try {
+        if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
+            await fsPromises.mkdir(targetSkillsDir, { recursive: true });
+            await fsPromises.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
+            console.log(`✅ [Agent] Loaded repository skills into isolated Claude environment`);
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [Agent] Failed to load skills into environment: ${e.message}`);
+    }
+}
+
+async function runIteration(iteration: number, trace: any, workDir: string, homeDir: string, task: Task, availableSkills: string, previousErrors: string, git: any): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
     // 1. PLAN (Opus)
@@ -349,7 +371,9 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
         name: `Planning-Opus-Iter-${iteration}`,
         metadata: { iteration }
     });
-    const plan = await planPhase(workDir, task, availableSkills, previousErrors);
+    const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
+    // Strip XML tags if present to prevent Executor confusion
+    const plan = rawPlan.replace(/<plan>|<\/plan>/g, '').trim();
     planSpan.end({ output: plan });
 
     // 2. EXECUTE (Sonnet)
@@ -357,7 +381,7 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
         name: `Execution-Sonnet-Iter-${iteration}`,
         metadata: { iteration }
     });
-    await executePhase(workDir, plan);
+    await executePhase(workDir, homeDir, plan);
     execSpan.end();
 
     // 3. VALIDATE
@@ -395,10 +419,10 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
     return { success: false, output: check.output };
 }
 
-async function handleFailureFallback(workDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
+async function handleFailureFallback(workDir: string, homeDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
     console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Generating explanation...`);
     
-    const explanation = await summarizeFailurePhase(task, previousErrors);
+    const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
     const failComment = `❌ **Task failed after ${MAX_RETRIES} attempts.**\n\n${explanation}\n\n---\n**Technical Details:**\n\`\`\`\n${previousErrors.substring(0, 1000)}...\n\`\`\``;
     
     // Reset ticket to unstarted state and add explanation
@@ -411,6 +435,8 @@ async function handleFailureFallback(workDir: string, task: Task, git: any, prev
 export const runAgent = async (task: Task): Promise<void> => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
+        const homeDir = path.join(workDir, '.claude-home');
+        
         try {
             // Smart notification based on attempt number
             if (task.attempt > 1) {
@@ -419,17 +445,18 @@ export const runAgent = async (task: Task): Promise<void> => {
                 await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
             }
 
+            await prepareClaudeSkills(workDir, homeDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
 
             for (let i = 0; i < MAX_RETRIES; i++) {
-                const result = await runIteration(i + 1, trace, workDir, task, availableSkills, previousErrors, git);
+                const result = await runIteration(i + 1, trace, workDir, homeDir, task, availableSkills, previousErrors, git);
                 if (result.success) return;
                 previousErrors = result.output || "";
             }
 
-            await handleFailureFallback(workDir, task, git, previousErrors, MAX_RETRIES);
+            await handleFailureFallback(workDir, homeDir, task, git, previousErrors, MAX_RETRIES);
 
         } finally { cleanup(); }
     });

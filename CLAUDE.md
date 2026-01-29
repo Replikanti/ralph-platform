@@ -87,11 +87,13 @@ The agent (src/agent.ts:12-18) has a two-tier prompt system:
 When adding features, preserve this separation - security rules are hardcoded, repo-specific guidance comes from the skills directory.
 
 #### Agent Tool Execution Security
-The agent uses native Claude tool use for code manipulation (src/tools.ts). Four tools are exposed:
-- `list_files`: Directory listing with path traversal protection
-- `read_file`: File reading with path traversal protection
-- `write_file`: File writing with path traversal protection
-- `run_command`: Shell command execution with **strict security controls**
+The agent uses the native Claude CLI (Claude Code) tools for code manipulation. The following tools are available to the agent:
+- `Bash`: Execute shell commands (within allowlist)
+- `Read`: Read file contents
+- `Edit`: Apply precise edits to files
+- `FileSearch`: Search for text across the codebase
+- `Glob`: Find files matching patterns
+- `LS`: List directory contents
 
 **Command Execution Security (src/tools.ts:34-89)**:
 The `runCommand` tool implements defense-in-depth against command injection:
