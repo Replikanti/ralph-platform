@@ -16,3 +16,5 @@ infra/terraform.tfstate.backup
 infra/*.out
 
 .trivy-cache/
+
+.trivy-cache/
