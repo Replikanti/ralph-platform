@@ -15,3 +15,7 @@ langfuse_public_key   = "pk-lf-xxxxx"   # or leave empty
 langfuse_secret_key   = "sk-lf-xxxxx"   # or leave empty
 linear_webhook_secret = "xxxxx"         # or leave empty
 linear_api_key        = "lin_api_xxxxx" # or leave empty
+
+# Admin Dashboard credentials
+admin_user = "admin"
+admin_pass = "change-me-to-something-secure"
