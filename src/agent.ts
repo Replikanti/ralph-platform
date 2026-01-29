@@ -150,19 +150,19 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
-        const child = spawn(CLAUDE_PATH, args, {
-            cwd,
-            env: {
-                ...process.env,
-                HOME: homeDir,
-                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-                CI: 'true',
-                DEBUG: 'true',
-                TERM: 'dumb'
-            }
-        });
-
-        if (child.stdin) child.stdin.end();
+                const child = spawn(CLAUDE_PATH, args, { 
+                    cwd,
+                    env: { 
+                        ...process.env, 
+                        HOME: homeDir,
+                        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+                        CI: 'true',
+                        DEBUG: 'true',
+                        TERM: 'dumb',
+                        CLAUDE_CODE_ANALYTICS: 'false'
+                    }
+                });
+                if (child.stdin) child.stdin.end();
 
         if (!child.pid) {
             reject(new Error("Failed to spawn Claude CLI"));
@@ -263,7 +263,13 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
 async function executePhase(workDir: string, homeDir: string, plan: string) {
     const prompt = "Implement plan: " + plan + " " + SECURITY_GUARDRAILS;
     return await runClaude(
-        ['-p', prompt, '--model', 'claude-sonnet-4-5-20250929', '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob'],
+        [
+            '-p', prompt, 
+            '--model', 'claude-sonnet-4-5-20250929', 
+            '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob',
+            '--dangerously-skip-permissions',
+            '--permission-mode', 'bypassPermissions'
+        ],
         workDir,
         homeDir
     );
