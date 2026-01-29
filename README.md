@@ -137,6 +137,35 @@ For local webhook testing, use [ngrok](https://ngrok.com/): `ngrok http 3000`
 
 ---
 
+## API Endpoints
+
+### GET /health
+
+Health check endpoint to verify the API is running.
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/health` |
+| **Response** | `{"status":"ok"}` |
+| **Status Code** | 200 |
+
+**Example:**
+
+```bash
+curl http://localhost:3000/health
+```
+
+**Expected Response:**
+
+```json
+{"status":"ok"}
+```
+
+Use this endpoint to verify the API server is operational during development or as part of container health probes in production.
+
+---
+
 ## Production Deployment (Google Cloud)
 
 ### Phase 0: Prerequisites
