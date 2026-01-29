@@ -29,8 +29,13 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
         const targetState = states.nodes.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase());
 
         if (targetState) {
-            console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
-            await linear.updateIssue(issueId, { stateId: targetState.id });
+            const currentState = await issue.state;
+            if (currentState?.id === targetState.id) {
+                console.log(`ℹ️ [Agent] Issue ${issueId} is already in state "${statusName}", skipping state update.`);
+            } else {
+                console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
+                await linear.updateIssue(issueId, { stateId: targetState.id });
+            }
         } else {
             const availableStates = states.nodes.map((s: any) => s.name).join(", ");
             console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}. Available: ${availableStates}`);
@@ -221,6 +226,7 @@ YOUR GOAL:
 1. Create a detailed step-by-step implementation plan.
 2. Explicitly mention which native skills (/name) the Executor should invoke.
 3. Do NOT modify any files.
+4. FOCUS: Only address the task described above. If validation tools report errors in files UNRELATED to the task, IGNORE them. Do not attempt to fix unrelated infrastructure or configuration.
 
 Output format:
 <plan>Your detailed plan here</plan>
@@ -247,7 +253,7 @@ ${SECURITY_GUARDRAILS}
 Instructions:
 1. Follow the plan strictly.
 2. Only modify files that are absolutely necessary to implement the requested task.
-3. Do NOT "fix" or reformat unrelated files.
+3. Do NOT "fix" or reformat unrelated files. If you see errors in unrelated files (e.g., infrastructure config, unrelated source files), IGNORE them.
 4. Use your native skills if requested in the plan.
 5. Verify your work.
 6. Do NOT commit.
@@ -317,7 +323,9 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
 async function handleFailureFallback(workDir: string, task: any, git: any, previousErrors: string, MAX_RETRIES: number) {
     await git.add('.');
     const finalStatus = await git.status();
+    // Only push if there are actually staged changes and they seem relevant
     if (finalStatus.staged.length > 0) {
+        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Pushing WIP for inspection.`);
         await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
         await git.push('origin', task.branchName, ['--force']);
         const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
@@ -328,6 +336,7 @@ async function handleFailureFallback(workDir: string, task: any, git: any, previ
         
         await updateLinearIssue(task.ticketId, "Todo", failComment);
     } else {
+        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. No changes to push.`);
         await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
     }
 }
