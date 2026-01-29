@@ -22,6 +22,15 @@ export interface Task {
     maxAttempts: number;
 }
 
+interface IterationContext {
+    workDir: string;
+    homeDir: string;
+    task: Task;
+    availableSkills: string;
+    git: any;
+    trace: any;
+}
+
 // --- HELPERS ---
 
 async function findTargetState(team: any, statusName: string) {
@@ -363,15 +372,7 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
     }
 }
 
-interface IterationContext {
-    workDir: string;
-    homeDir: string;
-    task: Task;
-    availableSkills: string;
-    git: any;
-}
-
-async function runIteration(iteration: number, trace: any, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
+async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
     // 1. PLAN (Opus)
@@ -448,9 +449,13 @@ export const runAgent = async (task: Task): Promise<void> => {
         try {
             // Smart notification based on attempt number
             if (task.attempt > 1) {
-                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: \`${task.jobId}\``);
+                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: 
+${task.jobId}
+`);
             } else {
-                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
+                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: 
+${task.jobId}
+`);
             }
 
             await prepareClaudeSkills(workDir, homeDir);
@@ -461,7 +466,7 @@ export const runAgent = async (task: Task): Promise<void> => {
             const ctx: IterationContext = { trace, workDir, homeDir, task, availableSkills, git };
 
             for (let i = 0; i < MAX_RETRIES; i++) {
-                const result = await runIteration(i + 1, trace, { workDir, homeDir, task, availableSkills, git }, previousErrors);
+                const result = await runIteration(i + 1, ctx, previousErrors);
                 if (result.success) return;
                 previousErrors = result.output || "";
             }
