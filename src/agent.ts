@@ -41,15 +41,22 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
 
         const states = await team.states();
         
-        // Find target state by name, or common synonyms if 'Todo' is requested
+        // Find target state by name, or common synonyms
         let targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === statusName.toLowerCase());
         
-        if (!targetState && statusName.toLowerCase() === 'todo') {
-            // Try common synonyms for 'Todo'
-            const synonyms = ['triage', 'backlog', 'todo', 'unstarted', 'ready'];
-            for (const syn of synonyms) {
-                targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
-                if (targetState) break;
+        if (!targetState) {
+            if (statusName.toLowerCase() === 'todo') {
+                const synonyms = ['triage', 'backlog', 'todo', 'unstarted', 'ready'];
+                for (const syn of synonyms) {
+                    targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
+                    if (targetState) break;
+                }
+            } else if (statusName.toLowerCase() === 'in review') {
+                const synonyms = ['in review', 'under review', 'peer review', 'review', 'pr'];
+                for (const syn of synonyms) {
+                    targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
+                    if (targetState) break;
+                }
             }
         }
 
