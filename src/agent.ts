@@ -283,30 +283,29 @@ if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
     }
 }
 
+async function syncDirectoryContents(sourceDir: string, targetDir: string, operation: string): Promise<void> {
+    if (!fs.existsSync(sourceDir)) return;
+
+    await fsPromises.mkdir(targetDir, { recursive: true });
+    const { execSync } = await import('node:child_process');
+    try {
+        execSync("cp -r " + sourceDir + "/* " + targetDir + "/");
+        console.log(operation + " Claude projects cache");
+    } catch (e: any) {
+        console.warn(operation + " failed: " + e.message);
+    }
+}
+
 async function seedClaudeCache(targetClaudeDir: string) {
     const projectsCache = path.join(CLAUDE_CACHE_ROOT, 'projects');
-    if (fs.existsSync(projectsCache)) {
-        const targetProjects = path.join(targetClaudeDir, 'projects');
-        await fsPromises.mkdir(targetProjects, { recursive: true });
-        const { execSync } = await import('node:child_process');
-        try {
-            execSync("cp -r " + projectsCache + "/* " + targetProjects + "/");
-            console.log("Seeded Claude projects cache from global storage");
-        } catch (e: any) { console.warn("Seed failed: " + e.message); }
-    }
+    const targetProjects = path.join(targetClaudeDir, 'projects');
+    await syncDirectoryContents(projectsCache, targetProjects, "Seeded");
 }
 
 async function persistClaudeCache(sourceClaudeDir: string) {
     const projectsSource = path.join(sourceClaudeDir, 'projects');
-    if (fs.existsSync(projectsSource)) {
-        const targetProjects = path.join(CLAUDE_CACHE_ROOT, 'projects');
-        await fsPromises.mkdir(targetProjects, { recursive: true });
-        const { execSync } = await import('node:child_process');
-        try {
-            execSync("cp -r " + projectsSource + "/* " + targetProjects + "/");
-            console.log("Persisted Claude projects cache to global storage");
-        } catch (e: any) { console.warn("Persistence failed: " + e.message); }
-    }
+    const targetProjects = path.join(CLAUDE_CACHE_ROOT, 'projects');
+    await syncDirectoryContents(projectsSource, targetProjects, "Persisted");
 }
 
 async function prepareClaudeSkills(workDir: string, homeDir: string) {

@@ -61,70 +61,82 @@ function getSignature(body: any) {
         .digest('hex');
 }
 
+// Test helper: Send a webhook request with optional signature
+async function sendWebhook(body: any, options: { withSignature?: boolean; signature?: string } = {}) {
+    const req = request(app).post('/webhook');
+
+    if (options.signature) {
+        req.set('linear-signature', options.signature);
+    } else if (options.withSignature !== false) {
+        req.set('linear-signature', getSignature(body));
+    }
+
+    return req.send(body);
+}
+
+// Factory function: Create issue webhook payload
+function createIssueWebhook(data: {
+    id?: string;
+    title?: string;
+    description?: string;
+    identifier?: string;
+    labels?: { name: string }[];
+    team?: { key: string };
+}): any {
+    return {
+        type: 'Issue',
+        action: 'create',
+        data: {
+            id: data.id || '123',
+            title: data.title || 'Default title',
+            description: data.description,
+            identifier: data.identifier || 'TEST-1',
+            labels: data.labels || [],
+            team: data.team,
+        }
+    };
+}
+
 describe('POST /webhook', () => {
     it('should reject requests with missing signature', async () => {
-        const res = await request(app)
-            .post('/webhook')
-            .send({ type: 'Issue' });
-        
+        const res = await sendWebhook({ type: 'Issue' }, { withSignature: false });
         expect(res.status).toBe(401);
     });
 
     it('should reject requests with invalid signature', async () => {
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', 'wrong')
-            .send({ type: 'Issue' });
-        
+        const res = await sendWebhook({ type: 'Issue' }, { signature: 'wrong' });
         expect(res.status).toBe(401);
     });
 
     it('should ignore non-issue events with valid signature', async () => {
         const body = { type: 'PullRequest', action: 'create', data: {} };
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', getSignature(body))
-            .send(body);
-        
+        const res = await sendWebhook(body);
+
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'ignored' });
     });
 
     it('should ignore issues without "Ralph" label', async () => {
-        const body = { 
-            type: 'Issue', 
-            action: 'create', 
-            data: { 
-                identifier: 'TEST-1',
-                labels: [{ name: 'bug' }] 
-            } 
-        };
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', getSignature(body))
-            .send(body);
-        
+        const body = createIssueWebhook({
+            identifier: 'TEST-1',
+            labels: [{ name: 'bug' }]
+        });
+        const res = await sendWebhook(body);
+
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'ignored', reason: 'no_ralph_label' });
     });
 
     it('should queue task for valid Ralph issue with DEFAULT_REPO_URL', async () => {
         process.env.DEFAULT_REPO_URL = 'https://github.com/test/repo';
-        const body = {
-            type: 'Issue',
-            action: 'create',
-            data: {
-                id: '123',
-                title: 'Fix bug',
-                description: 'Fix it now',
-                identifier: '1',
-                labels: [{ name: 'Ralph' }]
-            }
-        };
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', getSignature(body))
-            .send(body);
+        const body = createIssueWebhook({
+            id: '123',
+            title: 'Fix bug',
+            description: 'Fix it now',
+            identifier: '1',
+            labels: [{ name: 'Ralph' }]
+        });
+        const res = await sendWebhook(body);
 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'queued' });
@@ -135,22 +147,15 @@ describe('POST /webhook', () => {
             'FRONT': 'https://github.com/org/frontend',
             'BACK': 'https://github.com/org/backend'
         });
-        const body = {
-            type: 'Issue',
-            action: 'create',
-            data: {
-                id: '456',
-                title: 'Add feature',
-                description: 'New feature',
-                identifier: 'FRONT-123',
-                team: { key: 'FRONT' },
-                labels: [{ name: 'Ralph' }]
-            }
-        };
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', getSignature(body))
-            .send(body);
+        const body = createIssueWebhook({
+            id: '456',
+            title: 'Add feature',
+            description: 'New feature',
+            identifier: 'FRONT-123',
+            team: { key: 'FRONT' },
+            labels: [{ name: 'Ralph' }]
+        });
+        const res = await sendWebhook(body);
 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'queued' });
@@ -159,21 +164,14 @@ describe('POST /webhook', () => {
     it('should ignore issue when no repo configured for team', async () => {
         delete process.env.DEFAULT_REPO_URL;
         process.env.LINEAR_TEAM_REPOS = JSON.stringify({ 'OTHER': 'https://github.com/org/other' });
-        const body = {
-            type: 'Issue',
-            action: 'create',
-            data: {
-                id: '789',
-                title: 'Unknown team issue',
-                identifier: 'UNK-1',
-                team: { key: 'UNKNOWN' },
-                labels: [{ name: 'Ralph' }]
-            }
-        };
-        const res = await request(app)
-            .post('/webhook')
-            .set('linear-signature', getSignature(body))
-            .send(body);
+        const body = createIssueWebhook({
+            id: '789',
+            title: 'Unknown team issue',
+            identifier: 'UNK-1',
+            team: { key: 'UNKNOWN' },
+            labels: [{ name: 'Ralph' }]
+        });
+        const res = await sendWebhook(body);
 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'ignored', reason: 'no_repo_configured' });
