@@ -1,4 +1,5 @@
 import { LinearClient as LinearSDK } from "@linear/sdk";
+import { findTargetState } from "./linear-utils";
 
 export class LinearClient {
     private client: LinearSDK | null = null;
@@ -43,7 +44,7 @@ export class LinearClient {
                 return;
             }
 
-            const targetState = await this.findTargetState(team, stateName);
+            const targetState = await findTargetState(team, stateName);
             if (!targetState) {
                 console.warn(`⚠️ State "${stateName}" not found for issue ${issueId}`);
                 return;
@@ -76,27 +77,4 @@ export class LinearClient {
         }
     }
 
-    private async findTargetState(team: any, statusName: string) {
-        const states = await team.states();
-        const name = statusName.toLowerCase();
-        
-        let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
-        if (state) return state;
-
-        const synonymMap: Record<string, string[]> = {
-            'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
-            'in review': ['in review', 'under review', 'peer review', 'review', 'pr'],
-            'plan-review': ['plan-review', 'plan review', 'pending review', 'awaiting approval']
-        };
-
-        const synonyms = synonymMap[name];
-        if (synonyms) {
-            for (const syn of synonyms) {
-                state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
-                if (state) return state;
-            }
-        }
-
-        return null;
-    }
 }

@@ -11,6 +11,7 @@ import IORedis from 'ioredis';
 import { storePlan, deletePlan } from './plan-store';
 import { formatPlanForLinear } from './plan-formatter';
 import { LinearClient as RalphLinearClient } from './linear-client';
+import { findTargetState } from './linear-utils';
 
 const langfuse = new Langfuse();
 
@@ -55,30 +56,6 @@ interface IterationContext {
 }
 
 // --- HELPERS ---
-
-async function findTargetState(team: any, statusName: string) {
-    const states = await team.states();
-    const name = statusName.toLowerCase();
-    
-    let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
-    if (state) return state;
-
-    const synonymMap: Record<string, string[]> = {
-        'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
-        'in review': ['in review', 'under review', 'peer review', 'review', 'pr'],
-        'plan-review': ['plan-review', 'plan review', 'pending review', 'awaiting approval']
-    };
-
-    const synonyms = synonymMap[name];
-    if (synonyms) {
-        for (const syn of synonyms) {
-            state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
-            if (state) return state;
-        }
-    }
-
-    return null;
-}
 
 export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
     if (!process.env.LINEAR_API_KEY) return;
