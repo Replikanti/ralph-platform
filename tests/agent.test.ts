@@ -190,27 +190,34 @@ describe('runAgent', () => {
         expect(mockPullsCreate).toHaveBeenCalled();
     });
 
-    it('should commit with WIP if validation fails after retries', async () => {
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
-            success: false,
-            output: 'Validation Failed',
+        it('should report failure to Linear and NOT push WIP if validation fails after retries', async () => {
+            const toolsModule = require('../src/tools');
+            (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+                success: false,
+                output: 'Validation Failed',
+            });
+    
+            mockStdoutOn.mockImplementation((event, cb) => {
+                if (event === 'data') cb(Buffer.from('Ralph tried to fix X but TSC failed. A human should take over.'));
+            });
+    
+            const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
+            await runAgent(task);
+            
+            // Should NOT have committed or created a PR
+            expect(mockGit.commit).not.toHaveBeenCalledWith(expect.stringContaining('wip:'));
+            expect(mockPullsCreate).not.toHaveBeenCalledWith(expect.objectContaining({
+                title: expect.stringContaining('wip:')
+            }));
+            
+            // Verify that ticket state was updated to s3
+            expect(mockIssueUpdate).toHaveBeenCalledWith('1', { stateId: 's3' });
+            // Should have added an explanation comment
+            expect(mockCommentCreate).toHaveBeenCalledWith(expect.objectContaining({
+                body: expect.stringContaining('Ralph tried to fix X')
+            }));
         });
-
-        mockStdoutOn.mockImplementation((event, cb) => {
-            if (event === 'data') cb(Buffer.from('<plan>Fail</plan>'));
-        });
-
-        const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
-        await runAgent(task);
-
-        expect(mockGit.commit).toHaveBeenCalledWith(expect.stringContaining('wip:'));
-        expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
-            title: expect.stringContaining('wip:')
-        }));
-    });
-
-    it('should update Linear status to "In Review" when PR is created successfully', async () => {
+        it('should update Linear status to "In Review" when PR is created successfully', async () => {
         const fsModule = require('node:fs/promises');
         fsModule.readdir.mockResolvedValue([]);
         fsModule.readFile.mockResolvedValue('CLAUDE.md content');
@@ -235,30 +242,5 @@ describe('runAgent', () => {
         expect(mockPullsCreate).toHaveBeenCalled();
     });
 
-    it('should update Linear status to "Todo" when validation fails after retries', async () => {
-        const fsModule = require('node:fs/promises');
-        fsModule.readdir.mockResolvedValue([]);
-        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
 
-        mockStdoutOn.mockImplementation((event, cb) => {
-            if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
-        });
-
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
-            success: false,
-            output: 'Validation Failed',
-        });
-
-        mockIssueUpdate.mockClear();
-
-        const task = { ticketId: 'fail-test', title: 'Test Validation Failure', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
-        await runAgent(task);
-
-        // Verify that status was updated to "Todo" (state id 's3')
-        expect(mockIssueUpdate).toHaveBeenCalledWith('fail-test', { stateId: 's3' });
-        expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
-            title: expect.stringContaining('wip:')
-        }));
-    });
 });

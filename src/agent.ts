@@ -24,6 +24,31 @@ export interface Task {
 
 // --- HELPERS ---
 
+async function findTargetState(team: any, statusName: string) {
+    const states = await team.states();
+    const name = statusName.toLowerCase();
+    
+    // 1. Direct match
+    let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
+    if (state) return state;
+
+    // 2. Synonym mapping for common states
+    const synonymMap: Record<string, string[]> = {
+        'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
+        'in review': ['in review', 'under review', 'peer review', 'review', 'pr']
+    };
+
+    const synonyms = synonymMap[name];
+    if (synonyms) {
+        for (const syn of synonyms) {
+            state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
+            if (state) return state;
+        }
+    }
+
+    return null;
+}
+
 export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
     if (!process.env.LINEAR_API_KEY) {
         console.warn("⚠️ LINEAR_API_KEY is missing, skipping status update.");
@@ -39,8 +64,7 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
             return;
         }
 
-        const states = await team.states();
-        const targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === statusName.toLowerCase());
+        const targetState = await findTargetState(team, statusName);
 
         if (targetState) {
             const currentState = await issue.state;
@@ -51,8 +75,7 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
                 await linear.updateIssue(issueId, { stateId: targetState.id });
             }
         } else {
-            const availableStates = states.nodes.map((s: { name: string }) => s.name).join(", ");
-            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}. Available: ${availableStates}`);
+            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}.`);
         }
 
         if (comment) {
@@ -62,6 +85,35 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
     } catch (e: unknown) {
         const error = e as Error;
         console.error(`❌ [Agent] Failed to update Linear issue ${issueId}: ${error.message}`);
+    }
+}
+
+/**
+ * Asks Claude Opus to summarize why the task failed based on the technical errors.
+ */
+async function summarizeFailurePhase(task: Task, errors: string): Promise<string> {
+    const prompt = `
+You are the Post-Mortem Analyst (Claude Opus 4.5).
+The AI coding agent "Ralph" failed to complete a task. 
+
+TASK: ${task.title}
+ERRORS ENCOUNTERED:
+${errors.substring(0, 5000)}
+
+YOUR GOAL:
+Write a concise, human-friendly explanation (2-3 sentences) for the developer explaining:
+1. What Ralph was trying to do.
+2. Why it failed (e.g., zacyklení na TSC chybách, chybějící soubor).
+3. Suggest what a human should do next.
+
+Format your response as a direct comment to the user.
+`.trim();
+
+    try {
+        const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101']);
+        return stdout.trim();
+    } catch {
+        return "Task failed due to persistent validation errors that Ralph couldn't resolve automatically.";
     }
 }
 
@@ -344,28 +396,16 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
 }
 
 async function handleFailureFallback(workDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
-    await git.add('.');
-    const finalStatus = await git.status();
+    console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Generating explanation...`);
     
-    // Safety check: Don't push if there are no changes or if they seem like unrelated garbage
-    if (finalStatus.staged.length > 0) {
-        // Optimization: In a real scenario, we could compare finalStatus.staged with task requirements
-        // For now, we'll just be explicit about failure if validation didn't pass.
-        
-        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Pushing WIP for inspection.`);
-        await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
-        await git.push('origin', task.branchName, ['--force']);
-        const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
-        
-        const failComment = wipPrUrl
-            ? `❌ Task failed validation after ${MAX_RETRIES} attempts. Changes pushed for inspection.\n\nPull Request: ${wipPrUrl}`
-            : `❌ Task failed validation after ${MAX_RETRIES} attempts. Errors:\n${previousErrors}`;
-        
-        await updateLinearIssue(task.ticketId, "Todo", failComment);
-    } else {
-        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. No changes to push.`);
-        await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
-    }
+    const explanation = await summarizeFailurePhase(task, previousErrors);
+    const failComment = `❌ **Task failed after ${MAX_RETRIES} attempts.**\n\n${explanation}\n\n---\n**Technical Details:**\n\`\`\`\n${previousErrors.substring(0, 1000)}...\n\`\`\``;
+    
+    // Reset ticket to unstarted state and add explanation
+    await updateLinearIssue(task.ticketId, "Todo", failComment);
+    
+    // We do NOT push to git anymore when it's a known failure. 
+    // The workspace will be cleaned up, leaving the repo clean.
 }
 
 export const runAgent = async (task: Task): Promise<void> => {
