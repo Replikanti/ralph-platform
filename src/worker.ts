@@ -1,13 +1,22 @@
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent } from './agent';
+import { runAgent, updateLinearIssue } from './agent';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 export const jobProcessor = async (job: any) => {
     console.log(`🔨 [Worker] Processing ${job.id}`);
-    await runAgent(job.data);
+    
+    // Inject job metadata into task data
+    const taskData = {
+        ...job.data,
+        jobId: job.id,
+        attempt: job.attemptsMade + 1,
+        maxAttempts: job.opts.attempts || 1
+    };
+    
+    await runAgent(taskData);
 };
 
 export const createWorker = () => {
@@ -35,14 +44,23 @@ export const createWorker = () => {
     worker.on('completed', (job) => {        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
     });
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', async (job, err) => {
         if (job) {
             console.error(`❌ [Worker] Job ${job.id} failed (Attempt ${job.attemptsMade}/${job.opts.attempts}): ${err.message}`);
             
-            // Check if this was the final attempt
             if (job.attemptsMade >= (job.opts.attempts || 1)) {
                  console.error(`💀 [Worker] Job ${job.id} FAILED PERMANENTLY. Reporting to Linear...`);
-                 console.warn("⚠️ Linear API notification not yet implemented.");
+                 
+                 // Report failure to Linear using the shared helper
+                 try {
+                     await updateLinearIssue(
+                         job.data.ticketId, 
+                         "Todo", // Or "Triage" / "Canceled" depending on workflow
+                         `💀 Critical System Failure\n\nThe task failed permanently after ${job.attemptsMade} attempts.\n\nError: ${err.message}`
+                     );
+                 } catch (e) {
+                     console.error("⚠️ Failed to report permanent failure to Linear:", e);
+                 }
             }
         }
     });
