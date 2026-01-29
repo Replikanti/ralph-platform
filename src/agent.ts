@@ -375,7 +375,7 @@ async function runIteration(iteration: number, trace: any, ctx: IterationContext
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
     // 1. PLAN (Opus)
-    const planSpan = trace.span({ 
+    const planSpan = ctx.trace.span({
         name: `Planning-Opus-Iter-${iteration}`,
         metadata: { iteration }
     });
@@ -385,7 +385,7 @@ async function runIteration(iteration: number, trace: any, ctx: IterationContext
     planSpan.end({ output: plan });
 
     // 2. EXECUTE (Sonnet)
-    const execSpan = trace.span({ 
+    const execSpan = ctx.trace.span({
         name: `Execution-Sonnet-Iter-${iteration}`,
         metadata: { iteration }
     });
@@ -393,7 +393,7 @@ async function runIteration(iteration: number, trace: any, ctx: IterationContext
     execSpan.end();
 
     // 3. VALIDATE
-    const valSpan = trace.span({ 
+    const valSpan = ctx.trace.span({
         name: `Validation-Iter-${iteration}`,
         metadata: { iteration }
     });
@@ -457,6 +457,8 @@ export const runAgent = async (task: Task): Promise<void> => {
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
+
+            const ctx: IterationContext = { trace, workDir, homeDir, task, availableSkills, git };
 
             for (let i = 0; i < MAX_RETRIES; i++) {
                 const result = await runIteration(i + 1, trace, { workDir, homeDir, task, availableSkills, git }, previousErrors);

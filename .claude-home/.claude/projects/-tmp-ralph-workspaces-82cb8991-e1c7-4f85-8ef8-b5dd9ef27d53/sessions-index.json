@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "sessionId": "f1e8b9d8-cd56-40cf-9ded-a6881bda87ed",
+      "fullPath": "/tmp/ralph-workspaces/82cb8991-e1c7-4f85-8ef8-b5dd9ef27d53/.claude-home/.claude/projects/-tmp-ralph-workspaces-82cb8991-e1c7-4f85-8ef8-b5dd9ef27d53/f1e8b9d8-cd56-40cf-9ded-a6881bda87ed.jsonl",
+      "fileMtime": 1769708666167,
+      "firstPrompt": "You are the Architect/Planner (Claude Opus 4.5).  Your task is to create an implementation plan for the Executor.  PROJECT GUIDE (CLAUDE.md): # CLAUDE.md  This file provides guidance to Claude Code (c…",
+      "messageCount": 2,
+      "created": "2026-01-29T17:43:58.176Z",
+      "modified": "2026-01-29T17:44:26.156Z",
+      "gitBranch": "ralph/feat-RAL-10",
+      "projectPath": "/tmp/ralph-workspaces/82cb8991-e1c7-4f85-8ef8-b5dd9ef27d53",
+      "isSidechain": false
+    }
+  ],
+  "originalPath": "/tmp/ralph-workspaces/82cb8991-e1c7-4f85-8ef8-b5dd9ef27d53"
+}
