@@ -175,6 +175,15 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
             return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
         }
 
+        // Avoid re-triggering if already in progress or review
+        const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
+        console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
+        
+        if (action === 'update' && (statusName === 'in progress' || statusName === 'in review' || statusName === 'completed' || statusName === 'canceled' || statusName === 'done')) {
+            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
+            return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
+        }
+
         const teamKey = data.team?.key;
         const repoUrl = await getRepoForTeam(teamKey);
 
@@ -186,7 +195,7 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
         console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
         
         // Use data.id as jobId for deduplication. 
-        // BullMQ will ignore duplicates if a job with this ID is already waiting or active.
+        // BullMQ will ignore duplicates if a job with this ID is already waiting, active, or completed (within retention period).
         try {
             await ralphQueue.add('coding-task', {
                 ticketId: data.id,
@@ -201,8 +210,9 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
                     type: 'exponential',
                     delay: 2000
                 },
-                removeOnComplete: true,
-                removeOnFail: false
+                // Keep jobs for 1 hour to ensure identical webhooks are deduplicated
+                removeOnComplete: { age: 3600 }, 
+                removeOnFail: { age: 86400 } // Keep failed for 24h
             });
             res.status(200).send({ status: 'queued' });
         } catch (e) {

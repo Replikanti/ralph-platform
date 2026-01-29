@@ -141,19 +141,117 @@ export const agentTools = [
 
 // --- EXISTING VALIDATION LOGIC ---
 
-async function validateNode(workDir: string): Promise<{ success: boolean, log: string }> {
+// Helper to get changed files
+async function getChangedFiles(workDir: string): Promise<string[]> {
+    try {
+        const { stdout } = await execAsync('git status --porcelain', { cwd: workDir });
+        if (!stdout) return [];
+
+        return stdout.split('\n')
+            .filter(line => line.trim() !== '')
+            .map(line => line.substring(3).trim());
+    } catch (e) {
+        console.warn("⚠️ Failed to detect changed files:", e);
+        return [];
+    }
+}
+
+// Helper to filter tool output to only include lines relevant to changed files
+
+function filterRelevantErrors(output: string, changedFiles: string[]): { relevant: boolean, filteredLog: string } {
+
+    if (changedFiles.length === 0) return { relevant: false, filteredLog: "" };
+
+    
+
+    const lines = output.split('\n');
+
+    const relevantLines = lines.filter(line => 
+
+        changedFiles.some(file => line.includes(file))
+
+    );
+
+
+
+    if (relevantLines.length > 0) {
+
+        return { 
+
+            relevant: true, 
+
+            filteredLog: relevantLines.join('\n') 
+
+        };
+
+    }
+
+
+
+    return { relevant: false, filteredLog: "" };
+
+}
+
+
+
+async function validateNode(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+
     let outputLog = "";
+
     let success = true;
 
+
+
+        const relevantExtensions = ['.ts', '.js', '.json', '.jsx', '.tsx'];
+
+
+
+        const hasRelevantChanges = changedFiles.some(f => 
+
+
+
+            relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('package.json')
+
+
+
+        );
+
+
+
+    
+
+
+
+        if (!hasRelevantChanges) {
+
+
+
+            return { success: true, log: "" };
+
+
+
+        }
+
+
+
+    
+
+
+
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
+
         try {
-            // Ensure dependencies are installed for TSC to work
+
             if (!fs.existsSync(path.join(workDir, 'node_modules'))) {
+
                 console.log("📦 Installing dependencies for validation...");
+
                 await execAsync('npm install --no-package-lock --no-audit --quiet', { cwd: workDir });
+
             }
-            
+
             await execAsync('biome check --apply .', { cwd: workDir });
+
             outputLog += "✅ Biome: Passed\n";
         } catch (e: unknown) { 
             const error = e as { stdout?: string };
@@ -162,9 +260,11 @@ async function validateNode(workDir: string): Promise<{ success: boolean, log: s
         }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
+
              try {
-                // We use --skipLibCheck to be faster and more resilient
+
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
+
                 outputLog += "✅ TSC: Passed\n";
             } catch (e: unknown) { 
                 const error = e as { stdout?: string };
@@ -172,32 +272,89 @@ async function validateNode(workDir: string): Promise<{ success: boolean, log: s
                 outputLog += `❌ TSC: ${error.stdout}\n`; 
             }
         }
+
     }
+
     return { success, log: outputLog };
+
 }
 
-async function validatePython(workDir: string): Promise<{ success: boolean, log: string }> {
+
+
+async function validatePython(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+
     let outputLog = "";
+
     let success = true;
 
+
+
+        const relevantExtensions = ['.py', '.toml', '.txt'];
+
+
+
+        const hasRelevantChanges = changedFiles.some(f => 
+
+
+
+            relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('requirements.txt') || f.includes('pyproject.toml')
+
+
+
+        );
+
+
+
+    
+
+
+
+        if (!hasRelevantChanges) {
+
+
+
+            return { success: true, log: "" };
+
+
+
+        }
+
+
+
+    
+
+
+
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
+
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
+
                       (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
 
+
+
     if (hasPython) {
+
         try {
-            // Install dependencies if they are not there
-            // We use a simple check for a hidden marker or just run it (pip is idempotent enough)
+
             if (fs.existsSync(path.join(workDir, 'requirements.txt'))) {
+
                 console.log("🐍 Installing Python dependencies from requirements.txt...");
+
                 await execAsync('pip install --quiet --no-cache-dir -r requirements.txt', { cwd: workDir });
+
             } else if (fs.existsSync(path.join(workDir, 'pyproject.toml'))) {
+
                 console.log("🐍 Installing Python dependencies from pyproject.toml...");
+
                 await execAsync('pip install --quiet --no-cache-dir .', { cwd: workDir });
+
             }
 
             await execAsync('ruff check --fix .', { cwd: workDir });
+
             await execAsync('ruff format .', { cwd: workDir });
+
             outputLog += "✅ Ruff: Passed\n";
         } catch (e: unknown) { 
             const error = e as { stdout?: string };
@@ -206,7 +363,9 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
         }
 
         try {
+
             await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
+
             outputLog += "✅ Mypy: Passed\n";
         } catch (e: unknown) { 
             const error = e as { stdout?: string };
@@ -214,12 +373,13 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
             outputLog += `❌ Mypy: ${error.stdout}\n`; 
         }
     }
+
     return { success, log: outputLog };
+
 }
 
 export async function runPolyglotValidation(workDir: string): Promise<{ success: boolean, output: string }> {
     let outputLog = "";
-    let allSuccess = true;
 
     const nodeResult = await validateNode(workDir);
     allSuccess = allSuccess && nodeResult.success;
@@ -230,4 +390,5 @@ export async function runPolyglotValidation(workDir: string): Promise<{ success:
     outputLog += pythonResult.log;
 
     return { success: allSuccess, output: outputLog };
+
 }

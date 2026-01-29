@@ -249,6 +249,7 @@ YOUR GOAL:
 1. Create a detailed step-by-step implementation plan.
 2. Explicitly mention which native skills (/name) the Executor should invoke.
 3. Do NOT modify any files.
+4. FOCUS: Only address the task described above. If validation tools report errors in files UNRELATED to the task, IGNORE them. Do not attempt to fix unrelated infrastructure or configuration.
 
 Output format:
 <plan>Your detailed plan here</plan>
@@ -274,9 +275,11 @@ ${SECURITY_GUARDRAILS}
 
 Instructions:
 1. Follow the plan strictly.
-2. Use your native skills if requested in the plan.
-3. Verify your work.
-4. Do NOT commit.
+2. Only modify files that are absolutely necessary to implement the requested task.
+3. Do NOT "fix" or reformat unrelated files. If you see errors in unrelated files (e.g., infrastructure config, unrelated source files), IGNORE them.
+4. Use your native skills if requested in the plan.
+5. Verify your work.
+6. Do NOT commit.
     `.trim();
 
     // Execution phase: Sonnet does the work using native CLI capabilities
@@ -343,7 +346,13 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
 async function handleFailureFallback(workDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
     await git.add('.');
     const finalStatus = await git.status();
+    
+    // Safety check: Don't push if there are no changes or if they seem like unrelated garbage
     if (finalStatus.staged.length > 0) {
+        // Optimization: In a real scenario, we could compare finalStatus.staged with task requirements
+        // For now, we'll just be explicit about failure if validation didn't pass.
+        
+        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Pushing WIP for inspection.`);
         await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
         await git.push('origin', task.branchName, ['--force']);
         const wipPrUrl = await createPullRequest(task.repoUrl, task.branchName, `wip: ${task.title}`, `Validation failed after ${MAX_RETRIES} attempts.\n\nErrors:\n${previousErrors}`);
@@ -354,6 +363,7 @@ async function handleFailureFallback(workDir: string, task: Task, git: any, prev
         
         await updateLinearIssue(task.ticketId, "Todo", failComment);
     } else {
+        console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. No changes to push.`);
         await updateLinearIssue(task.ticketId, "Todo", `❌ Task failed during processing. No changes were made.\n\nErrors:\n${previousErrors}`);
     }
 }
