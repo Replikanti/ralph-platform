@@ -228,7 +228,8 @@ Output format:
 
     // Planning phase: Opus creates the roadmap
     // CRITICAL: Must pass workDir so Claude knows the context
-    const { stdout } = await runClaude(['-p', prompt, '--model', 'opus-4-5'], workDir);
+    // Using explicit 4.5 model IDs found via search
+    const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], workDir);
     
     const planRegex = /<plan>([\s\S]*?)<\/plan>/;
     const planMatch = planRegex.exec(stdout);
@@ -252,7 +253,7 @@ Instructions:
 
     // Execution phase: Sonnet does the work using native CLI capabilities
     return await runClaude(
-        ['-p', prompt, '--model', 'sonnet-4-5', '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob'],
+        ['-p', prompt, '--model', 'claude-sonnet-4-5-20250929', '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob'],
         workDir
     );
 }
