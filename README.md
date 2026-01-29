@@ -41,6 +41,15 @@ graph LR
 6. **Validation**: Polyglot toolchain (Biome, Ruff, Mypy, TSC, Trivy) validates the code
 7. **Push**: Worker commits and pushes to a feature branch
 
+### Indexing & Caching
+
+To reduce credit consumption and improve execution speed, Ralph implements a persistent indexing cache for Claude Code:
+
+- **Persistent Cache**: The directory `/app/claude-cache` is mounted as a Persistent Volume (PVC) in the worker deployment.
+- **Warm Indexing**: Indexing data is seeded into each task's isolated workspace at startup and persisted back to the global cache after every iteration (including failed ones).
+- **Multi-Repository Safety**: Claude Code CLI uses internal hashes based on the project directory path to store indexing data. Since each task uses a consistent directory structure (`/repo`), different repositories are naturally isolated within the cache by their content and metadata.
+- **Scaling Note**: The current architecture uses `ReadWriteOnce` (RWO) storage, which supports a single worker node. For large-scale horizontal scaling across multiple nodes, a `ReadWriteMany` (RWX) storage solution like Google Cloud Filestore would be required.
+
 ---
 
 ## Security Features
