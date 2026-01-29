@@ -43,6 +43,39 @@ graph LR
 
 ---
 
+## API Endpoints
+
+### GET /health
+
+Health check endpoint to verify the API server is running.
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/health` |
+| **Authentication** | None required |
+| **Response Code** | 200 OK |
+| **Response Body** | `{"status":"ok"}` |
+
+**Example:**
+
+```bash
+curl http://localhost:3000/health
+```
+
+**Expected Response:**
+
+```json
+{"status":"ok"}
+```
+
+This endpoint is useful for:
+- Kubernetes liveness/readiness probes
+- Load balancer health checks
+- Manual verification that the API is running
+
+---
+
 ## Security Features
 
 Ralph implements multiple security layers to safely execute AI-generated code in untrusted repositories:
