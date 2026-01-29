@@ -80,7 +80,7 @@ Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The w
 ### Agent Security Layer
 The agent (src/agent.ts:12-18) has a two-tier prompt system:
 1. **SECURITY_GUARDRAILS**: Immutable security rules preventing secret exposure, destructive operations, and sandbox escapes
-2. **Repo Skills**: Mutable per-repo instructions loaded from `.ralph/skills/*.md` in the target repository
+2. **Repo Skills**: Mutable per-repo instructions loaded from `.claude/skills/` directories in the target repository (each skill is a folder with a `SKILL.md` file)
 
 When adding features, preserve this separation - security rules are hardcoded, repo-specific guidance comes from the skills directory.
 

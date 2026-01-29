@@ -175,7 +175,7 @@ const SECURITY_GUARDRAILS = `
 `.trim();
 
 // --- SKILLS MANAGEMENT ---
-async function listAvailableSkills(workDir: string): Promise<string> {
+export async function listAvailableSkills(workDir: string): Promise<string> {
     // List native skills from .claude/skills so the Planner knows what's available
     const skillsDir = path.join(workDir, '.claude', 'skills');
     try {
