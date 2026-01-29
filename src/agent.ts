@@ -354,6 +354,29 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
     await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
+const CLAUDE_CACHE_ROOT = '/tmp/ralph-claude-cache';
+if (!fs.existsSync(CLAUDE_CACHE_ROOT)) fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true });
+
+async function seedClaudeCache(targetClaudeDir: string) {
+    const projectsCache = path.join(CLAUDE_CACHE_ROOT, 'projects');
+    if (fs.existsSync(projectsCache)) {
+        const targetProjects = path.join(targetClaudeDir, 'projects');
+        await fsPromises.mkdir(targetProjects, { recursive: true });
+        await fsPromises.cp(projectsCache, targetProjects, { recursive: true });
+        console.log("Seeded Claude projects cache from global storage");
+    }
+}
+
+async function persistClaudeCache(sourceClaudeDir: string) {
+    const projectsSource = path.join(sourceClaudeDir, 'projects');
+    if (fs.existsSync(projectsSource)) {
+        const targetProjects = path.join(CLAUDE_CACHE_ROOT, 'projects');
+        await fsPromises.mkdir(CLAUDE_CACHE_ROOT, { recursive: true });
+        await fsPromises.cp(projectsSource, targetProjects, { recursive: true });
+        console.log("Persisted Claude projects cache to global storage");
+    }
+}
+
 export const runAgent = async (task: Task): Promise<void> => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
         const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
@@ -374,6 +397,7 @@ export const runAgent = async (task: Task): Promise<void> => {
                     }
                 }
                 
+                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
                 const credsFile = path.join(targetClaudeDir, '.credentials.json');
                 if (!fs.existsSync(credsFile)) {
                     await fsPromises.writeFile(credsFile, JSON.stringify({
@@ -381,6 +405,10 @@ export const runAgent = async (task: Task): Promise<void> => {
                         "email": "ralph@duvo.ai"
                     }));
                 }
+                
+                // NEW: Seed project cache to save credits on indexing
+                await seedClaudeCache(targetClaudeDir);
+
                 console.log("Seeded isolated Claude config");
             } catch (e: any) {
                 console.warn("Seed failed: " + e.message);
@@ -401,7 +429,11 @@ export const runAgent = async (task: Task): Promise<void> => {
 
             for (let i = 0; i < MAX_RETRIES; i++) {
                 const result = await runIteration(i + 1, ctx, previousErrors);
-                if (result.success) return;
+                if (result.success) {
+                    // Save warm cache for next tasks
+                    await persistClaudeCache(targetClaudeDir);
+                    return;
+                }
                 previousErrors = result.output || "";
             }
 
