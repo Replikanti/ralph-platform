@@ -363,54 +363,63 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
     }
 }
 
-async function runIteration(iteration: number, trace: any, workDir: string, homeDir: string, task: Task, availableSkills: string, previousErrors: string, git: any): Promise<{ success: boolean, output?: string }> {
+interface IterationContext {
+    trace: any;
+    workDir: string;
+    homeDir: string;
+    task: Task;
+    availableSkills: string;
+    git: any;
+}
+
+async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
     // 1. PLAN (Opus)
-    const planSpan = trace.span({ 
+    const planSpan = ctx.trace.span({
         name: `Planning-Opus-Iter-${iteration}`,
         metadata: { iteration }
     });
-    const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
+    const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
     // Strip XML tags if present to prevent Executor confusion
-    const plan = rawPlan.replace(/<plan>|<\/plan>/g, '').trim();
+    const plan = rawPlan.replaceAll(/<plan>|<\/plan>/g, '').trim();
     planSpan.end({ output: plan });
 
     // 2. EXECUTE (Sonnet)
-    const execSpan = trace.span({ 
+    const execSpan = ctx.trace.span({
         name: `Execution-Sonnet-Iter-${iteration}`,
         metadata: { iteration }
     });
-    await executePhase(workDir, homeDir, plan);
+    await executePhase(ctx.workDir, ctx.homeDir, plan);
     execSpan.end();
 
     // 3. VALIDATE
-    const valSpan = trace.span({ 
+    const valSpan = ctx.trace.span({
         name: `Validation-Iter-${iteration}`,
         metadata: { iteration }
     });
-    const check = await runPolyglotValidation(workDir);
+    const check = await runPolyglotValidation(ctx.workDir);
     valSpan.end({ output: check });
 
     if (check.success) {
         console.log("✅ [Agent] Validation passed!");
-        
-        await git.add('.');
-        const status = await git.status();
+
+        await ctx.git.add('.');
+        const status = await ctx.git.status();
         if (status.staged.length > 0) {
-            await git.commit(`feat: ${task.title}`);
-            await git.push('origin', task.branchName, ['--force']);
-            
-            const prUrl = await createPullRequest(task.repoUrl, task.branchName, `feat: ${task.title}`, task.description || '');
-            const successComment = prUrl 
+            await ctx.git.commit(`feat: ${ctx.task.title}`);
+            await ctx.git.push('origin', ctx.task.branchName, ['--force']);
+
+            const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, `feat: ${ctx.task.title}`, ctx.task.description || '');
+            const successComment = prUrl
                 ? `✅ Task completed successfully.\n\nPull Request: ${prUrl}`
-                : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${task.branchName}`;
-            
-            await updateLinearIssue(task.ticketId, "In Review", successComment);
+                : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${ctx.task.branchName}`;
+
+            await updateLinearIssue(ctx.task.ticketId, "In Review", successComment);
             if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
         } else {
             console.warn("⚠️ [Agent] Validation passed but no files were changed.");
-            await updateLinearIssue(task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary or made.");
+            await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary or made.");
         }
         return { success: true };
     }
@@ -450,8 +459,10 @@ export const runAgent = async (task: Task): Promise<void> => {
             let previousErrors = "";
             const MAX_RETRIES = 3;
 
+            const ctx: IterationContext = { trace, workDir, homeDir, task, availableSkills, git };
+
             for (let i = 0; i < MAX_RETRIES; i++) {
-                const result = await runIteration(i + 1, trace, workDir, homeDir, task, availableSkills, previousErrors, git);
+                const result = await runIteration(i + 1, ctx, previousErrors);
                 if (result.success) return;
                 previousErrors = result.output || "";
             }

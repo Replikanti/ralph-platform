@@ -14,9 +14,8 @@ RUN apt-get update && \
 
 # Build App
 COPY package*.json ./
-RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm ci && npm run build
 
 # Set ownership to existing node user for security (node user is pre-created in node:22-bookworm with UID/GID 1000)
 RUN chown -R node:node /app
