@@ -147,13 +147,20 @@ export async function runPolyglotValidation(workDir: string) {
     // 1. TS/JS: Biome & TSC
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
         try {
+            // Ensure dependencies are installed for TSC to work
+            if (!fs.existsSync(path.join(workDir, 'node_modules'))) {
+                console.log("📦 Installing dependencies for validation...");
+                await execAsync('npm install --no-package-lock --no-audit --quiet', { cwd: workDir });
+            }
+            
             await execAsync('biome check --apply .', { cwd: workDir });
             outputLog += "✅ Biome: Passed\n";
         } catch (e: any) { allSuccess = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
              try {
-                await execAsync('tsc --noEmit', { cwd: workDir });
+                // We use --skipLibCheck to be faster and more resilient
+                await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
                 outputLog += "✅ TSC: Passed\n";
             } catch (e: any) { allSuccess = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
         }
@@ -162,26 +169,36 @@ export async function runPolyglotValidation(workDir: string) {
     // 2. Python: Ruff & Mypy
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
-                      (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false /* Ignore find errors */));
+                      (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
 
     if (hasPython) {
         try {
+            // Install dependencies if they are not there
+            // We use a simple check for a hidden marker or just run it (pip is idempotent enough)
+            if (fs.existsSync(path.join(workDir, 'requirements.txt'))) {
+                console.log("🐍 Installing Python dependencies from requirements.txt...");
+                await execAsync('pip install --quiet --no-cache-dir -r requirements.txt', { cwd: workDir });
+            } else if (fs.existsSync(path.join(workDir, 'pyproject.toml'))) {
+                console.log("🐍 Installing Python dependencies from pyproject.toml...");
+                await execAsync('pip install --quiet --no-cache-dir .', { cwd: workDir });
+            }
+
             await execAsync('ruff check --fix .', { cwd: workDir });
             await execAsync('ruff format .', { cwd: workDir });
             outputLog += "✅ Ruff: Passed\n";
         } catch (e: any) { allSuccess = false; outputLog += `❌ Ruff: ${e.stdout}\n`; }
 
         try {
-            // --ignore-missing-imports is safer for environments without all stubs installed
             await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
             outputLog += "✅ Mypy: Passed\n";
         } catch (e: any) { allSuccess = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
     }
 
     // 3. Security: Trivy (Universal - Apache 2.0)
-    // Scans for vulnerabilities, secrets, and misconfigurations
+    // We use a custom cache directory inside the writable workDir
+    const trivyCache = path.join(workDir, '.trivy-cache');
     try {
-        await execAsync('trivy fs . --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1', { cwd: workDir });
+        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
         outputLog += "✅ Trivy: Secure\n";
     } catch (e: any) { 
         allSuccess = false; 

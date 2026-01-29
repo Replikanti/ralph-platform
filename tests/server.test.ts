@@ -1,9 +1,13 @@
 import request from 'supertest';
 import crypto from 'node:crypto';
-import { app } from '../src/server';
 
+// Setup environment BEFORE importing server
 const TEST_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.LINEAR_WEBHOOK_SECRET = TEST_SECRET;
+process.env.ADMIN_USER = 'admin';
+process.env.ADMIN_PASS = 'password';
+
+import { app } from '../src/server';
 
 // Mock fs
 jest.mock('node:fs/promises', () => ({
@@ -15,6 +19,20 @@ jest.mock('node:fs/promises', () => ({
 jest.mock('bullmq', () => ({
     Queue: jest.fn().mockImplementation(() => ({
         add: jest.fn(),
+    })),
+}));
+
+// Mock Bull Board
+jest.mock('@bull-board/api', () => ({
+    createBullBoard: jest.fn(),
+}));
+jest.mock('@bull-board/api/bullMQAdapter', () => ({
+    BullMQAdapter: jest.fn(),
+}));
+jest.mock('@bull-board/express', () => ({
+    ExpressAdapter: jest.fn().mockImplementation(() => ({
+        setBasePath: jest.fn(),
+        getRouter: jest.fn().mockReturnValue((req: any, res: any, next: any) => next()),
     })),
 }));
 
@@ -154,5 +172,10 @@ describe('POST /webhook', () => {
         const res = await request(app).get('/health');
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ status: 'ok' });
+    });
+
+    it('should protect /admin/queues with Basic Auth', async () => {
+        const res = await request(app).get('/admin/queues');
+        expect(res.status).toBe(401);
     });
 });

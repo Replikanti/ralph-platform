@@ -15,6 +15,10 @@ secrets:
   anthropicKey: "ralph-anthropic-key"
   langfuse: "ralph-langfuse"
   linearWebhook: "ralph-linear-secret"
+
+admin:
+  user: "admin"
+
 # Map Linear Teams to GitHub Repositories
 # Key: Linear Team Key (e.g., "FRONT")
 # Value: GitHub Repository URL

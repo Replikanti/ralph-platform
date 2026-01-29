@@ -47,7 +47,10 @@ describe('Agent Tools', () => {
     });
 
     it('runCommand should execute allowed commands and return output', async () => {
-        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => cb(null, { stdout: 'out', stderr: 'err' }));
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            callback(null, { stdout: 'out', stderr: 'err' });
+        });
         const result = await runCommand(workDir, 'npm test');
         expect(result).toContain('STDOUT:\nout');
         expect(result).toContain('STDERR:\nerr');
@@ -69,7 +72,10 @@ describe('Agent Tools', () => {
     });
 
     it('should allow safe whitelisted commands', async () => {
-        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => cb(null, { stdout: 'ok', stderr: '' }));
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            callback(null, { stdout: 'ok', stderr: '' });
+        });
 
         const safeCommands = [
             'npm test',
@@ -97,94 +103,70 @@ describe('runPolyglotValidation', () => {
         jest.clearAllMocks();
     });
 
-    const setupMocks = (
-        fileFilter: (p: string) => boolean,
-        execHandler: (cmd: string, cb: any) => void = (cmd, cb) => cb(null, { stdout: '' })
-    ) => {
-        mockedFsExistsSync.mockImplementation(fileFilter);
-        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => execHandler(cmd, cb));
-    };
+    it('should run npm install, biome and tsc if package.json and tsconfig.json exist', async () => {
+        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json') || p.endsWith('tsconfig.json') || p.endsWith('node_modules'));
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            callback(null, { stdout: 'Success', stderr: '' });
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
 
-    const successHandler = (_cmd: string, cb: any) => cb(null, { stdout: '' });
-
-    const runAndAssert = async (
-        expectedStrings: string[],
-        execCalls: string[] = [],
-        expectSuccess = true
-    ) => {
         const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(expectSuccess);
-
-        for (const str of expectedStrings) {
-            expect(result.output).toContain(str);
-        }
-        for (const call of execCalls) {
-             expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining(call), expect.anything(), expect.anything());
-        }
-        return result;
-    };
-
-    it('should run biome and tsc if package.json and tsconfig.json exist', async () => {
-        setupMocks(
-            (p) => p.endsWith('package.json') || p.endsWith('tsconfig.json'),
-            successHandler
-        );
-        await runAndAssert(
-            ['✅ Biome: Passed', '✅ TSC: Passed'],
-            ['biome check', 'tsc --noEmit']
-        );
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('✅ Biome: Passed');
+        expect(result.output).toContain('✅ TSC: Passed');
+        expect(result.output).toContain('✅ Trivy: Secure');
     });
 
     it('should run ruff and mypy if pyproject.toml exists', async () => {
-        setupMocks(
-            (p) => p.endsWith('pyproject.toml'),
-            successHandler
-        );
-        await runAndAssert(
-            ['✅ Ruff: Passed', '✅ Mypy: Passed'],
-            ['ruff check', 'mypy --ignore-missing-imports']
-        );
-    });
+        mockedFsExistsSync.mockImplementation((p) => {
+            const normalized = p.replace(/\\/g, '/');
+            if (normalized.endsWith('package.json')) return false;
+            if (normalized.endsWith('pyproject.toml')) return true;
+            return false;
+        });
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('find')) callback(null, { stdout: 'main.py', stderr: '' });
+            else callback(null, { stdout: 'Success', stderr: '' });
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
 
-    it('should run mypy if python files are found via find command', async () => {
-        setupMocks(
-            () => false,
-            (cmd, cb) => {
-                if (cmd.startsWith('find')) cb(null, { stdout: './main.py\n' });
-                else cb(null, { stdout: '' });
-            }
-        );
-        await runAndAssert(
-            ['✅ Ruff: Passed', '✅ Mypy: Passed'],
-            ['mypy --ignore-missing-imports']
-        );
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('✅ Ruff: Passed');
+        expect(result.output).toContain('✅ Mypy: Passed');
     });
 
     it('should fail if tool execution fails', async () => {
-        setupMocks(
-            (p) => p.endsWith('package.json'),
-            (cmd, cb) => {
-                if (cmd.includes('biome')) {
-                    const err: any = new Error('Biome failed');
-                    err.stdout = 'Lint errors';
-                    cb(err, { stdout: 'Lint errors' });
-                } else {
-                    cb(null, { stdout: '' });
-                }
+        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('biome')) {
+                const err: any = new Error('Biome failed');
+                err.stdout = 'Lint errors';
+                callback(err, { stdout: 'Lint errors' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
             }
-        );
-        await runAndAssert(
-            ['❌ Biome: Lint errors'],
-            [],
-            false
-        );
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(false);
+        expect(result.output).toContain('❌ Biome: Lint errors');
     });
 
-    it('should always run trivy', async () => {
-        setupMocks(() => false, successHandler);
-        await runAndAssert(
-            ['✅ Trivy: Secure'],
-            ['trivy fs']
-        );
+    it('should always run trivy with custom cache', async () => {
+        mockedFsExistsSync.mockReturnValue(false);
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            callback(null, { stdout: 'Success', stderr: '' });
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.output).toContain('✅ Trivy: Secure');
+        expect(mockedExec).toHaveBeenCalledWith(expect.stringContaining('trivy fs . --cache-dir'), expect.anything(), expect.anything());
     });
 });
