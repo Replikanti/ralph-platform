@@ -33,13 +33,5 @@ export async function setupWorkspace(repoUrl: string, branchName: string) {
         await git.checkoutLocalBranch(branchName); 
     }
 
-    // SAFETY: Ensure .trivy-cache is ignored so it's never pushed
-    try {
-        const gitignorePath = path.join(workDir, '.gitignore');
-        await fs.promises.appendFile(gitignorePath, '\n.trivy-cache/\n');
-    } catch (e) {
-        console.warn("⚠️ Failed to update .gitignore:", e);
-    }
-
     return { workDir, git, cleanup: () => fs.rmSync(workDir, { recursive: true, force: true }) };
 }

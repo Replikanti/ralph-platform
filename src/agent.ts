@@ -246,9 +246,11 @@ ${SECURITY_GUARDRAILS}
 
 Instructions:
 1. Follow the plan strictly.
-2. Use your native skills if requested in the plan.
-3. Verify your work.
-4. Do NOT commit.
+2. Only modify files that are absolutely necessary to implement the requested task.
+3. Do NOT "fix" or reformat unrelated files.
+4. Use your native skills if requested in the plan.
+5. Verify your work.
+6. Do NOT commit.
     `.trim();
 
     // Execution phase: Sonnet does the work using native CLI capabilities
