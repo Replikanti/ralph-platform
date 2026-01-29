@@ -200,6 +200,28 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
     return { success, log: outputLog };
 }
 
+async function validateSecurity(workDir: string): Promise<{ success: boolean, log: string }> {
+    let outputLog = "";
+    let success = true;
+    const trivyCache = path.join(workDir, '.trivy-cache');
+    
+    try {
+        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
+        outputLog += "✅ Trivy: Secure\n";
+    } catch (e: any) { 
+        success = false; 
+        outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
+    } finally {
+        // CLEANUP: Remove trivy cache to prevent it from being pushed to git (it's >900MB)
+        try {
+            await fsPromises.rm(trivyCache, { recursive: true, force: true });
+        } catch (e) {
+            console.warn("⚠️ Failed to cleanup trivy cache:", e);
+        }
+    }
+    return { success, log: outputLog };
+}
+
 export async function runPolyglotValidation(workDir: string) {
     let outputLog = "";
     let allSuccess = true;
@@ -215,22 +237,9 @@ export async function runPolyglotValidation(workDir: string) {
     outputLog += pythonResult.log;
 
     // 3. Security: Trivy (Universal - Apache 2.0)
-    // We use a custom cache directory inside the writable workDir
-    const trivyCache = path.join(workDir, '.trivy-cache');
-    try {
-        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
-        outputLog += "✅ Trivy: Secure\n";
-    } catch (e: any) { 
-        allSuccess = false; 
-        outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
-    } finally {
-        // CLEANUP: Remove trivy cache to prevent it from being pushed to git (it's >900MB)
-        try {
-            await fsPromises.rm(trivyCache, { recursive: true, force: true });
-        } catch (e) {
-            console.warn("⚠️ Failed to cleanup trivy cache:", e);
-        }
-    }
+    const securityResult = await validateSecurity(workDir);
+    allSuccess = allSuccess && securityResult.success;
+    outputLog += securityResult.log;
 
     return { success: allSuccess, output: outputLog };
 }
