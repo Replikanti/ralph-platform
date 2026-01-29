@@ -352,6 +352,16 @@ export const runAgent = async (task: Task): Promise<void> => {
                         await fsPromises.copyFile(src, dst);
                     }
                 }
+                
+                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
+                const credsFile = path.join(targetClaudeDir, '.credentials.json');
+                if (!fs.existsSync(credsFile)) {
+                    await fsPromises.writeFile(credsFile, JSON.stringify({
+                        "token": "sk-ant-dummy-token",
+                        "email": "ralph@duvo.ai"
+                    }));
+                }
+                
                 console.log("Seeded isolated Claude config");
             } catch (e: any) {
                 console.warn("Seed failed: " + e.message);
