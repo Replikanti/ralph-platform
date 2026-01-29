@@ -341,6 +341,28 @@ Instructions:
     );
 }
 
+/**
+ * Ensures that skills from the repository are available to the Claude CLI.
+ * Copies skills from the repository's .claude/skills directory to the Claude home directory.
+ */
+async function prepareClaudeSkills(workDir: string) {
+    const CLAUDE_HOME = '/tmp'; // Matches HOME in runClaude
+    const targetSkillsDir = path.join(CLAUDE_HOME, '.claude', 'skills');
+    const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
+
+    try {
+        if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
+            await fsPromises.mkdir(targetSkillsDir, { recursive: true });
+            // Use cp -r to copy the skills directory
+            const { execSync } = await import('node:child_process');
+            execSync(`cp -r ${sourceSkillsDir}/* ${targetSkillsDir}/`);
+            console.log(`✅ [Agent] Loaded repository skills into Claude environment`);
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [Agent] Failed to load skills into environment: ${e.message}`);
+    }
+}
+
 async function runIteration(iteration: number, trace: any, workDir: string, task: Task, availableSkills: string, previousErrors: string, git: any): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
@@ -349,7 +371,9 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
         name: `Planning-Opus-Iter-${iteration}`,
         metadata: { iteration }
     });
-    const plan = await planPhase(workDir, task, availableSkills, previousErrors);
+    const rawPlan = await planPhase(workDir, task, availableSkills, previousErrors);
+    // Strip XML tags if present to prevent Executor confusion
+    const plan = rawPlan.replace(/<plan>|<\/plan>/g, '').trim();
     planSpan.end({ output: plan });
 
     // 2. EXECUTE (Sonnet)
@@ -419,6 +443,7 @@ export const runAgent = async (task: Task): Promise<void> => {
                 await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
             }
 
+            await prepareClaudeSkills(workDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
