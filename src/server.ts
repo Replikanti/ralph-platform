@@ -120,7 +120,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
 
 // Middleware to capture raw body for signature verification
 app.use(express.json({
-    verify: (req: any, _res, buf) => {
+    verify: (req: any, _res: express.Response, buf: Buffer) => {
         req.rawBody = buf;
     }
 }));
@@ -148,7 +148,7 @@ function verifyLinearSignature(req: any): boolean {
     return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
 }
 
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (!verifyLinearSignature(req)) {
         console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
         return res.status(401).send('Invalid signature');
@@ -159,14 +159,14 @@ app.post('/webhook', async (req, res) => {
     // DEBUG: Log everything
     console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
     if (data?.labels) {
-        console.log(`🏷️ [API] Labels: ${data.labels.map((l: any) => l.name).join(', ')}`);
+        console.log(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`);
     } else {
         console.log(`🏷️ [API] No labels in payload.`);
     }
 
     // Filter: Only issues with label "Ralph"
     const labels = data.labels || [];
-    const labelNames = labels.map((l: any) => l.name);
+    const labelNames = labels.map((l: { name: string }) => l.name);
     const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
 
     if (type === 'Issue' && (action === 'create' || action === 'update')) {

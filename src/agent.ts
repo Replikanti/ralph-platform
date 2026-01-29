@@ -1,12 +1,26 @@
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation } from "./tools";
-import fs from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { LinearClient } from "@linear/sdk";
 
 const langfuse = new Langfuse();
+
+// --- TYPES ---
+
+export interface Task {
+    ticketId: string;
+    title: string;
+    description?: string;
+    repoUrl: string;
+    branchName: string;
+    jobId: string;
+    attempt: number;
+    maxAttempts: number;
+}
 
 // --- HELPERS ---
 
@@ -26,7 +40,7 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
         }
 
         const states = await team.states();
-        const targetState = states.nodes.find((s: any) => s.name.toLowerCase() === statusName.toLowerCase());
+        const targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === statusName.toLowerCase());
 
         if (targetState) {
             const currentState = await issue.state;
@@ -37,7 +51,7 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
                 await linear.updateIssue(issueId, { stateId: targetState.id });
             }
         } else {
-            const availableStates = states.nodes.map((s: any) => s.name).join(", ");
+            const availableStates = states.nodes.map((s: { name: string }) => s.name).join(", ");
             console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}. Available: ${availableStates}`);
         }
 
@@ -45,12 +59,13 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
             console.log(`💬 [Agent] Adding comment to Linear issue ${issueId}`);
             await linear.createComment({ issueId, body: comment });
         }
-    } catch (e: any) {
-        console.error(`❌ [Agent] Failed to update Linear issue ${issueId}: ${e.message}`);
+    } catch (e: unknown) {
+        const error = e as Error;
+        console.error(`❌ [Agent] Failed to update Linear issue ${issueId}: ${error.message}`);
     }
 }
 
-async function createPullRequest(repoUrl: string, branchName: string, title: string, body: string) {
+async function createPullRequest(repoUrl: string, branchName: string, title: string, body: string): Promise<string | null> {
     const { owner, repo } = parseRepoUrl(repoUrl);
     try {
         const { Octokit } = await import("@octokit/rest");
@@ -114,7 +129,7 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
         });
 
         // Close stdin to prevent hanging on interactive prompts
-        child.stdin.end();
+        if (child.stdin) child.stdin.end();
 
         // Debug process creation
         if (!child.pid) {
@@ -124,22 +139,26 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
         }
         console.log(`✅ [Claude CLI] Process spawned with PID: ${child.pid}`);
         
-        let stdout = '';
-        let stderr = '';
+        let stdout: string = '';
+        let stderr: string = '';
 
         // Real-time logging
-        child.stdout.on('data', (data) => {
-            const str = data.toString();
-            stdout += str;
-            // Log only significant chunks to avoid spamming
-            if (str.trim()) console.log(`[Claude STDOUT]: ${str.trim()}`);
-        });
+        if (child.stdout) {
+            child.stdout.on('data', (data: Buffer) => {
+                const str = data.toString();
+                stdout += str;
+                // Log only significant chunks to avoid spamming
+                if (str.trim()) console.log(`[Claude STDOUT]: ${str.trim()}`);
+            });
+        }
 
-        child.stderr.on('data', (data) => {
-            const str = data.toString();
-            stderr += str;
-            if (str.trim()) console.warn(`[Claude STDERR]: ${str.trim()}`);
-        });
+        if (child.stderr) {
+            child.stderr.on('data', (data: Buffer) => {
+                const str = data.toString();
+                stderr += str;
+                if (str.trim()) console.warn(`[Claude STDERR]: ${str.trim()}`);
+            });
+        }
 
         // Timeout handler
         const timeout = setTimeout(() => {
@@ -148,7 +167,7 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
             reject(new Error(`Claude CLI timed out after ${timeoutMs}ms`));
         }, timeoutMs);
 
-        child.on('close', (code) => {
+        child.on('close', (code: number) => {
             clearTimeout(timeout);
             if (code === 0) {
                 resolve({ stdout, stderr });
@@ -160,7 +179,7 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
             }
         });
 
-        child.on('error', (err) => {
+        child.on('error', (err: Error) => {
             clearTimeout(timeout);
             reject(err);
         });
@@ -175,23 +194,27 @@ const SECURITY_GUARDRAILS = `
 `.trim();
 
 // --- SKILLS MANAGEMENT ---
+
 async function listAvailableSkills(workDir: string): Promise<string> {
     // List native skills from .claude/skills so the Planner knows what's available
     const skillsDir = path.join(workDir, '.claude', 'skills');
     try {
-        const dirs = await fs.readdir(skillsDir, { withFileTypes: true });
+        const dirs = await fsPromises.readdir(skillsDir, { withFileTypes: true });
         return dirs
-            .filter(d => d.isDirectory())
-            .map(d => `- /${d.name}`)
+            .filter((d: fs.Dirent) => d.isDirectory())
+            .map((d: fs.Dirent) => `- /${d.name}`)
             .join('\n');
     } catch { return "No native skills available."; }
 }
 
 // --- TRACING ---
-async function withTrace<T>(name: string, metadata: any, fn: (span: any) => Promise<T>) {
+async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (span: any) => Promise<T>) {
     const trace = langfuse.trace({ name, metadata });
     try { return await fn(trace); } 
-    catch (e: any) { trace.update({ metadata: { level: "ERROR", error: e.message } }); throw e; } 
+    catch (e: unknown) { 
+        const error = e as Error;
+        trace.update({ metadata: { level: "ERROR", error: error.message } }); throw e; 
+    } 
     finally { await langfuse.flushAsync(); }
 }
 
@@ -201,7 +224,7 @@ async function planPhase(workDir: string, task: any, availableSkills: string, pr
     // Load CLAUDE.md as the primary project guide
     let projectGuide = "";
     try {
-        projectGuide = await fs.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8');
+        projectGuide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8');
     } catch {
         projectGuide = "No CLAUDE.md found. Use general knowledge.";
     }
@@ -266,7 +289,7 @@ Instructions:
     );
 }
 
-async function runIteration(iteration: number, trace: any, workDir: string, task: any, availableSkills: string, previousErrors: string, git: any) {
+async function runIteration(iteration: number, trace: any, workDir: string, task: Task, availableSkills: string, previousErrors: string, git: any): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
     // 1. PLAN (Opus)
@@ -320,7 +343,7 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
     return { success: false, output: check.output };
 }
 
-async function handleFailureFallback(workDir: string, task: any, git: any, previousErrors: string, MAX_RETRIES: number) {
+async function handleFailureFallback(workDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
     await git.add('.');
     const finalStatus = await git.status();
     
@@ -345,8 +368,8 @@ async function handleFailureFallback(workDir: string, task: any, git: any, previ
     }
 }
 
-export const runAgent = async (task: any) => {
-    return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
+export const runAgent = async (task: Task): Promise<void> => {
+    return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
             // Smart notification based on attempt number

@@ -7,6 +7,7 @@ jest.mock('node:fs/promises', () => ({
     mkdir: jest.fn().mockResolvedValue(undefined),
     writeFile: jest.fn().mockResolvedValue(undefined),
     stat: jest.fn().mockResolvedValue({ mtimeMs: Date.now() }),
+    cp: jest.fn().mockResolvedValue(undefined),
 }));
 
 // Set a longer timeout for agent tests involving CLI mocks
