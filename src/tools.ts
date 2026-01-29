@@ -140,25 +140,46 @@ export const agentTools = [
 
 // --- EXISTING VALIDATION LOGIC ---
 
-async function validateNode(workDir: string): Promise<{ success: boolean, log: string }> {
+// Helper to get changed files
+async function getChangedFiles(workDir: string): Promise<string[]> {
+    try {
+        const { stdout } = await execAsync('git status --porcelain', { cwd: workDir });
+        if (!stdout) return [];
+
+        return stdout.split('\n')
+            .filter(line => line.trim() !== '')
+            .map(line => line.substring(3).trim());
+    } catch (e) {
+        console.warn("⚠️ Failed to detect changed files:", e);
+        return [];
+    }
+}
+
+async function validateNode(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
 
+    const relevantExtensions = ['.ts', '.js', '.json', '.jsx', '.tsx'];
+    const hasRelevantChanges = changedFiles.length === 0 || changedFiles.some(f => 
+        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('package.json')
+    );
+
+    if (!hasRelevantChanges) {
+        return { success: true, log: "⏩ Node.js validation skipped (no relevant changes)\n" };
+    }
+
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
         try {
-            // Ensure dependencies are installed for TSC to work
             if (!fs.existsSync(path.join(workDir, 'node_modules'))) {
                 console.log("📦 Installing dependencies for validation...");
                 await execAsync('npm install --no-package-lock --no-audit --quiet', { cwd: workDir });
             }
-            
             await execAsync('biome check --apply .', { cwd: workDir });
             outputLog += "✅ Biome: Passed\n";
         } catch (e: any) { success = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
              try {
-                // We use --skipLibCheck to be faster and more resilient
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
                 outputLog += "✅ TSC: Passed\n";
             } catch (e: any) { success = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
@@ -167,9 +188,22 @@ async function validateNode(workDir: string): Promise<{ success: boolean, log: s
     return { success, log: outputLog };
 }
 
-async function validatePython(workDir: string): Promise<{ success: boolean, log: string }> {
+async function validatePython(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
+
+    const relevantExtensions = ['.py', '.toml', '.txt'];
+    const hasRelevantChanges = changedFiles.length === 0 || changedFiles.some(f => 
+        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('requirements.txt') || f.includes('pyproject.toml')
+    );
+
+    if (!hasRelevantChanges) {
+        const pythonEnvExists = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
+                                fs.existsSync(path.join(workDir, 'requirements.txt'));
+        if (pythonEnvExists) {
+             return { success: true, log: "⏩ Python validation skipped (no relevant changes)\n" };
+        }
+    }
 
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
@@ -177,8 +211,6 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
 
     if (hasPython) {
         try {
-            // Install dependencies if they are not there
-            // We use a simple check for a hidden marker or just run it (pip is idempotent enough)
             if (fs.existsSync(path.join(workDir, 'requirements.txt'))) {
                 console.log("🐍 Installing Python dependencies from requirements.txt...");
                 await execAsync('pip install --quiet --no-cache-dir -r requirements.txt', { cwd: workDir });
@@ -186,7 +218,6 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
                 console.log("🐍 Installing Python dependencies from pyproject.toml...");
                 await execAsync('pip install --quiet --no-cache-dir .', { cwd: workDir });
             }
-
             await execAsync('ruff check --fix .', { cwd: workDir });
             await execAsync('ruff format .', { cwd: workDir });
             outputLog += "✅ Ruff: Passed\n";
@@ -212,7 +243,6 @@ async function validateSecurity(workDir: string): Promise<{ success: boolean, lo
         success = false; 
         outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
     } finally {
-        // CLEANUP: Remove trivy cache to prevent it from being pushed to git (it's >900MB)
         try {
             await fsPromises.rm(trivyCache, { recursive: true, force: true });
         } catch (e) {
@@ -226,17 +256,19 @@ export async function runPolyglotValidation(workDir: string) {
     let outputLog = "";
     let allSuccess = true;
 
-    // 1. TS/JS: Biome & TSC
-    const nodeResult = await validateNode(workDir);
+    const changedFiles = await getChangedFiles(workDir);
+    if (changedFiles.length > 0) {
+        console.log(`🔍 [Validation] Changed files: ${changedFiles.join(', ')}`);
+    }
+
+    const nodeResult = await validateNode(workDir, changedFiles);
     allSuccess = allSuccess && nodeResult.success;
     outputLog += nodeResult.log;
 
-    // 2. Python: Ruff & Mypy
-    const pythonResult = await validatePython(workDir);
+    const pythonResult = await validatePython(workDir, changedFiles);
     allSuccess = allSuccess && pythonResult.success;
     outputLog += pythonResult.log;
 
-    // 3. Security: Trivy (Universal - Apache 2.0)
     const securityResult = await validateSecurity(workDir);
     allSuccess = allSuccess && securityResult.success;
     outputLog += securityResult.log;
