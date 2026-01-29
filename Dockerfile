@@ -18,11 +18,9 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Create non-root user for security
-RUN groupadd --gid 1000 appuser && \
-    useradd --uid 1000 --gid 1000 --create-home appuser && \
-    chown -R appuser:appuser /app
+# Set ownership to existing node user for security (node user is pre-created in node:22-bookworm with UID/GID 1000)
+RUN chown -R node:node /app
 
-USER appuser
+USER node
 
 CMD ["node", "dist/server.js"]
