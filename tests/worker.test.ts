@@ -46,14 +46,14 @@ describe('Worker', () => {
             attemptsMade: 0,
             opts: { attempts: 3 }
         };
-        await jobProcessor(mockJob);
+        await jobProcessor(mockJob as any);
         
         expect(runAgent).toHaveBeenCalledWith({
             task: 'test',
             jobId: '123',
             attempt: 1,
             maxAttempts: 3
-        });
+        } as any);
     });
 
     it('should log on completed event', () => {
