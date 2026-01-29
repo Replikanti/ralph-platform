@@ -170,9 +170,10 @@ const SECURITY_GUARDRAILS = `
 `.trim();
 
 // --- SKILLS MANAGEMENT ---
+
 async function listAvailableSkills(workDir: string): Promise<string> {
-    // List native skills from .claude/skills so the Planner knows what's available
-    const skillsDir = path.join(workDir, '.claude', 'skills');
+    // List native skills from .ralph/skills so the Planner knows what's available
+    const skillsDir = path.join(workDir, '.ralph', 'skills');
     try {
         const dirs = await fs.readdir(skillsDir, { withFileTypes: true });
         return dirs
@@ -180,6 +181,26 @@ async function listAvailableSkills(workDir: string): Promise<string> {
             .map(d => `- /${d.name}`)
             .join('\n');
     } catch { return "No native skills available."; }
+}
+
+/**
+ * Ensures that skills from the repository are available to the Claude CLI.
+ * Copies skills from the repository's .ralph/skills directory to the Claude home directory.
+ */
+async function prepareClaudeSkills(workDir: string) {
+    const CLAUDE_HOME = '/tmp'; // Matches HOME in runClaude
+    const targetSkillsDir = path.join(CLAUDE_HOME, '.claude', 'skills');
+    const sourceSkillsDir = path.join(workDir, '.ralph', 'skills');
+
+    try {
+        if (await fs.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
+            await fs.mkdir(targetSkillsDir, { recursive: true });
+            await fs.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
+            console.log(`✅ [Agent] Loaded repository skills from .ralph/skills`);
+        }
+    } catch (e: any) {
+        console.warn(`⚠️ [Agent] Failed to load skills: ${e.message}`);
+    }
 }
 
 // --- TRACING ---
@@ -341,6 +362,7 @@ export const runAgent = async (task: any) => {
                 await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
             }
 
+            await prepareClaudeSkills(workDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             const MAX_RETRIES = 3;
