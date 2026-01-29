@@ -10,7 +10,7 @@ const langfuse = new Langfuse();
 
 // --- HELPERS ---
 
-async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
+export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
     if (!process.env.LINEAR_API_KEY) {
         console.warn("⚠️ LINEAR_API_KEY is missing, skipping status update.");
         return;
@@ -334,7 +334,12 @@ export const runAgent = async (task: any) => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace) => {
         const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         try {
-            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph has started working on this task.");
+            // Smart notification based on attempt number
+            if (task.attempt > 1) {
+                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: \`${task.jobId}\``);
+            } else {
+                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
+            }
 
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
