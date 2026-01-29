@@ -41,7 +41,7 @@ describe('setupWorkspace', () => {
         expect(rootDir).not.toContain('repo');
         
         cleanup();
-        expect(mockedFsRmSync).toHaveBeenCalledWith(rootDir, { recursive: true, force: true });
+        expect(mockedFsRmSync).toHaveBeenCalledWith(rootDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     });
 
     it('should create new branch if checkout fails', async () => {

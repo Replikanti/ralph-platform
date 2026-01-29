@@ -37,5 +37,16 @@ export async function setupWorkspace(repoUrl: string, branchName: string): Promi
         await git.checkoutLocalBranch(branchName); 
     }
 
-    return { workDir, rootDir, git, cleanup: () => fs.rmSync(rootDir, { recursive: true, force: true }) };
+    return { 
+        workDir, 
+        rootDir, 
+        git, 
+        cleanup: () => {
+            try {
+                fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+            } catch (e: any) {
+                console.warn(`[Workspace] Cleanup failed for ${rootDir}: ${e.message}`);
+            }
+        } 
+    };
 }

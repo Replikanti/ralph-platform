@@ -26,6 +26,10 @@ spec:
               mountPath: /tmp/ralph-workspaces
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.storage.claudeCache.enabled }}
+            - name: claude-cache
+              mountPath: /app/claude-cache
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.worker.requests.cpu }}
@@ -36,6 +40,8 @@ spec:
               memory: {{ .Values.resources.worker.limits.memory }}
               ephemeral-storage: {{ .Values.resources.worker.limits.storage }}
           env:
+            - name: CLAUDE_CACHE_PATH
+              value: /app/claude-cache
             - name: REDIS_URL
               {{- if .Values.redis.existingSecret }}
               valueFrom:
@@ -83,6 +89,11 @@ spec:
             sizeLimit: 10Gi
         - name: tmp
           emptyDir: {}
+        {{- if .Values.storage.claudeCache.enabled }}
+        - name: claude-cache
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-claude-cache
+        {{- end }}
         - name: repo-config
           configMap:
             name: {{ .Release.Name }}-repo-config

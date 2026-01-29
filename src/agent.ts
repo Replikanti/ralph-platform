@@ -109,7 +109,6 @@ async function summarizeFailurePhase(task: Task, homeDir: string, errors: string
         "Write a concise, human-friendly explanation (2-3 sentences) for the developer.";
 
     try {
-        // Post-mortem can run in the same isolated homeDir
         const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], process.cwd(), homeDir);
         return stdout.trim();
     } catch {
@@ -150,33 +149,39 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
-                const child = spawn(CLAUDE_PATH, args, { 
-                    cwd,
-                    env: { 
-                        ...process.env, 
-                        HOME: homeDir,
-                        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-                        CI: 'true',
-                        DEBUG: 'true',
-                        TERM: 'dumb',
-                        CLAUDE_CODE_ANALYTICS: 'false'
-                    }
-                });
-                if (child.stdin) child.stdin.end();
+        console.log("🚀 Spawning: " + CLAUDE_PATH + " in " + cwd);
+
+        const child = spawn(CLAUDE_PATH, args, {
+            cwd,
+            env: {
+                ...process.env, 
+                HOME: homeDir,
+                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+                CI: 'true',
+                DEBUG: 'true',
+                TERM: 'dumb',
+                CLAUDE_CODE_ANALYTICS: 'false'
+            }
+        });
+
+        if (child.stdin) child.stdin.end();
 
         if (!child.pid) {
             reject(new Error("Failed to spawn Claude CLI"));
             return;
         }
         
-        let stdout: string = '';
-        let stderr: string = '';
+        let stdout = '';
+        let stderr = '';
 
         if (child.stdout) {
             child.stdout.on('data', (data: Buffer) => {
                 const str = data.toString();
                 stdout += str;
-                if (str.trim()) console.log("[Claude STDOUT]: " + str.trim());
+                if (str.trim()) {
+                    // Filter out known noisy strings but keep progress visible
+                    process.stdout.write(str);
+                }
             });
         }
 
@@ -184,11 +189,14 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
             child.stderr.on('data', (data: Buffer) => {
                 const str = data.toString();
                 stderr += str;
-                if (str.trim()) console.warn("[Claude STDERR]: " + str.trim());
+                if (str.trim()) {
+                    process.stderr.write(str);
+                }
             });
         }
 
         const timeout = setTimeout(() => {
+            console.error("🛑 Timeout after " + timeoutMs + "ms. Killing PID " + child.pid);
             child.kill('SIGKILL');
             reject(new Error("Claude CLI timed out after " + timeoutMs + "ms"));
         }, timeoutMs);
@@ -199,8 +207,6 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
                 resolve({ stdout, stderr });
             } else {
                 console.error("Claude CLI failed with code " + code);
-                console.error("STDOUT: " + stdout);
-                console.error("STDERR: " + stderr);
                 const combined = (stderr + " " + stdout).trim();
                 const err = new Error("Claude CLI exited with code " + code + ". Output: " + combined.substring(0, 500));
                 (err as any).stdout = stdout;
@@ -216,7 +222,7 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
     });
 }
 
-const SECURITY_GUARDRAILS = "SECURITY RULES: 1. NO SECRETS. 2. SANDBOX.";
+const SECURITY_GUARDRAILS = "SECURITY RULES: 1. NO SECRETS. 2. SANDBOX: Only modify files inside the workspace.";
 
 async function listAvailableSkills(workDir: string): Promise<string> {
     const skillsDir = path.join(workDir, '.claude', 'skills');
@@ -247,25 +253,31 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
         projectGuide = "No CLAUDE.md found.";
     }
 
-    const prompt = "Create implementation plan for: " + task.title + " " +
-        "Description: " + task.description + " " +
-        "Skills: " + availableSkills + " " +
-        (previousErrors ? "Previous errors: " + previousErrors : "") + " " +
-        "Use <plan> tags for output.";
+    const prompt = "You are the Architect. Create a step-by-step implementation plan for the task.\n\n" +
+        "PROJECT GUIDE:\n" + projectGuide + "\n\n" +
+        "TASK: " + task.title + "\n" +
+        "DESCRIPTION: " + task.description + "\n" +
+        "AVAILABLE SKILLS: " + availableSkills + "\n" +
+        (previousErrors ? "\nPREVIOUS ATTEMPT ERRORS:\n" + previousErrors : "") + "\n\n" +
+        "GOALS:\n1. Detailed plan.\n2. Mention native skills to use.\n3. Address only the task.\n\n" +
+        "Output your plan inside <plan> tags.";
 
     const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], workDir, homeDir);
     
     const planRegex = /<plan>([\s\S]*?)<\/plan>/;
     const planMatch = planRegex.exec(stdout);
-    return planMatch ? planMatch[1].trim() : "No plan";
+    return planMatch ? planMatch[1].trim() : "No plan generated by Opus.";
 }
 
 async function executePhase(workDir: string, homeDir: string, plan: string) {
-    const prompt = "Implement plan: " + plan + " " + SECURITY_GUARDRAILS;
+    const prompt = "You are the Executor. Implement this plan strictly:\n" + plan + "\n\n" +
+        SECURITY_GUARDRAILS + "\n" +
+        "Instructions: Follow the plan, only modify necessary files, verify your work, do NOT commit.";
+
     return await runClaude(
         [
             '-p', prompt, 
-            '--model', 'claude-sonnet-4-5-20250929', 
+            '--model', 'claude-sonnet-4-5-20250929',
             '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob',
             '--dangerously-skip-permissions',
             '--permission-mode', 'bypassPermissions'
@@ -283,7 +295,7 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
         if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
             await fsPromises.mkdir(targetSkillsDir, { recursive: true });
             await fsPromises.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
-            console.log("Loaded skills into environment");
+            console.log("Loaded skills into isolated Claude environment");
         }
     } catch (e: any) {
         console.warn("Failed to load skills: " + e.message);
@@ -291,10 +303,10 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 }
 
 async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
-    console.log("Iteration " + iteration);
+    console.log("🤖 Iteration " + iteration);
 
     const planSpan = ctx.trace.span({
-        name: "Planning",
+        name: "Planning-Opus-Iter-" + iteration,
         metadata: { iteration }
     });
     const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
@@ -302,7 +314,7 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     planSpan.end({ output: plan });
 
     const execSpan = ctx.trace.span({
-        name: "Execution",
+        name: "Execution-Sonnet-Iter-" + iteration,
         metadata: { iteration }
     });
     await executePhase(ctx.workDir, ctx.homeDir, plan);
@@ -311,6 +323,7 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     const check = await runPolyglotValidation(ctx.workDir);
 
     if (check.success) {
+        console.log("✅ Validation passed!");
         await ctx.git.add('.');
         const status = await ctx.git.status();
         if (status.staged.length > 0) {
@@ -319,24 +332,66 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
             
             const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, ctx.task.description || '');
             const successComment = prUrl 
-                ? "Task completed. PR: " + prUrl
-                : "Task completed. PR failed but changes pushed to " + ctx.task.branchName;
+                ? "✅ Task completed. PR: " + prUrl
+                : "✅ Task completed. PR failed but changes pushed to " + ctx.task.branchName;
             
             await updateLinearIssue(ctx.task.ticketId, "In Review", successComment);
         } else {
-            console.warn("No files changed.");
-            await updateLinearIssue(ctx.task.ticketId, "Todo", "No changes made.");
+            console.warn("⚠️ No files changed.");
+            await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary.");
         }
         return { success: true };
     }
 
+    console.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
     return { success: false, output: check.output };
 }
 
 async function handleFailureFallback(workDir: string, homeDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
+    console.warn("🛑 Task failed after " + MAX_RETRIES + " attempts.");
     const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
-    const failComment = "Task failed after " + MAX_RETRIES + " attempts. " + explanation;
+    const failComment = "❌ Task failed after " + MAX_RETRIES + " attempts.\n\n" + explanation + "\n\n---\nTechnical Details:\n```\n" + previousErrors.substring(0, 1000) + "...\n```";
     await updateLinearIssue(task.ticketId, "Todo", failComment);
+}
+
+const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
+if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
+    try {
+        fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true });
+    } catch (e: any) {
+        console.warn(`[Agent] Could not create cache root at ${CLAUDE_CACHE_ROOT}: ${e.message}`);
+    }
+}
+
+async function seedClaudeCache(targetClaudeDir: string) {
+    const projectsCache = path.join(CLAUDE_CACHE_ROOT, 'projects');
+    if (fs.existsSync(projectsCache)) {
+        const targetProjects = path.join(targetClaudeDir, 'projects');
+        await fsPromises.mkdir(targetProjects, { recursive: true });
+        // Use cp -r to be safe
+        const { execSync } = await import('node:child_process');
+        try {
+            execSync(`cp -r ${projectsCache}/* ${targetProjects}/`);
+            console.log("Seeded Claude projects cache from global storage");
+        } catch (e: any) {
+            console.warn(`[Agent] Seed failed: ${e.message}`);
+        }
+    }
+}
+
+async function persistClaudeCache(sourceClaudeDir: string) {
+    const projectsSource = path.join(sourceClaudeDir, 'projects');
+    if (fs.existsSync(projectsSource)) {
+        const targetProjects = path.join(CLAUDE_CACHE_ROOT, 'projects');
+        await fsPromises.mkdir(targetProjects, { recursive: true });
+        const { execSync } = await import('node:child_process');
+        try {
+            execSync(`cp -r ${projectsSource}/* ${targetProjects}/`);
+            console.log("Persisted Claude projects cache to global storage");
+        } catch (e: any) {
+            console.warn(`[Agent] Persistence failed: ${e.message}`);
+        }
+    }
 }
 
 export const runAgent = async (task: Task): Promise<void> => {
@@ -350,50 +405,37 @@ export const runAgent = async (task: Task): Promise<void> => {
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
             
             try {
-                const itemsToCopy = ['.credentials.json', 'settings.json', 'settings.local.json'];
-                for (const item of itemsToCopy) {
-                    const src = path.join(sourceClaudeDir, item);
-                    const dst = path.join(targetClaudeDir, item);
-                    if (fs.existsSync(src)) {
-                        await fsPromises.copyFile(src, dst);
-                    }
+                const itemsToCopy = ['.credentials.json', 'settings.json'];
+                for (const f of itemsToCopy) {
+                    const src = path.join(sourceClaudeDir, f);
+                    if (fs.existsSync(src)) await fsPromises.copyFile(src, path.join(targetClaudeDir, f));
                 }
-                
-                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
                 const credsFile = path.join(targetClaudeDir, '.credentials.json');
                 if (!fs.existsSync(credsFile)) {
-                    await fsPromises.writeFile(credsFile, JSON.stringify({
-                        "token": "sk-ant-dummy-token",
-                        "email": "ralph@duvo.ai"
-                    }));
+                    await fsPromises.writeFile(credsFile, JSON.stringify({ "token": "dummy", "email": "ralph@duvo.ai" }));
                 }
-                
-                console.log("Seeded isolated Claude config");
-            } catch (e: any) {
-                console.warn("Seed failed: " + e.message);
-            }
+            } catch (e: any) { console.warn("Seed failed: " + e.message); }
 
-            if (task.attempt > 1) {
-                await updateLinearIssue(task.ticketId, "In Progress", "Retrying attempt " + task.attempt);
-            } else {
-                await updateLinearIssue(task.ticketId, "In Progress", "Ralph started.");
-            }
+            await seedClaudeCache(targetClaudeDir);
+
+            if (task.attempt > 1) await updateLinearIssue(task.ticketId, "In Progress", "🔄 Retrying attempt " + task.attempt);
+            else await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started.");
 
             await prepareClaudeSkills(workDir, homeDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
-            const MAX_RETRIES = 3;
+            for (let i = 0; i < 3; i++) {
+                const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
+                
+                // ALWAYS persist cache after iteration to save indexing progress
+                await persistClaudeCache(targetClaudeDir);
 
-            const ctx: IterationContext = { trace, workDir, homeDir, task, availableSkills, git };
-
-            for (let i = 0; i < MAX_RETRIES; i++) {
-                const result = await runIteration(i + 1, ctx, previousErrors);
                 if (result.success) return;
-                previousErrors = result.output || "";
+                previousErrors = result.output || "Unknown error";
             }
-
-            await handleFailureFallback(workDir, homeDir, task, git, previousErrors, MAX_RETRIES);
-
+            
+            const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
+            await updateLinearIssue(task.ticketId, "Todo", "❌ Failed: " + explanation);
         } finally { cleanup(); }
     });
 };
