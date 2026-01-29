@@ -22,6 +22,7 @@ const mockStderrOn = jest.fn();
 const mockSpawn = jest.fn().mockImplementation(() => ({
     stdout: { on: mockStdoutOn },
     stderr: { on: mockStderrOn },
+    stdin: { end: jest.fn() }, // Added mock for stdin.end
     on: mockSpawnOn,
     pid: 12345 // Added PID for debug check
 }));

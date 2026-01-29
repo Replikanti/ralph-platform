@@ -101,11 +101,15 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
                 ...process.env, 
                 PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                 HOME: '/tmp',
-                // Explicitly set non-interactive mode if applicable or debug
+                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
                 CI: 'true',
-                DEBUG: 'true' 
+                DEBUG: 'true',
+                TERM: 'dumb' // Prevent TTY issues
             }
         });
+
+        // Close stdin to prevent hanging on interactive prompts
+        child.stdin.end();
 
         // Debug process creation
         if (!child.pid) {
@@ -122,7 +126,7 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
         child.stdout.on('data', (data) => {
             const str = data.toString();
             stdout += str;
-            // Log only significant chunks to avoid spamming (or log everything in verbose mode)
+            // Log only significant chunks to avoid spamming
             if (str.trim()) console.log(`[Claude STDOUT]: ${str.trim()}`);
         });
 
@@ -134,7 +138,8 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
 
         // Timeout handler
         const timeout = setTimeout(() => {
-            child.kill('SIGTERM');
+            console.error(`🛑 [Claude CLI] Process ${child.pid} timed out after ${timeoutMs}ms. Killing...`);
+            child.kill('SIGKILL');
             reject(new Error(`Claude CLI timed out after ${timeoutMs}ms`));
         }, timeoutMs);
 
@@ -222,7 +227,8 @@ Output format:
     `.trim();
 
     // Planning phase: Opus creates the roadmap
-    const { stdout } = await runClaude(['-p', prompt, '--model', 'opus-4-5']);
+    // CRITICAL: Must pass workDir so Claude knows the context
+    const { stdout } = await runClaude(['-p', prompt, '--model', 'opus-4-5'], workDir);
     
     const planRegex = /<plan>([\s\S]*?)<\/plan>/;
     const planMatch = planRegex.exec(stdout);
