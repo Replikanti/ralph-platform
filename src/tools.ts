@@ -175,6 +175,27 @@ function filterRelevantErrors(output: string, changedFiles: string[]): { relevan
     return { relevant: false, filteredLog: "" };
 }
 
+// Helper to handle tool errors and filter relevant lines
+function handleToolError(error: any, toolName: string, changedFiles: string[]): { success: boolean, log: string, relevant: boolean } {
+    const err = error as { stdout?: string, stderr?: string };
+    const { relevant, filteredLog } = filterRelevantErrors(err.stdout || err.stderr || "", changedFiles);
+    
+    if (relevant) {
+        return {
+            success: false,
+            log: `❌ ${toolName} Errors (relevant to your changes):\n${filteredLog}\n`,
+            relevant: true
+        };
+    } else {
+        console.log(`ℹ️ [Validation] Ignoring ${toolName} errors unrelated to changed files.`);
+        return {
+            success: true,
+            log: `✅ ${toolName}: Passed (ignored unrelated errors)\n`,
+            relevant: false
+        };
+    }
+}
+
 async function validateNode(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
@@ -197,15 +218,9 @@ async function validateNode(workDir: string, changedFiles: string[]): Promise<{ 
             await execAsync('biome check --apply .', { cwd: workDir });
             outputLog += "✅ Biome: Passed\n";
         } catch (e: unknown) { 
-            const error = e as { stdout?: string, stderr?: string };
-            const { relevant, filteredLog } = filterRelevantErrors(error.stdout || error.stderr || "", changedFiles);
-            if (relevant) {
-                success = false; 
-                outputLog += `❌ Biome Errors (relevant to your changes):\n${filteredLog}\n`; 
-            } else {
-                console.log("ℹ️ [Validation] Ignoring Biome errors unrelated to changed files.");
-                outputLog += "✅ Biome: Passed (ignored unrelated errors)\n";
-            }
+            const result = handleToolError(e, "Biome", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
         }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
@@ -213,15 +228,9 @@ async function validateNode(workDir: string, changedFiles: string[]): Promise<{ 
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
                 outputLog += "✅ TSC: Passed\n";
             } catch (e: unknown) { 
-                const error = e as { stdout?: string, stderr?: string };
-                const { relevant, filteredLog } = filterRelevantErrors(error.stdout || error.stderr || "", changedFiles);
-                if (relevant) {
-                    success = false; 
-                    outputLog += `❌ TSC Errors (relevant to your changes):\n${filteredLog}\n`; 
-                } else {
-                    console.log("ℹ️ [Validation] Ignoring TSC errors unrelated to changed files.");
-                    outputLog += "✅ TSC: Passed (ignored unrelated errors)\n";
-                }
+                const result = handleToolError(e, "TSC", changedFiles);
+                success = success && result.success;
+                outputLog += result.log;
             }
         }
     }
@@ -258,30 +267,18 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
             await execAsync('ruff format .', { cwd: workDir });
             outputLog += "✅ Ruff: Passed\n";
         } catch (e: unknown) { 
-            const error = e as { stdout?: string, stderr?: string };
-            const { relevant, filteredLog } = filterRelevantErrors(error.stdout || error.stderr || "", changedFiles);
-            if (relevant) {
-                success = false; 
-                outputLog += `❌ Ruff Errors (relevant to your changes):\n${filteredLog}\n`; 
-            } else {
-                console.log("ℹ️ [Validation] Ignoring Ruff errors unrelated to changed files.");
-                outputLog += "✅ Ruff: Passed (ignored unrelated errors)\n";
-            }
+            const result = handleToolError(e, "Ruff", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
         }
 
         try {
             await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
             outputLog += "✅ Mypy: Passed\n";
         } catch (e: unknown) { 
-            const error = e as { stdout?: string, stderr?: string };
-            const { relevant, filteredLog } = filterRelevantErrors(error.stdout || error.stderr || "", changedFiles);
-            if (relevant) {
-                success = false; 
-                outputLog += `❌ Mypy Errors (relevant to your changes):\n${filteredLog}\n`; 
-            } else {
-                console.log("ℹ️ [Validation] Ignoring Mypy errors unrelated to changed files.");
-                outputLog += "✅ Mypy: Passed (ignored unrelated errors)\n";
-            }
+            const result = handleToolError(e, "Mypy", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
         }
     }
     return { success, log: outputLog };
@@ -296,14 +293,14 @@ async function validateSecurity(workDir: string, changedFiles: string[]): Promis
         await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
         outputLog += "✅ Trivy: Secure\n";
     } catch (e: unknown) { 
-        const error = e as { stdout?: string, stderr?: string };
-        const { relevant, filteredLog } = filterRelevantErrors(error.stdout || error.stderr || "", changedFiles);
-        if (relevant) {
-            success = false; 
-            outputLog += `❌ Trivy Issues in changed files:\n${filteredLog}\n`; 
-        } else {
-            outputLog += "✅ Trivy: Secure (no high/critical issues in changed files)\n";
-        }
+        const result = handleToolError(e, "Trivy", changedFiles);
+        // Special case for Trivy log message to maintain original wording
+        const log = result.relevant 
+            ? `❌ Trivy Issues in changed files:\n${result.log.split('\n').slice(1).join('\n')}`
+            : "✅ Trivy: Secure (no high/critical issues in changed files)\n";
+        
+        success = success && result.success;
+        outputLog += log;
     } finally {
         try {
             if (fs.existsSync(trivyCache)) {
