@@ -38,11 +38,9 @@ async function findTargetState(team: any, statusName: string) {
     const states = await team.states();
     const name = statusName.toLowerCase();
     
-    // 1. Direct match
     let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
     if (state) return state;
 
-    // 2. Synonym mapping for common states
     const synonymMap: Record<string, string[]> = {
         'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
         'in review': ['in review', 'under review', 'peer review', 'review', 'pr']
@@ -60,59 +58,45 @@ async function findTargetState(team: any, statusName: string) {
 }
 
 export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
-    if (!process.env.LINEAR_API_KEY) {
-        console.warn("LINEAR_API_KEY is missing, skipping status update.");
-        return;
-    }
+    if (!process.env.LINEAR_API_KEY) return;
     
     try {
         const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
         const issue = await linear.issue(issueId);
         const team = await issue.team;
-        if (!team) {
-            console.warn("No team found for issue " + issueId);
-            return;
-        }
+        if (!team) return;
 
         const targetState = await findTargetState(team, statusName);
 
         if (targetState) {
             const currentState = await issue.state;
-            if (currentState?.id === targetState.id) {
-                console.log("Issue " + issueId + " is already in state " + statusName + ", skipping state update.");
-            } else {
-                console.log("Updating Linear issue " + issueId + " to status: " + statusName);
+            if (currentState?.id !== targetState.id) {
+                console.log("Updating Linear status to: " + statusName);
                 await linear.updateIssue(issueId, { stateId: targetState.id });
             }
-        } else {
-            console.warn("Linear status " + statusName + " not found in team " + team.name + ".");
         }
 
         if (comment) {
             console.log("Adding comment to Linear issue " + issueId);
             await linear.createComment({ issueId, body: comment });
         }
-    } catch (e: unknown) {
-        const error = e as Error;
-        console.error("Failed to update Linear issue " + issueId + ": " + error.message);
+    } catch (e: any) {
+        console.error("Linear update failed: " + e.message);
     }
 }
 
-/**
- * Asks Claude Opus to summarize why the task failed based on the technical errors.
- */
 async function summarizeFailurePhase(task: Task, homeDir: string, errors: string): Promise<string> {
     const prompt = "You are the Post-Mortem Analyst (Claude Opus 4.5). " +
-        "The AI coding agent Ralph failed to complete a task. " +
+        "The AI coding agent Ralph failed a task. " +
         "TASK: " + task.title + " " +
-        "ERRORS ENCOUNTERED: " + errors.substring(0, 5000) + " " +
+        "ERRORS: " + errors.substring(0, 2000) + " " +
         "Write a concise, human-friendly explanation (2-3 sentences) for the developer.";
 
     try {
-        const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], process.cwd(), homeDir);
+        const { stdout } = await runClaude(['-p', prompt, '--model', 'opus', '--tools', ''], process.cwd(), homeDir);
         return stdout.trim();
     } catch {
-        return "Task failed due to persistent validation errors that Ralph could not resolve automatically.";
+        return "Task failed due to persistent validation errors.";
     }
 }
 
@@ -132,28 +116,20 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
         });
         return response.data.html_url;
     } catch (e: any) {
-        if (e.message?.includes('No commits between')) {
-            console.warn("Skipping PR creation: No changes detected between branches.");
-            return null;
-        }
-        console.error("Failed to create Pull Request: " + e.message);
+        console.error("PR failed: " + e.message);
         return null;
     }
 }
 
-/**
- * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
- * Now supports real-time logging and timeouts.
- */
 function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
         console.log("🚀 Spawning: " + CLAUDE_PATH + " in " + cwd);
 
-        const child = spawn(CLAUDE_PATH, args, {
+        const child = spawn(CLAUDE_PATH, args, { 
             cwd,
-            env: {
+            env: { 
                 ...process.env, 
                 HOME: homeDir,
                 ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -178,10 +154,7 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
             child.stdout.on('data', (data: Buffer) => {
                 const str = data.toString();
                 stdout += str;
-                if (str.trim()) {
-                    // Filter out known noisy strings but keep progress visible
-                    process.stdout.write(str);
-                }
+                process.stdout.write(str); 
             });
         }
 
@@ -189,16 +162,14 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
             child.stderr.on('data', (data: Buffer) => {
                 const str = data.toString();
                 stderr += str;
-                if (str.trim()) {
-                    process.stderr.write(str);
-                }
+                process.stderr.write(str);
             });
         }
 
         const timeout = setTimeout(() => {
             console.error("🛑 Timeout after " + timeoutMs + "ms. Killing PID " + child.pid);
             child.kill('SIGKILL');
-            reject(new Error("Claude CLI timed out after " + timeoutMs + "ms"));
+            reject(new Error("Claude CLI timed out after " + timeoutMs + "ms. Output: " + stdout.substring(stdout.length - 200)));
         }, timeoutMs);
 
         child.on('close', (code: number) => {
@@ -206,12 +177,8 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
             if (code === 0) {
                 resolve({ stdout, stderr });
             } else {
-                console.error("Claude CLI failed with code " + code);
                 const combined = (stderr + " " + stdout).trim();
-                const err = new Error("Claude CLI exited with code " + code + ". Output: " + combined.substring(0, 500));
-                (err as any).stdout = stdout;
-                (err as any).stderr = stderr;
-                reject(err);
+                reject(new Error("Claude CLI exited with code " + code + ". Output: " + combined.substring(0, 500)));
             }
         });
 
@@ -238,23 +205,19 @@ async function listAvailableSkills(workDir: string): Promise<string> {
 async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (span: any) => Promise<T>) {
     const trace = langfuse.trace({ name, metadata });
     try { return await fn(trace); } 
-    catch (e: unknown) { 
-        const error = e as Error;
-        trace.update({ metadata: { level: "ERROR", error: error.message } }); throw e; 
+    catch (e: any) { 
+        trace.update({ metadata: { error: e.message } });
+        throw e; 
     } 
     finally { await langfuse.flushAsync(); }
 }
 
 async function planPhase(workDir: string, homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
-    let projectGuide = "";
-    try {
-        projectGuide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8');
-    } catch {
-        projectGuide = "No CLAUDE.md found.";
-    }
+    let guide = "";
+    try { guide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8'); } catch { guide = "None."; }
 
     const prompt = "You are the Architect. Create a step-by-step implementation plan for the task.\n\n" +
-        "PROJECT GUIDE:\n" + projectGuide + "\n\n" +
+        "PROJECT GUIDE:\n" + guide + "\n\n" +
         "TASK: " + task.title + "\n" +
         "DESCRIPTION: " + task.description + "\n" +
         "AVAILABLE SKILLS: " + availableSkills + "\n" +
@@ -262,7 +225,7 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
         "GOALS:\n1. Detailed plan.\n2. Mention native skills to use.\n3. Address only the task.\n\n" +
         "Output your plan inside <plan> tags.";
 
-    const { stdout } = await runClaude(['-p', prompt, '--model', 'claude-opus-4-5-20251101'], workDir, homeDir);
+    const { stdout } = await runClaude(['-p', prompt, '--model', 'opus', '--tools', ''], workDir, homeDir);
     
     const planRegex = /<plan>([\s\S]*?)<\/plan>/;
     const planMatch = planRegex.exec(stdout);
@@ -277,89 +240,23 @@ async function executePhase(workDir: string, homeDir: string, plan: string) {
     return await runClaude(
         [
             '-p', prompt, 
-            '--model', 'claude-sonnet-4-5-20250929',
-            '--allowedTools', 'Bash,Read,Edit,FileSearch,Glob',
+            '--model', 'sonnet', 
+            '--tools', 'Bash,Read,Edit,FileSearch,Glob',
             '--dangerously-skip-permissions',
-            '--permission-mode', 'bypassPermissions'
+            '--permission-mode', 'bypassPermissions',
+            '--no-session-persistence',
+            '--verbose'
         ],
         workDir,
-        homeDir
+        homeDir,
+        900000 // 15 minutes for execution
     );
-}
-
-async function prepareClaudeSkills(workDir: string, homeDir: string) {
-    const targetSkillsDir = path.join(homeDir, '.claude', 'skills');
-    const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
-
-    try {
-        if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
-            await fsPromises.mkdir(targetSkillsDir, { recursive: true });
-            await fsPromises.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
-            console.log("Loaded skills into isolated Claude environment");
-        }
-    } catch (e: any) {
-        console.warn("Failed to load skills: " + e.message);
-    }
-}
-
-async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
-    console.log("🤖 Iteration " + iteration);
-
-    const planSpan = ctx.trace.span({
-        name: "Planning-Opus-Iter-" + iteration,
-        metadata: { iteration }
-    });
-    const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
-    const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
-    planSpan.end({ output: plan });
-
-    const execSpan = ctx.trace.span({
-        name: "Execution-Sonnet-Iter-" + iteration,
-        metadata: { iteration }
-    });
-    await executePhase(ctx.workDir, ctx.homeDir, plan);
-    execSpan.end();
-
-    const check = await runPolyglotValidation(ctx.workDir);
-
-    if (check.success) {
-        console.log("✅ Validation passed!");
-        await ctx.git.add('.');
-        const status = await ctx.git.status();
-        if (status.staged.length > 0) {
-            await ctx.git.commit("feat: " + ctx.task.title);
-            await ctx.git.push('origin', ctx.task.branchName, ['--force']);
-            
-            const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, ctx.task.description || '');
-            const successComment = prUrl 
-                ? "✅ Task completed. PR: " + prUrl
-                : "✅ Task completed. PR failed but changes pushed to " + ctx.task.branchName;
-            
-            await updateLinearIssue(ctx.task.ticketId, "In Review", successComment);
-        } else {
-            console.warn("⚠️ No files changed.");
-            await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ Ralph finished checking the code, but no changes were necessary.");
-        }
-        return { success: true };
-    }
-
-    console.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
-    return { success: false, output: check.output };
-}
-
-async function handleFailureFallback(workDir: string, homeDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
-    console.warn("🛑 Task failed after " + MAX_RETRIES + " attempts.");
-    const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
-    const failComment = "❌ Task failed after " + MAX_RETRIES + " attempts.\n\n" + explanation + "\n\n---\nTechnical Details:\n```\n" + previousErrors.substring(0, 1000) + "...\n```";
-    await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
 const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
 if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
-    try {
-        fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true });
-    } catch (e: any) {
-        console.warn(`[Agent] Could not create cache root at ${CLAUDE_CACHE_ROOT}: ${e.message}`);
+    try { fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true }); } catch (e: any) {
+        console.warn("Could not create cache root: " + e.message);
     }
 }
 
@@ -368,14 +265,11 @@ async function seedClaudeCache(targetClaudeDir: string) {
     if (fs.existsSync(projectsCache)) {
         const targetProjects = path.join(targetClaudeDir, 'projects');
         await fsPromises.mkdir(targetProjects, { recursive: true });
-        // Use cp -r to be safe
         const { execSync } = await import('node:child_process');
         try {
-            execSync(`cp -r ${projectsCache}/* ${targetProjects}/`);
+            execSync("cp -r " + projectsCache + "/* " + targetProjects + "/");
             console.log("Seeded Claude projects cache from global storage");
-        } catch (e: any) {
-            console.warn(`[Agent] Seed failed: ${e.message}`);
-        }
+        } catch (e: any) { console.warn("Seed failed: " + e.message); }
     }
 }
 
@@ -386,12 +280,61 @@ async function persistClaudeCache(sourceClaudeDir: string) {
         await fsPromises.mkdir(targetProjects, { recursive: true });
         const { execSync } = await import('node:child_process');
         try {
-            execSync(`cp -r ${projectsSource}/* ${targetProjects}/`);
+            execSync("cp -r " + projectsSource + "/* " + targetProjects + "/");
             console.log("Persisted Claude projects cache to global storage");
-        } catch (e: any) {
-            console.warn(`[Agent] Persistence failed: ${e.message}`);
-        }
+        } catch (e: any) { console.warn("Persistence failed: " + e.message); }
     }
+}
+
+async function prepareClaudeSkills(workDir: string, homeDir: string) {
+    const targetSkillsDir = path.join(homeDir, '.claude', 'skills');
+    const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
+    try {
+        if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
+            await fsPromises.mkdir(targetSkillsDir, { recursive: true });
+            await fsPromises.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
+            console.log("Loaded skills into isolated Claude environment");
+        }
+    } catch (e: any) { console.warn("Failed to load skills: " + e.message); }
+}
+
+async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
+    console.log("🤖 Iteration " + iteration);
+
+    const planSpan = ctx.trace.span({ name: "Planning-Opus-Iter-" + iteration, metadata: { iteration } });
+    const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
+    const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
+    planSpan.end({ output: plan });
+
+    const execSpan = ctx.trace.span({ name: "Execution-Sonnet-Iter-" + iteration, metadata: { iteration } });
+    await executePhase(ctx.workDir, ctx.homeDir, plan);
+    execSpan.end();
+
+    const check = await runPolyglotValidation(ctx.workDir);
+    if (check.success) {
+        console.log("✅ Validation passed!");
+        await ctx.git.add('.');
+        const status = await ctx.git.status();
+        if (status.staged.length > 0) {
+            await ctx.git.commit("feat: " + ctx.task.title);
+            await ctx.git.push('origin', ctx.task.branchName, ['--force']);
+            const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, ctx.task.description || '');
+            await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+        } else {
+            console.warn("⚠️ No files changed.");
+            await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ No changes necessary.");
+        }
+        return { success: true };
+    }
+    console.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
+    return { success: false, output: check.output };
+}
+
+async function handleFailureFallback(workDir: string, homeDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
+    console.warn("🛑 Task failed after " + MAX_RETRIES + " attempts.");
+    const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
+    const failComment = "❌ Failed after " + MAX_RETRIES + " attempts.\n\n" + explanation + "\n\n---\nDetails:\n```\n" + previousErrors.substring(0, 1000) + "...\n```";
+    await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
 export const runAgent = async (task: Task): Promise<void> => {
@@ -401,12 +344,11 @@ export const runAgent = async (task: Task): Promise<void> => {
         const targetClaudeDir = path.join(homeDir, '.claude');
         
         try {
-            const sourceClaudeDir = path.join(os.homedir(), '.claude');
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
-            
+            const sourceClaudeDir = path.join(os.homedir(), '.claude');
             try {
-                const itemsToCopy = ['.credentials.json', 'settings.json'];
-                for (const f of itemsToCopy) {
+                const files = ['.credentials.json', 'settings.json'];
+                for (const f of files) {
                     const src = path.join(sourceClaudeDir, f);
                     if (fs.existsSync(src)) await fsPromises.copyFile(src, path.join(targetClaudeDir, f));
                 }
@@ -417,25 +359,18 @@ export const runAgent = async (task: Task): Promise<void> => {
             } catch (e: any) { console.warn("Seed failed: " + e.message); }
 
             await seedClaudeCache(targetClaudeDir);
-
-            if (task.attempt > 1) await updateLinearIssue(task.ticketId, "In Progress", "🔄 Retrying attempt " + task.attempt);
-            else await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started.");
-
+            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started task " + task.ticketId);
+            
             await prepareClaudeSkills(workDir, homeDir);
             const availableSkills = await listAvailableSkills(workDir);
             let previousErrors = "";
             for (let i = 0; i < 3; i++) {
                 const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
-                
-                // ALWAYS persist cache after iteration to save indexing progress
                 await persistClaudeCache(targetClaudeDir);
-
                 if (result.success) return;
                 previousErrors = result.output || "Unknown error";
             }
-            
-            const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
-            await updateLinearIssue(task.ticketId, "Todo", "❌ Failed: " + explanation);
+            await handleFailureFallback(workDir, homeDir, task, git, previousErrors, 3);
         } finally { cleanup(); }
     });
 };
