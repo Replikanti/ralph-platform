@@ -223,6 +223,13 @@ export async function runPolyglotValidation(workDir: string) {
     } catch (e: any) { 
         allSuccess = false; 
         outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
+    } finally {
+        // CLEANUP: Remove trivy cache to prevent it from being pushed to git (it's >900MB)
+        try {
+            await fsPromises.rm(trivyCache, { recursive: true, force: true });
+        } catch (e) {
+            console.warn("⚠️ Failed to cleanup trivy cache:", e);
+        }
     }
 
     return { success: allSuccess, output: outputLog };
