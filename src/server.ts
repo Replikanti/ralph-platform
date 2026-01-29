@@ -176,9 +176,11 @@ app.post('/webhook', async (req, res) => {
         }
 
         // Avoid re-triggering if already in progress or review
-        const statusName = data.state?.name?.toLowerCase() || '';
-        if (action === 'update' && (statusName === 'in progress' || statusName === 'in review' || statusName === 'completed' || statusName === 'canceled')) {
-            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in state: ${statusName}`);
+        const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
+        console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
+        
+        if (action === 'update' && (statusName === 'in progress' || statusName === 'in review' || statusName === 'completed' || statusName === 'canceled' || statusName === 'done')) {
+            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
             return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
         }
 
