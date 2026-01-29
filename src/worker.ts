@@ -11,7 +11,7 @@ export const jobProcessor = async (job: any) => {
 };
 
 export const createWorker = () => {
-    const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
+    const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
         maxRetriesPerRequest: null,
         retryStrategy(times) {
             const delay = Math.min(times * 50, 2000);
@@ -21,17 +21,18 @@ export const createWorker = () => {
 
     console.log("👷 Ralph Worker Started");
 
-    const worker = new Worker('ralph-tasks', jobProcessor, { 
-        connection, 
-        concurrency: 2, // Max parallel jobs per Pod
+    const worker = new Worker('ralph-tasks', jobProcessor, {
+        connection,
+        concurrency: 1, // Only 1 job at a time to prevent resource exhaustion
         limiter: {
-            max: 5, // Rate limit (Anthropic protection)
-            duration: 60000 
-        }
+            max: 10,
+            duration: 60000
+        },
+        lockDuration: 600000, // 10 minutes (default is 30s) - critical for long LLM tasks
+        lockRenewTime: 30000, // Renew lock every 30s
     });
 
-    worker.on('completed', (job) => {
-        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
+    worker.on('completed', (job) => {        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
     });
 
     worker.on('failed', (job, err) => {

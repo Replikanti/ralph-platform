@@ -28,9 +28,11 @@ describe('Worker', () => {
             'ralph-tasks', 
             jobProcessor, 
             expect.objectContaining({
-                concurrency: 2,
-                limiter: { max: 5, duration: 60000 },
-                connection: expect.any(IORedis)
+                concurrency: 1,
+                limiter: { max: 10, duration: 60000 },
+                connection: expect.any(IORedis),
+                lockDuration: 600000,
+                lockRenewTime: 30000
             })
         );
         expect(mockOn).toHaveBeenCalledWith('completed', expect.any(Function));
