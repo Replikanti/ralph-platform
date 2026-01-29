@@ -8,7 +8,7 @@ if (!fs.existsSync(WORKSPACE_ROOT)) fs.mkdirSync(WORKSPACE_ROOT, { recursive: tr
 
 export function parseRepoUrl(repoUrl: string): { owner: string, repo: string } {
     // Expected format: https://github.com/owner/repo or https://github.com/owner/repo.git
-    const match = repoUrl.match(/github\.com\/([^/]+)\/([^.]+)(\.git)?/);
+    const match = /github\.com\/([^/]+)\/([^.]+)(\.git)?/.exec(repoUrl);
     if (!match) throw new Error(`Invalid GitHub URL: ${repoUrl}`);
     return { owner: match[1], repo: match[2] };
 }
