@@ -85,19 +85,19 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
 
 /**
  * Executes Claude CLI using spawn to safely handle multi-line prompts and avoid shell escaping issues.
+ * Now supports real-time logging and timeouts.
  */
-function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> {
+function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-        // SECURITY: Use absolute path from env or fixed default to prevent injection
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
+        console.log(`🚀 [Claude CLI] Starting: ${args.join(' ').substring(0, 100)}...`);
+
         const child = spawn(CLAUDE_PATH, args, { 
             cwd,
             env: { 
                 ...process.env, 
-                // Fixed PATH for security
                 PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-                // Set HOME to a writable directory for Claude config/cache
                 HOME: '/tmp',
                 ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY 
             }
@@ -106,10 +106,28 @@ function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stde
         let stdout = '';
         let stderr = '';
 
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
-        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        // Real-time logging
+        child.stdout.on('data', (data) => {
+            const str = data.toString();
+            stdout += str;
+            // Log only significant chunks to avoid spamming (or log everything in verbose mode)
+            if (str.trim()) console.log(`[Claude STDOUT]: ${str.trim()}`);
+        });
+
+        child.stderr.on('data', (data) => {
+            const str = data.toString();
+            stderr += str;
+            if (str.trim()) console.warn(`[Claude STDERR]: ${str.trim()}`);
+        });
+
+        // Timeout handler
+        const timeout = setTimeout(() => {
+            child.kill('SIGTERM');
+            reject(new Error(`Claude CLI timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
 
         child.on('close', (code) => {
+            clearTimeout(timeout);
             if (code === 0) {
                 resolve({ stdout, stderr });
             } else {
@@ -121,6 +139,7 @@ function runClaude(args: string[], cwd?: string): Promise<{ stdout: string; stde
         });
 
         child.on('error', (err) => {
+            clearTimeout(timeout);
             reject(err);
         });
     });
