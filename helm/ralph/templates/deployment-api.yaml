@@ -65,7 +65,11 @@ spec:
             - name: repo-config
               mountPath: /etc/ralph/config
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: repo-config
           configMap:
             name: {{ .Release.Name }}-repo-config
+        - name: tmp
+          emptyDir: {}

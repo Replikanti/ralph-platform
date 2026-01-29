@@ -24,6 +24,8 @@ spec:
           volumeMounts:
             - name: workspaces
               mountPath: /tmp/ralph-workspaces
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: {{ .Values.resources.worker.requests.cpu }}
@@ -79,6 +81,8 @@ spec:
         - name: workspaces
           emptyDir:
             sizeLimit: 10Gi
+        - name: tmp
+          emptyDir: {}
         - name: repo-config
           configMap:
             name: {{ .Release.Name }}-repo-config
