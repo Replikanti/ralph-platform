@@ -447,15 +447,14 @@ export const runAgent = async (task: Task): Promise<void> => {
         const homeDir = path.join(rootDir, 'home');
         
         try {
+            // Ensure isolated homeDir exists for Claude CLI
+            await fsPromises.mkdir(homeDir, { recursive: true });
+
             // Smart notification based on attempt number
             if (task.attempt > 1) {
-                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: 
-${task.jobId}
-`);
+                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: \`${task.jobId}\``);
             } else {
-                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: 
-${task.jobId}
-`);
+                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
             }
 
             await prepareClaudeSkills(workDir, homeDir);
