@@ -120,7 +120,7 @@ describe('runPolyglotValidation', () => {
 
     it('should run ruff and mypy if pyproject.toml exists', async () => {
         mockedFsExistsSync.mockImplementation((p) => {
-            const normalized = p.replace(/\\/g, '/');
+            const normalized = p.replaceAll('\\', '/');
             if (normalized.endsWith('package.json')) return false;
             if (normalized.endsWith('pyproject.toml')) return true;
             return false;
