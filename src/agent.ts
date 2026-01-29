@@ -91,7 +91,9 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
-        console.log(`🚀 [Claude CLI] Starting: ${args.join(' ').substring(0, 100)}...`);
+        console.log(`🚀 [Claude CLI] Spawning process: ${CLAUDE_PATH}`);
+        console.log(`📂 [Claude CLI] CWD: ${cwd || process.cwd()}`);
+        console.log(`📝 [Claude CLI] Args: ${args.join(' ')}`);
 
         const child = spawn(CLAUDE_PATH, args, { 
             cwd,
@@ -99,10 +101,20 @@ function runClaude(args: string[], cwd?: string, timeoutMs: number = 300000): Pr
                 ...process.env, 
                 PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
                 HOME: '/tmp',
-                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY 
+                // Explicitly set non-interactive mode if applicable or debug
+                CI: 'true',
+                DEBUG: 'true' 
             }
         });
 
+        // Debug process creation
+        if (!child.pid) {
+            console.error("❌ [Claude CLI] Failed to spawn process! PID is undefined.");
+            reject(new Error("Failed to spawn Claude CLI"));
+            return;
+        }
+        console.log(`✅ [Claude CLI] Process spawned with PID: ${child.pid}`);
+        
         let stdout = '';
         let stderr = '';
 
