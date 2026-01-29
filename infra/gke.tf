@@ -131,6 +131,12 @@ resource "google_container_node_pool" "primary_nodes" {
       mode = "GKE_METADATA"
     }
 
+    # SECURITY: Disable legacy metadata endpoints (v0.1 and v1beta1)
+    # This protects against SSRF attacks that could extract instance metadata
+    metadata = {
+      disable-legacy-endpoints = "true"
+    }
+
     # Tags for firewall rules
     tags = ["gke-node", "ralph-cluster"]
   }
