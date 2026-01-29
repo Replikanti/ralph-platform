@@ -13,18 +13,17 @@ graph LR
         Ingress --> API[Node.js API]
         API -->|Enqueue| Redis[(Redis)]
         Redis -->|Dequeue| Worker[Node.js Worker]
+        Cache[(Persistent Cache)] <-->|Seed/Persist| Worker
 
         subgraph "Worker Execution"
-            Worker -->|Clone| Git[Ephemeral Workspace]
+            Worker -->|Clone| Repo[repo/]
             Worker -->|Plan| Opus[Claude Opus]
             Worker -->|Code| Sonnet[Claude Sonnet]
             Worker -->|Validate| Polyglot[Toolchain]
-
-            Polyglot -.->|TS| Biome
-            Polyglot -.->|TS Types| tsc
-            Polyglot -.->|Py| Ruff
-            Polyglot -.->|Py Types| mypy
-            Polyglot -.->|Sec| Trivy
+            
+            Repo --- Home[home/]
+            Sonnet -.->|Work| Repo
+            Sonnet -.->|Meta| Home
         end
     end
     Worker -->|Push PR| GitHub
@@ -33,28 +32,29 @@ graph LR
 
 ### How It Works
 
-1. **Trigger**: Create a Linear issue with the label `Ralph`
-2. **Webhook**: Linear sends webhook to Ralph API
-3. **Queue**: API validates signature, enqueues task to Redis (BullMQ)
-4. **Planning**: Worker uses Claude Opus to create implementation plan
-5. **Coding**: Worker uses Claude Sonnet to generate code
-6. **Validation**: Polyglot toolchain (Biome, Ruff, Mypy, TSC, Trivy) validates the code
-7. **Push**: Worker commits and pushes to a feature branch
-
-### Indexing & Caching
-
-To reduce credit consumption and improve execution speed, Ralph implements a persistent indexing cache for Claude Code:
-
-- **Persistent Cache**: The directory `/app/claude-cache` is mounted as a Persistent Volume (PVC) in the worker deployment.
-- **Warm Indexing**: Indexing data is seeded into each task's isolated workspace at startup and persisted back to the global cache after every iteration (including failed ones).
-- **Multi-Repository Safety**: Claude Code CLI uses internal hashes based on the project directory path to store indexing data. Since each task uses a consistent directory structure (`/repo`), different repositories are naturally isolated within the cache by their content and metadata.
-- **Scaling Note**: The current architecture uses `ReadWriteOnce` (RWO) storage, which supports a single worker node. For large-scale horizontal scaling across multiple nodes, a `ReadWriteMany` (RWX) storage solution like Google Cloud Filestore would be required.
+1. **Trigger**: Create a Linear issue with the label `Ralph`.
+2. **Webhook**: Linear sends a webhook to the Ralph API.
+3. **Queue**: API validates the signature and enqueues the task to Redis (BullMQ).
+4. **Cache Seeding**: Worker initializes an isolated `$HOME` and seeds it with metadata from the **Persistent Cache** (the "Reading Diary") to avoid re-indexing.
+5. **Planning**: Worker uses Claude Opus to create an implementation plan (context-only, tools disabled to save credits).
+6. **Coding**: Worker uses Claude Sonnet to generate code based on the plan.
+7. **Validation**: Polyglot toolchain (Biome, Ruff, Mypy, TSC, Trivy) validates the changes.
+8. **Cache Persistence**: Successful (or partial) indexing progress is saved back to the Persistent Cache.
+9. **Push**: Worker commits and pushes to a feature branch and creates a PR.
 
 ---
 
 ## Security Features
 
-Ralph implements multiple security layers to safely execute AI-generated code in untrusted repositories:
+Ralph implements multiple security layers to safely execute AI-generated code:
+
+### Workspace Isolation & Storage
+
+- **Task Isolation**: Each task runs in a unique, UUID-based directory (`/tmp/ralph-workspaces/{UUID}`).
+- **Structural Separation**:
+    - `/repo/`: Contains only the cloned source code. Git operations are restricted to this folder.
+    - `/home/`: A separate directory used as the `$HOME` for Claude CLI. It contains AI metadata, credentials, and history, keeping them out of your source code and PRs.
+- **Persistent Cache**: A dedicated volume (`/app/claude-cache`) stores indexing metadata across restarts, significantly reducing API costs while maintaining repository isolation through internal hashing.
 
 ### Agent Tool Execution Security
 
