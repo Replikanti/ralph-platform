@@ -255,19 +255,23 @@ async function validateNode(workDir: string, changedFiles: string[]): Promise<{ 
 
         } catch (e: any) { 
 
-            const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
 
-            if (relevant) {
+                        if (relevant) {
 
-                success = false; 
+                            success = false; 
 
-                outputLog += `❌ Biome Errors:\n${filteredLog}\n`; 
+                            outputLog += `❌ Biome Errors (relevant to your changes):\n${filteredLog}\n`; 
 
-            } else {
+                        } else {
 
-                outputLog += "✅ Biome: Passed (ignored unrelated errors)\n";
+                            console.log("ℹ️ [Validation] Ignoring Biome errors unrelated to changed files.");
 
-            }
+                            outputLog += "✅ Biome: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
 
         }
 
@@ -283,19 +287,23 @@ async function validateNode(workDir: string, changedFiles: string[]): Promise<{ 
 
             } catch (e: any) { 
 
-                const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+                            const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
 
-                if (relevant) {
+                            if (relevant) {
 
-                    success = false; 
+                                success = false; 
 
-                    outputLog += `❌ TSC Errors:\n${filteredLog}\n`; 
+                                outputLog += `❌ TSC Errors (relevant to your changes):\n${filteredLog}\n`; 
 
-                } else {
+                            } else {
 
-                    outputLog += "✅ TSC: Passed (ignored unrelated errors)\n";
+                                console.log("ℹ️ [Validation] Ignoring TSC errors unrelated to changed files.");
 
-                }
+                                outputLog += "✅ TSC: Passed (ignored unrelated errors)\n";
+
+                            }
+
+                
 
             }
 
@@ -387,19 +395,23 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
 
         } catch (e: any) { 
 
-            const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
 
-            if (relevant) {
+                        if (relevant) {
 
-                success = false; 
+                            success = false; 
 
-                outputLog += `❌ Ruff Errors:\n${filteredLog}\n`; 
+                            outputLog += `❌ Ruff Errors (relevant to your changes):\n${filteredLog}\n`; 
 
-            } else {
+                        } else {
 
-                outputLog += "✅ Ruff: Passed (ignored unrelated errors)\n";
+                            console.log("ℹ️ [Validation] Ignoring Ruff errors unrelated to changed files.");
 
-            }
+                            outputLog += "✅ Ruff: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
 
         }
 
@@ -413,19 +425,23 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
 
         } catch (e: any) { 
 
-            const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
 
-            if (relevant) {
+                        if (relevant) {
 
-                success = false; 
+                            success = false; 
 
-                outputLog += `❌ Mypy Errors:\n${filteredLog}\n`; 
+                            outputLog += `❌ Mypy Errors (relevant to your changes):\n${filteredLog}\n`; 
 
-            } else {
+                        } else {
 
-                outputLog += "✅ Mypy: Passed (ignored unrelated errors)\n";
+                            console.log("ℹ️ [Validation] Ignoring Mypy errors unrelated to changed files.");
 
-            }
+                            outputLog += "✅ Mypy: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
 
         }
 

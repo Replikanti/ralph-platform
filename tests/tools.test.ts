@@ -158,7 +158,7 @@ describe('runPolyglotValidation', () => {
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ Biome Errors:');
+        expect(result.output).toContain('❌ Biome Errors (relevant to your changes):');
         expect(result.output).toContain('src/agent.ts:10:5: Lint errors');
     });
 
