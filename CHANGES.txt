@@ -1,0 +1,41 @@
+CHANGES - Human-in-the-Loop Planning Implementation
+====================================================
+
+NEW FILES CREATED:
+- src/plan-store.ts              Redis-based plan persistence module
+- src/linear-client.ts            Linear API client for comments/states
+- src/plan-formatter.ts           Plan formatting utility for Linear display
+- tests/plan-store.test.ts        Plan store unit tests (6 tests)
+- tests/linear-client.test.ts     Linear client unit tests (6 tests)
+- tests/plan-formatter.test.ts    Plan formatter unit tests (3 tests)
+- IMPLEMENTATION_SUMMARY.md       Detailed implementation documentation
+
+MODIFIED FILES:
+- src/agent.ts                    Refactored for 3-mode operation (plan-only/execute-only/full)
+- src/server.ts                   Added comment webhook handler
+- src/worker.ts                   Updated job processor with Redis connection
+- tests/agent.test.ts             Updated for plan review mode
+- tests/server.test.ts            Added 6 new tests for comment webhooks
+- tests/worker.test.ts            Updated for new job signature
+- .env.example                    Added LINEAR_API_KEY, PLAN_REVIEW_ENABLED, PLAN_TTL_DAYS
+- CLAUDE.md                       Comprehensive documentation updates
+
+VERIFICATION:
+✅ All 52 tests passing (8 test suites)
+✅ TypeScript compilation successful
+✅ 74% code coverage
+✅ Backwards compatible with legacy mode
+
+KEY FEATURES:
+- Human approval required before code execution (by default)
+- Plan revision loop with feedback incorporation
+- Redis-based plan storage with 7-day TTL
+- Linear comment-based approval workflow
+- Supports approval commands: LGTM, approved, proceed, ship it
+- Feature flag: PLAN_REVIEW_ENABLED (default: true)
+
+SECURITY:
+- HMAC SHA-256 webhook verification maintained
+- State-based comment filtering (only plan-review state)
+- No arbitrary code execution from comments
+- Automatic plan cleanup via TTL

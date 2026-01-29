@@ -7,6 +7,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { LinearClient } from "@linear/sdk";
+import IORedis from 'ioredis';
+import { storePlan, deletePlan } from './plan-store';
+import { formatPlanForLinear } from './plan-formatter';
+import { LinearClient as RalphLinearClient } from './linear-client';
 
 const langfuse = new Langfuse();
 
@@ -21,6 +25,24 @@ export interface Task {
     jobId: string;
     attempt: number;
     maxAttempts: number;
+    mode?: 'full' | 'plan-only' | 'execute-only';
+    existingPlan?: string;
+    additionalFeedback?: string;
+}
+
+export interface StoredPlan {
+    taskId: string;
+    plan: string;
+    taskContext: {
+        ticketId: string;
+        title: string;
+        description?: string;
+        repoUrl: string;
+        branchName: string;
+    };
+    feedbackHistory: string[];
+    createdAt: Date;
+    status: 'pending-review' | 'approved' | 'needs-revision';
 }
 
 interface IterationContext {
@@ -43,7 +65,8 @@ async function findTargetState(team: any, statusName: string) {
 
     const synonymMap: Record<string, string[]> = {
         'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
-        'in review': ['in review', 'under review', 'peer review', 'review', 'pr']
+        'in review': ['in review', 'under review', 'peer review', 'review', 'pr'],
+        'plan-review': ['plan-review', 'plan review', 'pending review', 'awaiting approval']
     };
 
     const synonyms = synonymMap[name];
@@ -337,12 +360,20 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
     await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
-export const runAgent = async (task: Task): Promise<void> => {
-    return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
+export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
+    const mode = task.mode || 'full';
+    const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
+
+    // If plan review is enabled and mode is 'full', switch to 'plan-only'
+    const actualMode = (mode === 'full' && planReviewEnabled) ? 'plan-only' : mode;
+
+    console.log(`🎯 Running agent in mode: ${actualMode}`);
+
+    return withTrace("Ralph-Task", { ticketId: task.ticketId, mode: actualMode }, async (trace: any) => {
         const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
         const homeDir = path.join(rootDir, 'home');
         const targetClaudeDir = path.join(homeDir, '.claude');
-        
+
         try {
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
             const sourceClaudeDir = path.join(os.homedir(), '.claude');
@@ -359,10 +390,27 @@ export const runAgent = async (task: Task): Promise<void> => {
             } catch (e: any) { console.warn("Seed failed: " + e.message); }
 
             await seedClaudeCache(targetClaudeDir);
-            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started task " + task.ticketId);
-            
             await prepareClaudeSkills(workDir, homeDir);
             const availableSkills = await listAvailableSkills(workDir);
+
+            // MODE: plan-only
+            if (actualMode === 'plan-only') {
+                await handlePlanOnlyMode(task, workDir, homeDir, trace, availableSkills, redis);
+                return;
+            }
+
+            // MODE: execute-only
+            if (actualMode === 'execute-only') {
+                if (!task.existingPlan) {
+                    throw new Error("execute-only mode requires existingPlan");
+                }
+                await handleExecuteOnlyMode(task, workDir, homeDir, git, trace, task.existingPlan, redis);
+                return;
+            }
+
+            // MODE: full (legacy - plan + execute in one go)
+            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started task " + task.ticketId);
+
             let previousErrors = "";
             for (let i = 0; i < 3; i++) {
                 const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
@@ -374,3 +422,101 @@ export const runAgent = async (task: Task): Promise<void> => {
         } finally { cleanup(); }
     });
 };
+
+async function handlePlanOnlyMode(
+    task: Task,
+    workDir: string,
+    homeDir: string,
+    trace: any,
+    availableSkills: string,
+    redis?: IORedis
+): Promise<void> {
+    console.log("📝 Running plan-only mode");
+
+    const linearClient = new RalphLinearClient();
+
+    // Generate plan with Opus
+    const planSpan = trace.span({ name: "Planning-Opus-Plan-Review", metadata: { mode: 'plan-only' } });
+    const previousErrors = task.additionalFeedback || "";
+    const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
+    const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
+    planSpan.end({ output: plan });
+
+    // Store plan in Redis
+    if (redis) {
+        const storedPlan: StoredPlan = {
+            taskId: task.ticketId,
+            plan,
+            taskContext: {
+                ticketId: task.ticketId,
+                title: task.title,
+                description: task.description,
+                repoUrl: task.repoUrl,
+                branchName: task.branchName
+            },
+            feedbackHistory: task.additionalFeedback ? [task.additionalFeedback] : [],
+            createdAt: new Date(),
+            status: 'pending-review'
+        };
+        await storePlan(redis, task.ticketId, storedPlan);
+    }
+
+    // Format and post plan to Linear
+    const formattedPlan = formatPlanForLinear(plan, task.title);
+    await linearClient.postComment(task.ticketId, formattedPlan);
+
+    // Update issue state to plan-review
+    await linearClient.updateIssueState(task.ticketId, "plan-review");
+
+    console.log("✅ Plan posted to Linear, awaiting human approval");
+}
+
+async function handleExecuteOnlyMode(
+    task: Task,
+    workDir: string,
+    homeDir: string,
+    git: any,
+    trace: any,
+    plan: string,
+    redis?: IORedis
+): Promise<void> {
+    console.log("⚙️ Running execute-only mode with approved plan");
+
+    await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph executing approved plan...");
+
+    // Execute the plan with Sonnet
+    const execSpan = trace.span({ name: "Execution-Sonnet-Approved-Plan", metadata: { mode: 'execute-only' } });
+    await executePhase(workDir, homeDir, plan);
+    execSpan.end();
+
+    // Run validation
+    const check = await runPolyglotValidation(workDir);
+
+    if (check.success) {
+        console.log("✅ Validation passed!");
+        await git.add('.');
+        const status = await git.status();
+
+        if (status.staged.length > 0) {
+            await git.commit("feat: " + task.title);
+            await git.push('origin', task.branchName, ['--force']);
+            const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
+            await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+        } else {
+            console.warn("⚠️ No files changed.");
+            await updateLinearIssue(task.ticketId, "Todo", "⚠️ No changes necessary.");
+        }
+
+        // Clean up stored plan
+        if (redis) {
+            await deletePlan(redis, task.ticketId);
+        }
+    } else {
+        console.warn("⚠️ Validation failed after execution:\n" + check.output);
+        await updateLinearIssue(
+            task.ticketId,
+            "Todo",
+            "❌ Execution completed but validation failed.\n\n```\n" + check.output.substring(0, 1000) + "\n```"
+        );
+    }
+}

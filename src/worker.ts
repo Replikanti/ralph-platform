@@ -5,18 +5,30 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Create Redis connection for passing to agent
+const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
+    maxRetriesPerRequest: null,
+    retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+    }
+});
+
 export const jobProcessor = async (job: Job) => {
-    console.log(`🔨 [Worker] Processing ${job.id}`);
-    
+    console.log(`🔨 [Worker] Processing ${job.id} (mode: ${job.data.mode || 'full'})`);
+
     // Inject job metadata into task data
     const taskData: Task = {
         ...job.data,
         jobId: job.id as string,
         attempt: job.attemptsMade + 1,
-        maxAttempts: job.opts.attempts || 1
+        maxAttempts: job.opts.attempts || 1,
+        mode: job.data.mode || 'full',
+        existingPlan: job.data.existingPlan,
+        additionalFeedback: job.data.additionalFeedback
     };
-    
-    await runAgent(taskData);
+
+    await runAgent(taskData, redisConnection);
 };
 
 export const createWorker = () => {

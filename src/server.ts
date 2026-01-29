@@ -9,6 +9,7 @@ import basicAuth from 'express-basic-auth';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
+import { getPlan } from './plan-store';
 
 dotenv.config();
 const app = express();
@@ -148,6 +149,11 @@ function verifyLinearSignature(req: any): boolean {
     return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
 }
 
+function isApprovalComment(body: string): boolean {
+    const approvalPatterns = [/\blgtm\b/i, /\bapproved\b/i, /\bproceed\b/i, /\bship it\b/i];
+    return approvalPatterns.some(pattern => pattern.test(body));
+}
+
 app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (!verifyLinearSignature(req)) {
         console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
@@ -155,13 +161,98 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
     }
 
     const { action, data, type } = req.body;
-    
+
     // DEBUG: Log everything
     console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
     if (data?.labels) {
         console.log(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`);
     } else {
         console.log(`🏷️ [API] No labels in payload.`);
+    }
+
+    // Handle Comment Events (Plan Review Approvals/Feedback)
+    if (type === 'Comment' && action === 'create') {
+        const issue = data.issue;
+        const commentBody = data.body || '';
+        const issueState = (issue?.state?.name || '').toLowerCase();
+
+        console.log(`💬 [API] Comment on issue ${issue?.id}, state: ${issueState}`);
+
+        // Only process comments on issues in plan-review state
+        if (issueState !== 'plan-review' && issueState !== 'plan review' && issueState !== 'pending review' && issueState !== 'awaiting approval') {
+            console.log(`ℹ️ [API] Skipping comment - issue not in plan-review state`);
+            return res.status(200).send({ status: 'ignored', reason: 'not_in_plan_review' });
+        }
+
+        const issueId = issue?.id;
+        if (!issueId) {
+            console.warn(`⚠️ [API] Comment event missing issue ID`);
+            return res.status(400).send({ error: 'missing_issue_id' });
+        }
+
+        // Retrieve stored plan
+        const storedPlan = await getPlan(connection, issueId);
+        if (!storedPlan) {
+            console.warn(`⚠️ [API] No stored plan found for issue ${issueId}`);
+            return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
+        }
+
+        // Check if comment is approval or feedback
+        if (isApprovalComment(commentBody)) {
+            console.log(`✅ [API] Plan approved for issue ${issueId}`);
+
+            // Enqueue execution job
+            try {
+                await ralphQueue.add('coding-task', {
+                    ticketId: issueId,
+                    title: storedPlan.taskContext.title,
+                    description: storedPlan.taskContext.description,
+                    repoUrl: storedPlan.taskContext.repoUrl,
+                    branchName: storedPlan.taskContext.branchName,
+                    mode: 'execute-only',
+                    existingPlan: storedPlan.plan
+                }, {
+                    jobId: `${issueId}-exec-${Date.now()}`,
+                    attempts: 3,
+                    backoff: { type: 'exponential', delay: 2000 },
+                    removeOnComplete: { age: 3600 },
+                    removeOnFail: { age: 86400 }
+                });
+
+                console.log(`📥 [API] Enqueued execution job for ${issueId}`);
+                return res.status(200).send({ status: 'execution_queued' });
+            } catch (e) {
+                console.error("❌ [API] Failed to enqueue execution job:", e);
+                return res.status(500).send({ error: 'queue_failed' });
+            }
+        } else {
+            console.log(`💭 [API] Revision feedback received for issue ${issueId}`);
+
+            // Enqueue re-planning job with feedback
+            try {
+                await ralphQueue.add('coding-task', {
+                    ticketId: issueId,
+                    title: storedPlan.taskContext.title,
+                    description: storedPlan.taskContext.description,
+                    repoUrl: storedPlan.taskContext.repoUrl,
+                    branchName: storedPlan.taskContext.branchName,
+                    mode: 'plan-only',
+                    additionalFeedback: commentBody
+                }, {
+                    jobId: `${issueId}-replan-${Date.now()}`,
+                    attempts: 3,
+                    backoff: { type: 'exponential', delay: 2000 },
+                    removeOnComplete: { age: 3600 },
+                    removeOnFail: { age: 86400 }
+                });
+
+                console.log(`📥 [API] Enqueued re-planning job for ${issueId}`);
+                return res.status(200).send({ status: 'replanning_queued' });
+            } catch (e) {
+                console.error("❌ [API] Failed to enqueue re-planning job:", e);
+                return res.status(500).send({ error: 'queue_failed' });
+            }
+        }
     }
 
     // Filter: Only issues with label "Ralph"

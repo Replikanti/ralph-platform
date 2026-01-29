@@ -8,6 +8,8 @@ process.env.ADMIN_USER = 'admin';
 process.env.ADMIN_PASS = 'password';
 
 import { app } from '../src/server';
+import { getPlan } from '../src/plan-store';
+import { StoredPlan } from '../src/agent';
 
 // Mock fs
 jest.mock('node:fs/promises', () => ({
@@ -43,6 +45,15 @@ jest.mock('ioredis', () => {
         set: jest.fn().mockResolvedValue('OK'),
     }));
 });
+
+// Mock plan-store
+jest.mock('../src/plan-store', () => ({
+    getPlan: jest.fn(),
+    storePlan: jest.fn(),
+    updatePlanStatus: jest.fn(),
+    appendFeedback: jest.fn(),
+    deletePlan: jest.fn()
+}));
 
 function getSignature(body: any) {
     return crypto.createHmac('sha256', TEST_SECRET)
@@ -177,5 +188,150 @@ describe('POST /webhook', () => {
     it('should protect /admin/queues with Basic Auth', async () => {
         const res = await request(app).get('/admin/queues');
         expect(res.status).toBe(401);
+    });
+
+    describe('Comment webhooks (plan review)', () => {
+        const mockStoredPlan: StoredPlan = {
+            taskId: 'issue-123',
+            plan: 'Test implementation plan',
+            taskContext: {
+                ticketId: 'issue-123',
+                title: 'Test Task',
+                description: 'Test description',
+                repoUrl: 'https://github.com/test/repo',
+                branchName: 'ralph/feat-TEST-123'
+            },
+            feedbackHistory: [],
+            createdAt: new Date(),
+            status: 'pending-review'
+        };
+
+        beforeEach(() => {
+            jest.clearAllMocks();
+        });
+
+        it('should ignore comments on issues not in plan-review state', async () => {
+            const body = {
+                type: 'Comment',
+                action: 'create',
+                data: {
+                    body: 'LGTM',
+                    issue: {
+                        id: 'issue-123',
+                        state: { name: 'In Progress' }
+                    }
+                }
+            };
+
+            const res = await request(app)
+                .post('/webhook')
+                .set('linear-signature', getSignature(body))
+                .send(body);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: 'ignored', reason: 'not_in_plan_review' });
+        });
+
+        it('should handle approval comment and queue execution job', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
+
+            const body = {
+                type: 'Comment',
+                action: 'create',
+                data: {
+                    body: 'LGTM, let\'s proceed!',
+                    issue: {
+                        id: 'issue-123',
+                        state: { name: 'plan-review' }
+                    }
+                }
+            };
+
+            const res = await request(app)
+                .post('/webhook')
+                .set('linear-signature', getSignature(body))
+                .send(body);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: 'execution_queued' });
+            expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
+        });
+
+        it('should handle feedback comment and queue re-planning job', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
+
+            const body = {
+                type: 'Comment',
+                action: 'create',
+                data: {
+                    body: 'Please add more error handling',
+                    issue: {
+                        id: 'issue-123',
+                        state: { name: 'plan-review' }
+                    }
+                }
+            };
+
+            const res = await request(app)
+                .post('/webhook')
+                .set('linear-signature', getSignature(body))
+                .send(body);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: 'replanning_queued' });
+            expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
+        });
+
+        it('should ignore comments when no stored plan exists', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(null);
+
+            const body = {
+                type: 'Comment',
+                action: 'create',
+                data: {
+                    body: 'LGTM',
+                    issue: {
+                        id: 'issue-123',
+                        state: { name: 'plan-review' }
+                    }
+                }
+            };
+
+            const res = await request(app)
+                .post('/webhook')
+                .set('linear-signature', getSignature(body))
+                .send(body);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: 'ignored', reason: 'no_stored_plan' });
+        });
+
+        it('should recognize various approval phrases', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
+
+            const approvalPhrases = ['lgtm', 'LGTM', 'approved', 'Proceed', 'ship it', 'Ship It!'];
+
+            for (const phrase of approvalPhrases) {
+                const body = {
+                    type: 'Comment',
+                    action: 'create',
+                    data: {
+                        body: phrase,
+                        issue: {
+                            id: 'issue-123',
+                            state: { name: 'plan-review' }
+                        }
+                    }
+                };
+
+                const res = await request(app)
+                    .post('/webhook')
+                    .set('linear-signature', getSignature(body))
+                    .send(body);
+
+                expect(res.status).toBe(200);
+                expect(res.body).toEqual({ status: 'execution_queued' });
+            }
+        });
     });
 });
