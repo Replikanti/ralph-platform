@@ -24,6 +24,31 @@ export interface Task {
 
 // --- HELPERS ---
 
+async function findTargetState(team: any, statusName: string) {
+    const states = await team.states();
+    const name = statusName.toLowerCase();
+    
+    // 1. Direct match
+    let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
+    if (state) return state;
+
+    // 2. Synonym mapping for common states
+    const synonymMap: Record<string, string[]> = {
+        'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready'],
+        'in review': ['in review', 'under review', 'peer review', 'review', 'pr']
+    };
+
+    const synonyms = synonymMap[name];
+    if (synonyms) {
+        for (const syn of synonyms) {
+            state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
+            if (state) return state;
+        }
+    }
+
+    return null;
+}
+
 export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
     if (!process.env.LINEAR_API_KEY) {
         console.warn("⚠️ LINEAR_API_KEY is missing, skipping status update.");
@@ -39,38 +64,18 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
             return;
         }
 
-        const states = await team.states();
-        
-        // Find target state by name, or common synonyms
-        let targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === statusName.toLowerCase());
-        
-        if (!targetState) {
-            if (statusName.toLowerCase() === 'todo') {
-                const synonyms = ['triage', 'backlog', 'todo', 'unstarted', 'ready'];
-                for (const syn of synonyms) {
-                    targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
-                    if (targetState) break;
-                }
-            } else if (statusName.toLowerCase() === 'in review') {
-                const synonyms = ['in review', 'under review', 'peer review', 'review', 'pr'];
-                for (const syn of synonyms) {
-                    targetState = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
-                    if (targetState) break;
-                }
-            }
-        }
+        const targetState = await findTargetState(team, statusName);
 
         if (targetState) {
             const currentState = await issue.state;
-            if (currentState?.id === targetState.id) {
-                console.log(`ℹ️ [Agent] Issue ${issueId} is already in state "${statusName}", skipping state update.`);
-            } else {
+            if (currentState?.id !== targetState.id) {
                 console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
                 await linear.updateIssue(issueId, { stateId: targetState.id });
+            } else {
+                console.log(`ℹ️ [Agent] Issue ${issueId} is already in state "${statusName}", skipping state update.`);
             }
         } else {
-            const availableStates = states.nodes.map((s: { name: string }) => s.name).join(", ");
-            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}. Available: ${availableStates}`);
+            console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}.`);
         }
 
         if (comment) {
