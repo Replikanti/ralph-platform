@@ -22,6 +22,15 @@ export interface Task {
     maxAttempts: number;
 }
 
+interface IterationContext {
+    workDir: string;
+    homeDir: string;
+    task: Task;
+    availableSkills: string;
+    git: any;
+    trace: any;
+}
+
 // --- HELPERS ---
 
 async function findTargetState(team: any, statusName: string) {
@@ -363,15 +372,6 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
     }
 }
 
-interface IterationContext {
-    trace: any;
-    workDir: string;
-    homeDir: string;
-    task: Task;
-    availableSkills: string;
-    git: any;
-}
-
 async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
     console.log(`🤖 [Agent] Iteration ${iteration}`);
 
@@ -382,7 +382,7 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     });
     const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
     // Strip XML tags if present to prevent Executor confusion
-    const plan = rawPlan.replaceAll(/<plan>|<\/plan>/g, '').trim();
+    const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
     planSpan.end({ output: plan });
 
     // 2. EXECUTE (Sonnet)
@@ -403,18 +403,18 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
 
     if (check.success) {
         console.log("✅ [Agent] Validation passed!");
-
+        
         await ctx.git.add('.');
         const status = await ctx.git.status();
         if (status.staged.length > 0) {
             await ctx.git.commit(`feat: ${ctx.task.title}`);
             await ctx.git.push('origin', ctx.task.branchName, ['--force']);
-
+            
             const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, `feat: ${ctx.task.title}`, ctx.task.description || '');
-            const successComment = prUrl
+            const successComment = prUrl 
                 ? `✅ Task completed successfully.\n\nPull Request: ${prUrl}`
                 : `✅ Task completed successfully, but PR creation failed.\n\nChanges pushed to branch: ${ctx.task.branchName}`;
-
+            
             await updateLinearIssue(ctx.task.ticketId, "In Review", successComment);
             if (prUrl) console.log(`🚀 [Agent] Pull Request created: ${prUrl}`);
         } else {
@@ -443,15 +443,19 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
 
 export const runAgent = async (task: Task): Promise<void> => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
-        const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
-        const homeDir = path.join(workDir, '.claude-home');
+        const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
+        const homeDir = path.join(rootDir, 'home');
         
         try {
             // Smart notification based on attempt number
             if (task.attempt > 1) {
-                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: \`${task.jobId}\``);
+                await updateLinearIssue(task.ticketId, "In Progress", `🔄 **Retrying task (Attempt ${task.attempt}/${task.maxAttempts})**\nJob ID: 
+${task.jobId}
+`);
             } else {
-                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: \`${task.jobId}\``);
+                await updateLinearIssue(task.ticketId, "In Progress", `🤖 **Ralph has started working on this task.**\nJob ID: 
+${task.jobId}
+`);
             }
 
             await prepareClaudeSkills(workDir, homeDir);

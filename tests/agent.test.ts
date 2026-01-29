@@ -102,7 +102,8 @@ describe('runAgent', () => {
         // Re-require mocked modules
         const workspaceModule = require('../src/workspace');
         (workspaceModule.setupWorkspace as jest.Mock).mockResolvedValue({
-            workDir: '/mock/workspace',
+            workDir: '/mock/workspace/repo',
+            rootDir: '/mock/workspace',
             git: mockGit,
             cleanup: mockCleanup,
         });
