@@ -40,20 +40,26 @@ describe('Worker', () => {
     });
 
     it('should process job by calling runAgent', async () => {
-        const mockJob = { 
-            id: '123', 
+        const mockJob = {
+            id: '123',
             data: { task: 'test' },
             attemptsMade: 0,
             opts: { attempts: 3 }
         };
         await jobProcessor(mockJob as any);
-        
-        expect(runAgent).toHaveBeenCalledWith({
-            task: 'test',
-            jobId: '123',
-            attempt: 1,
-            maxAttempts: 3
-        } as any);
+
+        expect(runAgent).toHaveBeenCalledWith(
+            {
+                task: 'test',
+                jobId: '123',
+                attempt: 1,
+                maxAttempts: 3,
+                mode: 'full',
+                existingPlan: undefined,
+                additionalFeedback: undefined
+            },
+            expect.any(IORedis)
+        );
     });
 
     it('should log on completed event', () => {

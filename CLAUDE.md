@@ -14,17 +14,95 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 - **Agent** (src/agent.ts): Core AI workflow - planning (Opus), coding (Sonnet), validation (polyglot tools)
 - **Workspace** (src/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
 - **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, Semgrep)
+- **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
+- **Linear Client** (src/linear-client.ts): Integration for posting plans and updating issue states
 
 ## Architecture Flow
 
+### Default Mode (Human-in-the-Loop Planning - ENABLED by default)
+
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
-3. Agent runs two-phase LLM workflow:
+3. Agent runs **plan-only mode** (Opus generates implementation plan)
+4. Plan posted to Linear as comment, issue moved to "plan-review" state
+5. **Human reviews plan**:
+   - Comment "LGTM", "approved", "proceed", or "ship it" → Execution job queued
+   - Comment with feedback → Re-planning job queued with feedback context
+6. On approval: Agent runs **execute-only mode** (Sonnet implements approved plan)
+7. Polyglot validation runs on generated code
+8. Push to GitHub (creates PR branch)
+9. Langfuse trace captures entire execution
+
+### Legacy Mode (PLAN_REVIEW_ENABLED=false)
+
+1. Linear webhook → API validates signature → enqueues to Redis
+2. Worker dequeues → clones repo to ephemeral workspace
+3. Agent runs **full mode** (plan + execute in one go):
    - Planning phase (Claude Opus)
    - Execution phase (Claude Sonnet)
 4. Polyglot validation runs on generated code
 5. Push to GitHub (creates PR branch)
 6. Langfuse trace captures entire execution
+
+## Human-in-the-Loop Planning
+
+Ralph supports **human-in-the-loop** plan review, allowing developers to approve or iterate on implementation plans before code execution begins. This feature is **enabled by default** and helps ensure Ralph's approach aligns with team expectations.
+
+### How It Works
+
+**1. Plan Generation**
+- When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Opus
+- The plan is posted as a comment on the Linear issue
+- The issue is automatically moved to the "plan-review" state (or synonym: "pending review", "awaiting approval")
+
+**2. Plan Review**
+Developers review the posted plan and can:
+- **Approve**: Comment with approval phrases (`LGTM`, `approved`, `proceed`, `ship it`)
+  - Triggers execution job with the approved plan
+  - Issue moves to "In Progress" state
+  - Ralph executes the plan using Claude Sonnet
+- **Request Changes**: Comment with specific feedback
+  - Triggers re-planning job with feedback incorporated
+  - Issue remains in "plan-review" state
+  - Ralph generates revised plan with feedback context
+
+**3. State Transitions**
+```
+Todo → Plan Review → In Progress → In Review → Done
+         ↑____________↓
+      (revision loop)
+```
+
+### Configuration
+
+**Environment Variables:**
+- `PLAN_REVIEW_ENABLED` - Enable/disable plan review (default: `true`)
+- `PLAN_TTL_DAYS` - Redis TTL for stored plans in days (default: `7`)
+- `LINEAR_API_KEY` - Required for posting comments and updating states (needs write access)
+
+**Disabling Plan Review:**
+Set `PLAN_REVIEW_ENABLED=false` to revert to legacy behavior (plan + execute in one job).
+
+### Approval Commands
+
+Ralph recognizes these case-insensitive patterns as approval:
+- `lgtm`
+- `approved`
+- `proceed`
+- `ship it`
+
+Any other comment content is treated as revision feedback.
+
+### Plan Storage
+
+Plans are stored in Redis with the key pattern `ralph:plan:{issueId}` and include:
+- Implementation plan (Opus output)
+- Original task context (title, description, repo, branch)
+- Feedback history (accumulated revision requests)
+- Status (`pending-review`, `approved`, `needs-revision`)
+- TTL (7 days by default)
+
+Plans are automatically deleted after successful execution or TTL expiration.
 
 ## Development Commands
 
@@ -62,6 +140,9 @@ Copy `.env.example` to `.env` and configure:
 - `GITHUB_TOKEN`: Requires 'repo' scope for cloning and pushing
 - `ANTHROPIC_API_KEY`: For Claude API access
 - `LINEAR_WEBHOOK_SECRET`: HMAC secret from Linear webhook settings
+- `LINEAR_API_KEY`: API key for posting comments and updating issue states (required for plan review)
+- `PLAN_REVIEW_ENABLED`: Enable human-in-the-loop planning (default: true)
+- `PLAN_TTL_DAYS`: Redis TTL for stored plans in days (default: 7)
 - `LANGFUSE_*`: Optional tracing (cloud.langfuse.com)
 
 ## Critical Implementation Details
@@ -72,7 +153,18 @@ The webhook endpoint (src/server.ts:49) uses **HMAC SHA-256 signature verificati
 **Never bypass signature verification** - it prevents unauthorized job injection.
 
 ### Task Filtering
-Only Linear issues with the label "Ralph" (case-insensitive) trigger agent execution (src/server.ts:57-58).
+Only Linear issues with the label "Ralph" (case-insensitive) trigger agent execution.
+
+**Issue Webhooks** (create/update):
+- Ignored if issue lacks "Ralph" label
+- Ignored if already in terminal states (In Progress, In Review, Completed, Done, Canceled)
+- Enqueues plan-only job (or full job if PLAN_REVIEW_ENABLED=false)
+
+**Comment Webhooks** (create):
+- Only processed on issues in "plan-review" state
+- Approval comments trigger execute-only job
+- Feedback comments trigger re-planning job with accumulated feedback
+- Requires stored plan in Redis (7-day TTL)
 
 ### Workspace Isolation
 Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The workspace module (src/workspace.ts) clones the repo using OAuth token authentication, creates/checks out a feature branch (`ralph/feat-{identifier}`), and configures git identity as "Ralph Bot <ralph@duvo.ai>".

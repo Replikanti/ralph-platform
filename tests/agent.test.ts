@@ -1,5 +1,8 @@
 jest.mock('../src/workspace');
 jest.mock('../src/tools');
+jest.mock('../src/plan-store');
+jest.mock('../src/linear-client');
+jest.mock('ioredis');
 jest.mock('node:fs/promises', () => ({
     access: jest.fn().mockRejectedValue(new Error('No skills')),
     readdir: jest.fn(),
@@ -14,6 +17,7 @@ jest.mock('node:fs/promises', () => ({
 jest.setTimeout(30000);
 
 process.env.LINEAR_API_KEY = 'test-key';
+process.env.PLAN_REVIEW_ENABLED = 'false'; // Disable plan review for most tests
 
 // Mock child_process for spawn and exec
 const mockSpawnOn = jest.fn();
