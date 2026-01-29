@@ -1,4 +1,4 @@
-import simpleGit from 'simple-git';
+import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'node:path';
@@ -6,14 +6,14 @@ import path from 'node:path';
 const WORKSPACE_ROOT = '/tmp/ralph-workspaces';
 if (!fs.existsSync(WORKSPACE_ROOT)) fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
-export function parseRepoUrl(repoUrl: string) {
+export function parseRepoUrl(repoUrl: string): { owner: string, repo: string } {
     // Expected format: https://github.com/owner/repo or https://github.com/owner/repo.git
     const match = repoUrl.match(/github\.com\/([^/]+)\/([^.]+)(\.git)?/);
     if (!match) throw new Error(`Invalid GitHub URL: ${repoUrl}`);
     return { owner: match[1], repo: match[2] };
 }
 
-export async function setupWorkspace(repoUrl: string, branchName: string) {
+export async function setupWorkspace(repoUrl: string, branchName: string): Promise<{ workDir: string, git: SimpleGit, cleanup: () => void }> {
     const id = uuidv4();
     const workDir = path.join(WORKSPACE_ROOT, id);
     const token = process.env.GITHUB_TOKEN;
@@ -31,14 +31,6 @@ export async function setupWorkspace(repoUrl: string, branchName: string) {
         await git.checkout(branchName); 
     } catch { 
         await git.checkoutLocalBranch(branchName); 
-    }
-
-    // SAFETY: Ensure .trivy-cache is ignored so it's never pushed
-    try {
-        const gitignorePath = path.join(workDir, '.gitignore');
-        await fs.promises.appendFile(gitignorePath, '\n.trivy-cache/\n');
-    } catch (e) {
-        console.warn("⚠️ Failed to update .gitignore:", e);
     }
 
     return { workDir, git, cleanup: () => fs.rmSync(workDir, { recursive: true, force: true }) };

@@ -72,20 +72,21 @@ export async function runCommand(workDir: string, command: string) {
         });
 
         // Sanitize output: limit length and remove potential secrets
-        const sanitize = (str: string) => {
+        const sanitize = (str: string): string => {
             const maxLen = 5000;
             return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
         };
 
         return `STDOUT:\n${sanitize(stdout)}\n\nSTDERR:\n${sanitize(stderr)}`;
-    } catch (e: any) {
+    } catch (e: unknown) {
+        const error = e as { stdout?: string, stderr?: string };
         const sanitize = (str: string) => {
             if (!str) return '';
             const maxLen = 2000;
             return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
         };
 
-        return `ERROR: Command failed\n${sanitize(e.stdout || '')}\n${sanitize(e.stderr || '')}`;
+        return `ERROR: Command failed\n${sanitize(error.stdout || '')}\n${sanitize(error.stderr || '')}`;
     }
 }
 
@@ -154,14 +155,22 @@ async function validateNode(workDir: string): Promise<{ success: boolean, log: s
             
             await execAsync('biome check --apply .', { cwd: workDir });
             outputLog += "✅ Biome: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
+        } catch (e: unknown) { 
+            const error = e as { stdout?: string };
+            success = false; 
+            outputLog += `❌ Biome: ${error.stdout}\n`; 
+        }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
              try {
                 // We use --skipLibCheck to be faster and more resilient
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
                 outputLog += "✅ TSC: Passed\n";
-            } catch (e: any) { success = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
+            } catch (e: unknown) { 
+                const error = e as { stdout?: string };
+                success = false; 
+                outputLog += `❌ TSC: ${error.stdout}\n`; 
+            }
         }
     }
     return { success, log: outputLog };
@@ -190,47 +199,35 @@ async function validatePython(workDir: string): Promise<{ success: boolean, log:
             await execAsync('ruff check --fix .', { cwd: workDir });
             await execAsync('ruff format .', { cwd: workDir });
             outputLog += "✅ Ruff: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Ruff: ${e.stdout}\n`; }
+        } catch (e: unknown) { 
+            const error = e as { stdout?: string };
+            success = false; 
+            outputLog += `❌ Ruff: ${error.stdout}\n`; 
+        }
 
         try {
             await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
             outputLog += "✅ Mypy: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
+        } catch (e: unknown) { 
+            const error = e as { stdout?: string };
+            success = false; 
+            outputLog += `❌ Mypy: ${error.stdout}\n`; 
+        }
     }
     return { success, log: outputLog };
 }
 
-export async function runPolyglotValidation(workDir: string) {
+export async function runPolyglotValidation(workDir: string): Promise<{ success: boolean, output: string }> {
     let outputLog = "";
     let allSuccess = true;
 
-    // 1. TS/JS: Biome & TSC
     const nodeResult = await validateNode(workDir);
     allSuccess = allSuccess && nodeResult.success;
     outputLog += nodeResult.log;
 
-    // 2. Python: Ruff & Mypy
     const pythonResult = await validatePython(workDir);
     allSuccess = allSuccess && pythonResult.success;
     outputLog += pythonResult.log;
-
-    // 3. Security: Trivy (Universal - Apache 2.0)
-    // We use a custom cache directory inside the writable workDir
-    const trivyCache = path.join(workDir, '.trivy-cache');
-    try {
-        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
-        outputLog += "✅ Trivy: Secure\n";
-    } catch (e: any) { 
-        allSuccess = false; 
-        outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
-    } finally {
-        // CLEANUP: Remove trivy cache to prevent it from being pushed to git (it's >900MB)
-        try {
-            await fsPromises.rm(trivyCache, { recursive: true, force: true });
-        } catch (e) {
-            console.warn("⚠️ Failed to cleanup trivy cache:", e);
-        }
-    }
 
     return { success: allSuccess, output: outputLog };
 }

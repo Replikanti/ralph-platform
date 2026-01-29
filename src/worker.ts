@@ -1,17 +1,17 @@
-import { Worker } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent, updateLinearIssue } from './agent';
+import { runAgent, updateLinearIssue, Task } from './agent';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-export const jobProcessor = async (job: any) => {
+export const jobProcessor = async (job: Job) => {
     console.log(`🔨 [Worker] Processing ${job.id}`);
     
     // Inject job metadata into task data
-    const taskData = {
+    const taskData: Task = {
         ...job.data,
-        jobId: job.id,
+        jobId: job.id as string,
         attempt: job.attemptsMade + 1,
         maxAttempts: job.opts.attempts || 1
     };
