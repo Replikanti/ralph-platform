@@ -49,7 +49,7 @@ jest.mock('node:util', () => {
 // Mock Linear
 const mockIssueUpdate = jest.fn();
 const mockCommentCreate = jest.fn();
-const mockStates = jest.fn().mockResolvedValue({ nodes: [{ name: 'In Progress', id: 's1' }, { name: 'Done', id: 's2' }, { name: 'Triage', id: 's3' }] });
+const mockStates = jest.fn().mockResolvedValue({ nodes: [{ name: 'In Progress', id: 's1' }, { name: 'In Review', id: 's2' }, { name: 'Todo', id: 's3' }, { name: 'Done', id: 's4' }, { name: 'Triage', id: 's5' }] });
 
 jest.mock('@linear/sdk', () => ({
     LinearClient: jest.fn().mockImplementation(() => ({
@@ -202,8 +202,60 @@ describe('runAgent', () => {
 
         const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
-        
+
         expect(mockGit.commit).toHaveBeenCalledWith(expect.stringContaining('wip:'));
+        expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
+            title: expect.stringContaining('wip:')
+        }));
+    });
+
+    it('should update Linear status to "In Review" when PR is created successfully', async () => {
+        const fsModule = require('node:fs/promises');
+        fsModule.readdir.mockResolvedValue([]);
+        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
+
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
+        });
+
+        const toolsModule = require('../src/tools');
+        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+            success: true,
+            output: 'Validation Passed',
+        });
+
+        mockIssueUpdate.mockClear();
+
+        const task = { ticketId: 'pr-test', title: 'Test PR Creation', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
+        await runAgent(task);
+
+        // Verify that status was updated to "In Review" (state id 's2')
+        expect(mockIssueUpdate).toHaveBeenCalledWith('pr-test', { stateId: 's2' });
+        expect(mockPullsCreate).toHaveBeenCalled();
+    });
+
+    it('should update Linear status to "Todo" when validation fails after retries', async () => {
+        const fsModule = require('node:fs/promises');
+        fsModule.readdir.mockResolvedValue([]);
+        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
+
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
+        });
+
+        const toolsModule = require('../src/tools');
+        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+            success: false,
+            output: 'Validation Failed',
+        });
+
+        mockIssueUpdate.mockClear();
+
+        const task = { ticketId: 'fail-test', title: 'Test Validation Failure', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
+        await runAgent(task);
+
+        // Verify that status was updated to "Todo" (state id 's3')
+        expect(mockIssueUpdate).toHaveBeenCalledWith('fail-test', { stateId: 's3' });
         expect(mockPullsCreate).toHaveBeenCalledWith(expect.objectContaining({
             title: expect.stringContaining('wip:')
         }));
