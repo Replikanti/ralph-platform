@@ -5,6 +5,10 @@ import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import morgan from 'morgan';
+import basicAuth from 'express-basic-auth';
+import { createBullBoard } from '@bull-board/api';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
+import { ExpressAdapter } from '@bull-board/express';
 
 dotenv.config();
 const app = express();
@@ -15,6 +19,33 @@ app.use(morgan('combined'));
 const CONFIG_PATH = process.env.REPO_CONFIG_PATH || '/etc/ralph/config/repos.json';
 const REDIS_CONFIG_KEY = 'ralph:config:repos';
 const REDIS_VERSION_KEY = 'ralph:config:version';
+
+// Redis & Queue Setup
+const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
+    maxRetriesPerRequest: null,
+    retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+    }
+});
+const ralphQueue = new Queue('ralph-tasks', { connection });
+
+// Admin Dashboard (Protected)
+const serverAdapter = new ExpressAdapter();
+serverAdapter.setBasePath('/admin/queues');
+
+createBullBoard({
+    queues: [new BullMQAdapter(ralphQueue)],
+    serverAdapter: serverAdapter,
+});
+
+const adminUser = process.env.ADMIN_USER || 'admin';
+const adminPass = process.env.ADMIN_PASS || 'ralph-secret';
+
+app.use('/admin/queues', basicAuth({
+    users: { [adminUser]: adminPass },
+    challenge: true,
+}), serverAdapter.getRouter());
 
 // Team → Repository mapping logic
 async function getRepoForTeam(teamKey: string | undefined): Promise<string | null> {
@@ -88,15 +119,6 @@ app.use(express.json({
         req.rawBody = buf;
     }
 }));
-
-const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { 
-    maxRetriesPerRequest: null,
-    retryStrategy(times) {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-    }
-});
-const ralphQueue = new Queue('ralph-tasks', { connection });
 
 function verifyLinearSignature(req: any): boolean {
     const secret = process.env.LINEAR_WEBHOOK_SECRET;
