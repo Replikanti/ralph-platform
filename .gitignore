@@ -18,3 +18,5 @@ infra/*.out
 .trivy-cache/
 
 .trivy-cache/
+
+.trivy-cache/
