@@ -140,11 +140,10 @@ export const agentTools = [
 
 // --- EXISTING VALIDATION LOGIC ---
 
-export async function runPolyglotValidation(workDir: string) {
+async function validateNode(workDir: string): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
-    let allSuccess = true;
+    let success = true;
 
-    // 1. TS/JS: Biome & TSC
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
         try {
             // Ensure dependencies are installed for TSC to work
@@ -155,18 +154,23 @@ export async function runPolyglotValidation(workDir: string) {
             
             await execAsync('biome check --apply .', { cwd: workDir });
             outputLog += "✅ Biome: Passed\n";
-        } catch (e: any) { allSuccess = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
+        } catch (e: any) { success = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
              try {
                 // We use --skipLibCheck to be faster and more resilient
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
                 outputLog += "✅ TSC: Passed\n";
-            } catch (e: any) { allSuccess = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
+            } catch (e: any) { success = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
         }
     }
+    return { success, log: outputLog };
+}
 
-    // 2. Python: Ruff & Mypy
+async function validatePython(workDir: string): Promise<{ success: boolean, log: string }> {
+    let outputLog = "";
+    let success = true;
+
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
                       (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
@@ -186,13 +190,29 @@ export async function runPolyglotValidation(workDir: string) {
             await execAsync('ruff check --fix .', { cwd: workDir });
             await execAsync('ruff format .', { cwd: workDir });
             outputLog += "✅ Ruff: Passed\n";
-        } catch (e: any) { allSuccess = false; outputLog += `❌ Ruff: ${e.stdout}\n`; }
+        } catch (e: any) { success = false; outputLog += `❌ Ruff: ${e.stdout}\n`; }
 
         try {
             await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
             outputLog += "✅ Mypy: Passed\n";
-        } catch (e: any) { allSuccess = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
+        } catch (e: any) { success = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
     }
+    return { success, log: outputLog };
+}
+
+export async function runPolyglotValidation(workDir: string) {
+    let outputLog = "";
+    let allSuccess = true;
+
+    // 1. TS/JS: Biome & TSC
+    const nodeResult = await validateNode(workDir);
+    allSuccess = allSuccess && nodeResult.success;
+    outputLog += nodeResult.log;
+
+    // 2. Python: Ruff & Mypy
+    const pythonResult = await validatePython(workDir);
+    allSuccess = allSuccess && pythonResult.success;
+    outputLog += pythonResult.log;
 
     // 3. Security: Trivy (Universal - Apache 2.0)
     // We use a custom cache directory inside the writable workDir
