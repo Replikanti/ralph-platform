@@ -9,7 +9,7 @@
     "tengu_scratch": false,
     "tengu_brass_pebble": false,
     "tengu_disable_bypass_permissions_mode": false,
-    "tengu_claudeai_mcp_connectors": false,
+    "tengu_claudeai_mcp_connectors": true,
     "tengu_event_sampling_config": {},
     "tengu_marble_anvil": true,
     "tengu_tool_pear": false,
