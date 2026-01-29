@@ -1,9 +1,13 @@
 import { setupWorkspace } from '../src/workspace';
 import simpleGit from 'simple-git';
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 
 jest.mock('simple-git');
 jest.mock('node:fs');
+jest.mock('node:fs/promises', () => ({
+    mkdir: jest.fn().mockResolvedValue(undefined)
+}));
 jest.mock('uuid', () => ({
     v4: () => 'test-uuid'
 }));
@@ -31,7 +35,7 @@ describe('setupWorkspace', () => {
         const repoUrl = 'https://github.com/user/repo';
         const branchName = 'feature/test';
         
-        const { workDir, rootDir, git, cleanup } = await setupWorkspace(repoUrl, branchName);
+        const { workDir, rootDir, cleanup } = await setupWorkspace(repoUrl, branchName);
         
         expect(workDir).toContain('repo');
         expect(rootDir).not.toContain('repo');
