@@ -156,6 +156,14 @@ app.post('/webhook', async (req, res) => {
 
     const { action, data, type } = req.body;
     
+    // DEBUG: Log everything
+    console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
+    if (data?.labels) {
+        console.log(`🏷️ [API] Labels: ${data.labels.map((l: any) => l.name).join(', ')}`);
+    } else {
+        console.log(`🏷️ [API] No labels in payload.`);
+    }
+
     // Filter: Only issues with label "Ralph"
     const labels = data.labels || [];
     const labelNames = labels.map((l: any) => l.name);
