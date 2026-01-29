@@ -140,7 +140,7 @@ describe('runPolyglotValidation', () => {
         expect(result.output).toContain('✅ Mypy: Passed');
     });
 
-    it('should fail if tool execution fails', async () => {
+    it('should fail if tool execution fails with relevant errors', async () => {
         mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
@@ -148,8 +148,8 @@ describe('runPolyglotValidation', () => {
                 callback(null, { stdout: 'M  src/agent.ts', stderr: '' });
             } else if (cmd.includes('biome')) {
                 const err: any = new Error('Biome failed');
-                err.stdout = 'Lint errors';
-                callback(err, { stdout: 'Lint errors' });
+                err.stdout = 'src/agent.ts:10:5: Lint errors';
+                callback(err, { stdout: 'src/agent.ts:10:5: Lint errors' });
             } else {
                 callback(null, { stdout: 'Success', stderr: '' });
             }
@@ -158,7 +158,30 @@ describe('runPolyglotValidation', () => {
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ Biome: Lint errors');
+        expect(result.output).toContain('❌ Biome Errors:');
+        expect(result.output).toContain('src/agent.ts:10:5: Lint errors');
+    });
+
+    it('should ignore unrelated errors', async () => {
+        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  README.md', stderr: '' });
+            } else if (cmd.includes('biome')) {
+                const err: any = new Error('Biome failed');
+                err.stdout = 'src/unrelated.ts:10:5: Lint errors';
+                callback(err, { stdout: 'src/unrelated.ts:10:5: Lint errors' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(true);
+        // Node and Python logs should be empty because they were skipped
+        expect(result.output).toContain('✅ Trivy: Secure');
     });
 
     it('should always run trivy with custom cache', async () => {
