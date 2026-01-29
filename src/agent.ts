@@ -68,11 +68,11 @@ export async function updateLinearIssue(issueId: string, statusName: string, com
 
         if (targetState) {
             const currentState = await issue.state;
-            if (currentState?.id !== targetState.id) {
+            if (currentState?.id === targetState.id) {
+                console.log(`ℹ️ [Agent] Issue ${issueId} is already in state "${statusName}", skipping state update.`);
+            } else {
                 console.log(`📡 [Agent] Updating Linear issue ${issueId} to status: ${statusName}`);
                 await linear.updateIssue(issueId, { stateId: targetState.id });
-            } else {
-                console.log(`ℹ️ [Agent] Issue ${issueId} is already in state "${statusName}", skipping state update.`);
             }
         } else {
             console.warn(`⚠️ [Agent] Linear status "${statusName}" not found in team ${team.name}.`);
@@ -401,7 +401,7 @@ async function handleFailureFallback(workDir: string, task: Task, git: any, prev
     const explanation = await summarizeFailurePhase(task, previousErrors);
     const failComment = `❌ **Task failed after ${MAX_RETRIES} attempts.**\n\n${explanation}\n\n---\n**Technical Details:**\n\`\`\`\n${previousErrors.substring(0, 1000)}...\n\`\`\``;
     
-    // Move back to Todo (or Triage/Backlog) and add explanation
+    // Reset ticket to unstarted state and add explanation
     await updateLinearIssue(task.ticketId, "Todo", failComment);
     
     // We do NOT push to git anymore when it's a known failure. 

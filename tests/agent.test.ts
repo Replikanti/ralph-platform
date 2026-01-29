@@ -210,7 +210,7 @@ describe('runAgent', () => {
                 title: expect.stringContaining('wip:')
             }));
             
-            // Should have updated Linear to Todo (s3)
+            // Verify that ticket state was updated to s3
             expect(mockIssueUpdate).toHaveBeenCalledWith('1', { stateId: 's3' });
             // Should have added an explanation comment
             expect(mockCommentCreate).toHaveBeenCalledWith(expect.objectContaining({
