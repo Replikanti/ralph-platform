@@ -234,7 +234,8 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
 async function validateSecurity(workDir: string): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
-    const trivyCache = path.join(workDir, '.trivy-cache');
+    // Use a temporary directory outside the workspace for the cache
+    const trivyCache = path.join('/tmp', `ralph-trivy-cache-${path.basename(workDir)}`);
     
     try {
         await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
@@ -244,7 +245,9 @@ async function validateSecurity(workDir: string): Promise<{ success: boolean, lo
         outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
     } finally {
         try {
-            await fsPromises.rm(trivyCache, { recursive: true, force: true });
+            if (fs.existsSync(trivyCache)) {
+                await fsPromises.rm(trivyCache, { recursive: true, force: true });
+            }
         } catch (e) {
             console.warn("⚠️ Failed to cleanup trivy cache:", e);
         }
