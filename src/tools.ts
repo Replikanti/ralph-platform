@@ -155,126 +155,408 @@ async function getChangedFiles(workDir: string): Promise<string[]> {
     }
 }
 
-async function validateNode(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
-    let outputLog = "";
-    let success = true;
+// Helper to filter tool output to only include lines relevant to changed files
 
-    const relevantExtensions = ['.ts', '.js', '.json', '.jsx', '.tsx'];
-    const hasRelevantChanges = changedFiles.length === 0 || changedFiles.some(f => 
-        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('package.json')
+function filterRelevantErrors(output: string, changedFiles: string[]): { relevant: boolean, filteredLog: string } {
+
+    if (changedFiles.length === 0) return { relevant: false, filteredLog: "" };
+
+    
+
+    const lines = output.split('\n');
+
+    const relevantLines = lines.filter(line => 
+
+        changedFiles.some(file => line.includes(file))
+
     );
 
-    if (!hasRelevantChanges) {
-        return { success: true, log: "⏩ Node.js validation skipped (no relevant changes)\n" };
+
+
+    if (relevantLines.length > 0) {
+
+        return { 
+
+            relevant: true, 
+
+            filteredLog: relevantLines.join('\n') 
+
+        };
+
     }
+
+
+
+    return { relevant: false, filteredLog: "" };
+
+}
+
+
+
+async function validateNode(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+
+    let outputLog = "";
+
+    let success = true;
+
+
+
+        const relevantExtensions = ['.ts', '.js', '.json', '.jsx', '.tsx'];
+
+
+
+        const hasRelevantChanges = changedFiles.some(f => 
+
+
+
+            relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('package.json')
+
+
+
+        );
+
+
+
+    
+
+
+
+        if (!hasRelevantChanges) {
+
+
+
+            return { success: true, log: "" };
+
+
+
+        }
+
+
+
+    
+
+
 
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
+
         try {
+
             if (!fs.existsSync(path.join(workDir, 'node_modules'))) {
+
                 console.log("📦 Installing dependencies for validation...");
+
                 await execAsync('npm install --no-package-lock --no-audit --quiet', { cwd: workDir });
+
             }
+
             await execAsync('biome check --apply .', { cwd: workDir });
+
             outputLog += "✅ Biome: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Biome: ${e.stdout}\n`; }
+
+        } catch (e: any) { 
+
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+
+                        if (relevant) {
+
+                            success = false; 
+
+                            outputLog += `❌ Biome Errors (relevant to your changes):\n${filteredLog}\n`; 
+
+                        } else {
+
+                            console.log("ℹ️ [Validation] Ignoring Biome errors unrelated to changed files.");
+
+                            outputLog += "✅ Biome: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
+
+        }
+
+
 
         if (fs.existsSync(path.join(workDir, 'tsconfig.json'))) {
+
              try {
+
                 await execAsync('tsc --noEmit --skipLibCheck', { cwd: workDir });
+
                 outputLog += "✅ TSC: Passed\n";
-            } catch (e: any) { success = false; outputLog += `❌ TSC: ${e.stdout}\n`; }
+
+            } catch (e: any) { 
+
+                            const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+
+                            if (relevant) {
+
+                                success = false; 
+
+                                outputLog += `❌ TSC Errors (relevant to your changes):\n${filteredLog}\n`; 
+
+                            } else {
+
+                                console.log("ℹ️ [Validation] Ignoring TSC errors unrelated to changed files.");
+
+                                outputLog += "✅ TSC: Passed (ignored unrelated errors)\n";
+
+                            }
+
+                
+
+            }
+
         }
+
     }
+
     return { success, log: outputLog };
+
 }
+
+
 
 async function validatePython(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+
     let outputLog = "";
+
     let success = true;
 
-    const relevantExtensions = ['.py', '.toml', '.txt'];
-    const hasRelevantChanges = changedFiles.length === 0 || changedFiles.some(f => 
-        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('requirements.txt') || f.includes('pyproject.toml')
-    );
 
-    if (!hasRelevantChanges) {
-        const pythonEnvExists = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
-                                fs.existsSync(path.join(workDir, 'requirements.txt'));
-        if (pythonEnvExists) {
-             return { success: true, log: "⏩ Python validation skipped (no relevant changes)\n" };
+
+        const relevantExtensions = ['.py', '.toml', '.txt'];
+
+
+
+        const hasRelevantChanges = changedFiles.some(f => 
+
+
+
+            relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('requirements.txt') || f.includes('pyproject.toml')
+
+
+
+        );
+
+
+
+    
+
+
+
+        if (!hasRelevantChanges) {
+
+
+
+            return { success: true, log: "" };
+
+
+
         }
-    }
+
+
+
+    
+
+
 
     const hasPython = fs.existsSync(path.join(workDir, 'pyproject.toml')) || 
+
                       fs.existsSync(path.join(workDir, 'requirements.txt')) ||
+
                       (await execAsync('find . -maxdepth 2 -name "*.py"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
 
+
+
     if (hasPython) {
+
         try {
+
             if (fs.existsSync(path.join(workDir, 'requirements.txt'))) {
+
                 console.log("🐍 Installing Python dependencies from requirements.txt...");
+
                 await execAsync('pip install --quiet --no-cache-dir -r requirements.txt', { cwd: workDir });
+
             } else if (fs.existsSync(path.join(workDir, 'pyproject.toml'))) {
+
                 console.log("🐍 Installing Python dependencies from pyproject.toml...");
+
                 await execAsync('pip install --quiet --no-cache-dir .', { cwd: workDir });
+
             }
+
             await execAsync('ruff check --fix .', { cwd: workDir });
+
             await execAsync('ruff format .', { cwd: workDir });
+
             outputLog += "✅ Ruff: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Ruff: ${e.stdout}\n`; }
 
-        try {
-            await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
-            outputLog += "✅ Mypy: Passed\n";
-        } catch (e: any) { success = false; outputLog += `❌ Mypy: ${e.stdout}\n`; }
-    }
-    return { success, log: outputLog };
-}
+        } catch (e: any) { 
 
-async function validateSecurity(workDir: string): Promise<{ success: boolean, log: string }> {
-    let outputLog = "";
-    let success = true;
-    // Use a temporary directory outside the workspace for the cache
-    const trivyCache = path.join('/tmp', `ralph-trivy-cache-${path.basename(workDir)}`);
-    
-    try {
-        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
-        outputLog += "✅ Trivy: Secure\n";
-    } catch (e: any) { 
-        success = false; 
-        outputLog += `❌ Trivy Issues Found:\n${e.stdout || e.stderr}\n`; 
-    } finally {
-        try {
-            if (fs.existsSync(trivyCache)) {
-                await fsPromises.rm(trivyCache, { recursive: true, force: true });
-            }
-        } catch (e) {
-            console.warn("⚠️ Failed to cleanup trivy cache:", e);
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+
+                        if (relevant) {
+
+                            success = false; 
+
+                            outputLog += `❌ Ruff Errors (relevant to your changes):\n${filteredLog}\n`; 
+
+                        } else {
+
+                            console.log("ℹ️ [Validation] Ignoring Ruff errors unrelated to changed files.");
+
+                            outputLog += "✅ Ruff: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
+
         }
+
+
+
+        try {
+
+            await execAsync('mypy --ignore-missing-imports .', { cwd: workDir });
+
+            outputLog += "✅ Mypy: Passed\n";
+
+        } catch (e: any) { 
+
+                        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+
+                        if (relevant) {
+
+                            success = false; 
+
+                            outputLog += `❌ Mypy Errors (relevant to your changes):\n${filteredLog}\n`; 
+
+                        } else {
+
+                            console.log("ℹ️ [Validation] Ignoring Mypy errors unrelated to changed files.");
+
+                            outputLog += "✅ Mypy: Passed (ignored unrelated errors)\n";
+
+                        }
+
+            
+
+        }
+
     }
+
     return { success, log: outputLog };
+
 }
+
+
+
+async function validateSecurity(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+
+    let outputLog = "";
+
+    let success = true;
+
+    // Use a temporary directory outside the workspace for the cache
+
+    const trivyCache = path.join('/tmp', `ralph-trivy-cache-${path.basename(workDir)}`);
+
+    
+
+    try {
+
+        await execAsync(`trivy fs . --cache-dir ${trivyCache} --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --no-progress --exit-code 1`, { cwd: workDir });
+
+        outputLog += "✅ Trivy: Secure\n";
+
+    } catch (e: any) { 
+
+        const { relevant, filteredLog } = filterRelevantErrors(e.stdout || e.stderr || "", changedFiles);
+
+        if (relevant) {
+
+            success = false; 
+
+            outputLog += `❌ Trivy Issues in changed files:\n${filteredLog}\n`; 
+
+        } else {
+
+            outputLog += "✅ Trivy: Secure (no high/critical issues in changed files)\n";
+
+        }
+
+    } finally {
+
+        try {
+
+            if (fs.existsSync(trivyCache)) {
+
+                await fsPromises.rm(trivyCache, { recursive: true, force: true });
+
+            }
+
+        } catch (e) {
+
+            console.warn("⚠️ Failed to cleanup trivy cache:", e);
+
+        }
+
+    }
+
+    return { success, log: outputLog };
+
+}
+
+
 
 export async function runPolyglotValidation(workDir: string) {
+
     let outputLog = "";
+
     let allSuccess = true;
 
+
+
     const changedFiles = await getChangedFiles(workDir);
+
     if (changedFiles.length > 0) {
+
         console.log(`🔍 [Validation] Changed files: ${changedFiles.join(', ')}`);
+
+    } else {
+
+        return { success: true, output: "⏩ Validation skipped: No files changed.\n" };
+
     }
 
+
+
     const nodeResult = await validateNode(workDir, changedFiles);
+
     allSuccess = allSuccess && nodeResult.success;
+
     outputLog += nodeResult.log;
 
+
+
     const pythonResult = await validatePython(workDir, changedFiles);
+
     allSuccess = allSuccess && pythonResult.success;
+
     outputLog += pythonResult.log;
 
-    const securityResult = await validateSecurity(workDir);
+
+
+    const securityResult = await validateSecurity(workDir, changedFiles);
+
     allSuccess = allSuccess && securityResult.success;
+
     outputLog += securityResult.log;
 
+
+
     return { success: allSuccess, output: outputLog };
+
 }

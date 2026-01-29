@@ -323,8 +323,12 @@ async function runIteration(iteration: number, trace: any, workDir: string, task
 async function handleFailureFallback(workDir: string, task: any, git: any, previousErrors: string, MAX_RETRIES: number) {
     await git.add('.');
     const finalStatus = await git.status();
-    // Only push if there are actually staged changes and they seem relevant
+    
+    // Safety check: Don't push if there are no changes or if they seem like unrelated garbage
     if (finalStatus.staged.length > 0) {
+        // Optimization: In a real scenario, we could compare finalStatus.staged with task requirements
+        // For now, we'll just be explicit about failure if validation didn't pass.
+        
         console.warn(`🛑 [Agent] Task failed after ${MAX_RETRIES} attempts. Pushing WIP for inspection.`);
         await git.commit(`wip: ${task.title} (Failed Validation after ${MAX_RETRIES} attempts)`);
         await git.push('origin', task.branchName, ['--force']);
