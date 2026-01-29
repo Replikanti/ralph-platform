@@ -301,7 +301,7 @@ YOUR GOAL:
 1. Create a detailed step-by-step implementation plan.
 2. Explicitly mention which native skills (/name) the Executor should invoke.
 3. Do NOT modify any files.
-4. FOCUS: Only address the task described above. If validation tools report errors in files UNRELATED to the task, IGNORE them. Do not attempt to fix unrelated infrastructure or configuration.
+4. FOCUS: Only address the task described above. Do NOT "fix" unrelated bugs or reformat files that are not part of the required changes. However, you ARE expected to modify the platform's core logic (e.g., agent.ts, server.ts, tools.ts) if the task explicitly requires architectural changes or new features.
 
 Output format:
 <plan>Your detailed plan here</plan>
@@ -328,7 +328,7 @@ ${SECURITY_GUARDRAILS}
 Instructions:
 1. Follow the plan strictly.
 2. Only modify files that are absolutely necessary to implement the requested task.
-3. Do NOT "fix" or reformat unrelated files. If you see errors in unrelated files (e.g., infrastructure config, unrelated source files), IGNORE them.
+3. Do NOT "fix" or reformat unrelated files. If you see errors in unrelated files, IGNORE them. You are encouraged to modify the platform's core code (agent.ts, server.ts, etc.) when the task requires implementing new system capabilities or refactoring the workflow.
 4. Use your native skills if requested in the plan.
 5. Verify your work.
 6. Do NOT commit.

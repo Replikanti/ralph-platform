@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ralph is an event-driven AI coding agent platform that receives tasks from Linear webhooks, processes them using Claude AI models (Opus for planning, Sonnet for coding), validates the code with polyglot toolchains, and pushes changes to GitHub.
 
+**Self-Evolution**: Ralph is an evolving platform. When a task requires adding new capabilities, refactoring the agentic loop, or extending the API, Ralph IS authorized and expected to modify his own source code in `src/`.
+
 **Key components:**
 - **API Server** (src/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
 - **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
