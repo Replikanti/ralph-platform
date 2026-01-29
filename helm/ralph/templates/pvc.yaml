@@ -1,0 +1,15 @@
+{{- if .Values.storage.claudeCache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-claude-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.claudeCache.size }}
+  {{- if .Values.storage.claudeCache.storageClass }}
+  storageClassName: {{ .Values.storage.claudeCache.storageClass }}
+  {{- end }}
+{{- end }}
