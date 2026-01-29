@@ -1,9 +1,13 @@
 import request from 'supertest';
 import crypto from 'node:crypto';
-import { app } from '../src/server';
 
+// Setup environment BEFORE importing server
 const TEST_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.LINEAR_WEBHOOK_SECRET = TEST_SECRET;
+process.env.ADMIN_USER = 'admin';
+process.env.ADMIN_PASS = 'password';
+
+import { app } from '../src/server';
 
 // Mock fs
 jest.mock('node:fs/promises', () => ({

@@ -39,13 +39,18 @@ createBullBoard({
     serverAdapter: serverAdapter,
 });
 
-const adminUser = process.env.ADMIN_USER || 'admin';
-const adminPass = process.env.ADMIN_PASS || 'ralph-secret';
+const adminUser = process.env.ADMIN_USER;
+const adminPass = process.env.ADMIN_PASS;
 
-app.use('/admin/queues', basicAuth({
-    users: { [adminUser]: adminPass },
-    challenge: true,
-}), serverAdapter.getRouter());
+if (adminUser && adminPass) {
+    app.use('/admin/queues', basicAuth({
+        users: { [adminUser]: adminPass },
+        challenge: true,
+    }), serverAdapter.getRouter());
+    console.log('🛡️ Admin dashboard enabled at /admin/queues');
+} else {
+    console.warn('⚠️ ADMIN_USER or ADMIN_PASS not set. Dashboard is disabled.');
+}
 
 // Team → Repository mapping logic
 async function getRepoForTeam(teamKey: string | undefined): Promise<string | null> {

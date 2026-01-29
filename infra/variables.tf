@@ -93,6 +93,18 @@ variable "linear_api_key" {
   default     = ""
 }
 
+variable "admin_user" {
+  description = "Username for Bull Board admin dashboard"
+  type        = string
+  default     = "admin"
+}
+
+variable "admin_pass" {
+  description = "Password for Bull Board admin dashboard"
+  type        = string
+  sensitive   = true
+}
+
 variable "master_authorized_networks" {
   description = "List of CIDR blocks to allow access to the GKE master endpoint"
   type = list(object({

@@ -99,6 +99,20 @@ resource "google_secret_manager_secret_version" "linear_api_key" {
   secret_data = var.linear_api_key != "" ? var.linear_api_key : "lin_api_PLACEHOLDER"
 }
 
+# Admin Password (for Bull Board)
+resource "google_secret_manager_secret" "admin_pass" {
+  secret_id = "ralph-admin-pass"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "admin_pass" {
+  secret      = google_secret_manager_secret.admin_pass.id
+  secret_data = var.admin_pass
+}
+
 # Redis URL (computed from Redis instance)
 resource "google_secret_manager_secret" "redis_url" {
   secret_id = "ralph-redis-url"

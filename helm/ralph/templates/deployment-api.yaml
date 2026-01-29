@@ -59,6 +59,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.linearWebhook }}
                   key: webhook-secret
+            - name: ADMIN_USER
+              value: {{ .Values.admin.user | default "admin" }}
+            - name: ADMIN_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ralph.fullname" . }}-admin-creds
+                  key: password
             - name: REPO_CONFIG_PATH
               value: /etc/ralph/config/repos.json
           volumeMounts:
