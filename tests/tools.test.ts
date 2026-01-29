@@ -107,7 +107,8 @@ describe('runPolyglotValidation', () => {
         mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json') || p.endsWith('tsconfig.json') || p.endsWith('node_modules'));
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
-            callback(null, { stdout: 'Success', stderr: '' });
+            if (cmd.includes('git status')) callback(null, { stdout: 'M  src/agent.ts', stderr: '' });
+            else callback(null, { stdout: 'Success', stderr: '' });
             return Promise.resolve({ stdout: 'Success', stderr: '' });
         });
 
@@ -127,7 +128,8 @@ describe('runPolyglotValidation', () => {
         });
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('find')) callback(null, { stdout: 'main.py', stderr: '' });
+            if (cmd.includes('git status')) callback(null, { stdout: 'M  main.py', stderr: '' });
+            else if (cmd.includes('find')) callback(null, { stdout: 'main.py', stderr: '' });
             else callback(null, { stdout: 'Success', stderr: '' });
             return Promise.resolve({ stdout: 'Success', stderr: '' });
         });
@@ -142,7 +144,9 @@ describe('runPolyglotValidation', () => {
         mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('biome')) {
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  src/agent.ts', stderr: '' });
+            } else if (cmd.includes('biome')) {
                 const err: any = new Error('Biome failed');
                 err.stdout = 'Lint errors';
                 callback(err, { stdout: 'Lint errors' });
