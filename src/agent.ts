@@ -434,8 +434,8 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
 
 export const runAgent = async (task: Task): Promise<void> => {
     return withTrace("Ralph-Task", { ticketId: task.ticketId }, async (trace: any) => {
-        const { workDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
-        const homeDir = path.join(workDir, '.claude-home');
+        const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
+        const homeDir = path.join(rootDir, 'home');
         
         try {
             // Smart notification based on attempt number

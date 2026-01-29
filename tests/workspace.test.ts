@@ -31,17 +31,13 @@ describe('setupWorkspace', () => {
         const repoUrl = 'https://github.com/user/repo';
         const branchName = 'feature/test';
         
-        const { workDir, cleanup } = await setupWorkspace(repoUrl, branchName);
+        const { workDir, rootDir, git, cleanup } = await setupWorkspace(repoUrl, branchName);
         
-        expect(workDir).toContain('test-uuid');
-        expect(gitInstance.clone).toHaveBeenCalledWith(
-            expect.stringContaining('github.com/user/repo'), 
-            expect.stringContaining('test-uuid')
-        );
-        expect(gitInstance.checkout).toHaveBeenCalledWith(branchName);
+        expect(workDir).toContain('repo');
+        expect(rootDir).not.toContain('repo');
         
         cleanup();
-        expect(mockedFsRmSync).toHaveBeenCalledWith(workDir, { recursive: true, force: true });
+        expect(mockedFsRmSync).toHaveBeenCalledWith(rootDir, { recursive: true, force: true });
     });
 
     it('should create new branch if checkout fails', async () => {

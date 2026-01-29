@@ -1,5 +1,6 @@
 import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'node:path';
 
@@ -13,12 +14,14 @@ export function parseRepoUrl(repoUrl: string): { owner: string, repo: string } {
     return { owner: match[1], repo: match[2] };
 }
 
-export async function setupWorkspace(repoUrl: string, branchName: string): Promise<{ workDir: string, git: SimpleGit, cleanup: () => void }> {
+export async function setupWorkspace(repoUrl: string, branchName: string): Promise<{ workDir: string, rootDir: string, git: SimpleGit, cleanup: () => void }> {
     const id = uuidv4();
-    const workDir = path.join(WORKSPACE_ROOT, id);
+    const rootDir = path.join(WORKSPACE_ROOT, id);
+    const workDir = path.join(rootDir, 'repo');
     const token = process.env.GITHUB_TOKEN;
     const authUrl = repoUrl.replace('https://', `https://oauth2:${token}@`);
 
+    await fsPromises.mkdir(workDir, { recursive: true });
     await simpleGit().clone(authUrl, workDir);
     const git = simpleGit(workDir);
     await git.addConfig('user.name', 'Ralph Bot');
@@ -33,5 +36,5 @@ export async function setupWorkspace(repoUrl: string, branchName: string): Promi
         await git.checkoutLocalBranch(branchName); 
     }
 
-    return { workDir, git, cleanup: () => fs.rmSync(workDir, { recursive: true, force: true }) };
+    return { workDir, rootDir, git, cleanup: () => fs.rmSync(rootDir, { recursive: true, force: true }) };
 }
