@@ -117,6 +117,44 @@ Ralph is designed for **development automation on trusted codebases**, not for r
 
 ---
 
+## API Endpoints
+
+### GET /health
+
+Health check endpoint to verify the API is running correctly.
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/health` |
+| **Authentication** | None |
+| **Response** | JSON |
+
+**Response Body:**
+```json
+{"status": "ok"}
+```
+
+**Example Request:**
+```bash
+curl http://localhost:3000/health
+```
+
+**Example Response:**
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"status":"ok"}
+```
+
+This endpoint is useful for:
+- Kubernetes liveness/readiness probes
+- Load balancer health checks
+- Verifying the API service is operational
+
+---
+
 ## Quick Start (Local Development)
 
 ```bash
