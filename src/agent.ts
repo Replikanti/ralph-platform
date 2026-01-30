@@ -195,14 +195,15 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
 const SECURITY_GUARDRAILS = "SECURITY RULES: 1. NO SECRETS. 2. SANDBOX: Only modify files inside the workspace.";
 
 async function listAvailableSkills(workDir: string): Promise<string> {
-    const skillsDir = path.join(workDir, '.claude', 'skills');
+    // List native commands from .claude/commands so the Planner knows what's available
+    const skillsDir = path.join(workDir, '.claude', 'commands');
     try {
         const dirs = await fsPromises.readdir(skillsDir, { withFileTypes: true });
         return dirs
             .filter((d: fs.Dirent) => d.isDirectory())
-            .map((d: fs.Dirent) => "- /" + d.name)
+            .map((d: fs.Dirent) => `- /${d.name}`)
             .join('\n');
-    } catch { return "No native skills available."; }
+    } catch { return "No native commands available."; }
 }
 
 async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (span: any) => Promise<T>) {
@@ -219,10 +220,14 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
     let guide = "";
     try { guide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8'); } catch { guide = "None."; }
 
-    const prompt = "You are the Architect. Create a plan for the Executor.\n" +
-        "GUIDE: " + guide + "\nTASK: " + task.title + "\nDESC: " + task.description + "\n" +
-        "SKILLS: " + availableSkills + "\n" + (previousErrors ? "PREV ERRORS: " + previousErrors : "") + "\n" +
-        "GOAL: Step-by-step plan using native skills. Output inside <plan> tags. BE CONCISE.";
+    const prompt = "You are the Architect. Create a step-by-step implementation plan for the task.\n\n" +
+        "PROJECT GUIDE:\n" + guide + "\n\n" +
+        "TASK: " + task.title + "\n" +
+        "DESCRIPTION: " + task.description + "\n" +
+        "AVAILABLE SLASH COMMANDS: " + availableSkills + "\n" +
+        (previousErrors ? "\nPREVIOUS ATTEMPT ERRORS:\n" + previousErrors : "") + "\n\n" +
+        "GOALS:\n1. Detailed plan.\n2. Mention slash commands to use.\n3. Address only the task.\n\n" +
+        "Output your plan inside <plan> tags.";
 
     // Switch to Sonnet 4.5 and add budget limit
     const { stdout } = await runClaude([
@@ -285,9 +290,9 @@ async function persistClaudeCache(sourceClaudeDir: string) {
 
 async function prepareClaudeSkills(workDir: string, homeDir: string) {
 
-    const targetSkillsDir = path.join(homeDir, '.claude', 'skills');
+    const targetSkillsDir = path.join(homeDir, '.claude', 'commands');
 
-    const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
+    const sourceSkillsDir = path.join(workDir, '.claude', 'commands');
 
     const targetScriptsDir = path.join(homeDir, '.claude', 'scripts');
 
@@ -313,15 +318,17 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 
         }
 
-        console.log("Loaded skills into isolated Claude environment");
+        console.log("Loaded commands into isolated Claude environment");
 
     } catch (e: any) {
 
-        console.warn("Failed to load skills: " + e.message);
+        console.warn("Failed to load commands: " + e.message);
 
     }
 
 }
+
+
 
 
 
