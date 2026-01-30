@@ -24,7 +24,7 @@ admin:
 # Value: GitHub Repository URL
 teamRepos:
   RAL: "https://github.com/Replikanti/ralph-platform"
-  # FRONT: "https://github.com/org/frontend.git"
+  WEB: "https://github.com/Replikanti/ralph-platform-web-demo"
   # BACK: "https://github.com/org/backend.git"
 
 resources:
