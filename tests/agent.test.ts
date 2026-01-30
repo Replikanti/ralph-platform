@@ -230,7 +230,7 @@ describe('runAgent', () => {
                 title: expect.stringContaining('wip:')
             }));
 
-            // Verify that ticket state was updated to "Todo"
+            // Verify ticket moved back to backlog state
             expect(mockUpdateIssueState).toHaveBeenCalledWith('1', 'Todo');
             // Should have added an explanation comment
             expect(mockPostComment).toHaveBeenCalledWith('1', expect.stringContaining('Ralph tried to fix X'));
