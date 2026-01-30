@@ -294,16 +294,30 @@ async function handleCommentWebhook(data: any, res: express.Response): Promise<e
     const issue = data.issue;
     const commentBody = data.body || '';
     const issueState = issue?.state?.name || '';
+    const commentAuthor = data.user?.name || data.user?.displayName || '';
 
     console.log(`💬 [API] Comment received:`);
     console.log(`   Issue ID: ${issue?.id}`);
     console.log(`   Issue State: "${issueState}"`);
+    console.log(`   Comment Author: "${commentAuthor}"`);
     console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
 
     const issueId = issue?.id;
     if (!issueId) {
         console.warn(`⚠️ [API] Comment event missing issue ID`);
         return res.status(400).send({ error: 'missing_issue_id' });
+    }
+
+    // CRITICAL: Ignore Ralph's own comments to prevent auto-execution
+    // Ralph's comments contain approval keywords in instructions (LGTM, approved, etc.)
+    const isRalphComment = commentAuthor.toLowerCase().includes('ralph') ||
+                          commentAuthor.toLowerCase().includes('bot') ||
+                          commentBody.includes('🤖 Ralph') ||
+                          commentBody.includes('Ralph\'s Implementation Plan');
+
+    if (isRalphComment) {
+        console.log(`🤖 [API] Ignoring Ralph's own comment (prevents auto-execution)`);
+        return res.status(200).send({ status: 'ignored', reason: 'ralph_comment' });
     }
 
     const storedPlan = await getPlan(connection, issueId);
