@@ -6,6 +6,12 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'LICENSE'
+      - '.gitignore'
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
