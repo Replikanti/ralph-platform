@@ -349,8 +349,22 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
         if (status.staged.length > 0) {
             await ctx.git.commit("feat: " + ctx.task.title);
             await ctx.git.push('origin', ctx.task.branchName, ['--force']);
+
+            // Create PR first, then wait for Linear auto-switch
             const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, ctx.task.description || '');
-            await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+            console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Check if Linear auto-switched, only update if needed
+            const linearClient = new RalphLinearClient();
+            const currentState = await linearClient.getIssueState(ctx.task.ticketId);
+            if (currentState?.toLowerCase() !== 'in review') {
+                console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
+                await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+            } else {
+                console.log("✅ Linear auto-switched to In Review, just adding comment");
+                await linearClient.postComment(ctx.task.ticketId, "✅ Done. PR: " + prUrl);
+            }
         } else {
             console.warn("⚠️ No files changed.");
             await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ No changes necessary.");
@@ -542,10 +556,10 @@ async function handlePlanOnlyMode(
     const formattedPlan = formatPlanForLinear(plan, task.title);
     await linearClient.postComment(task.ticketId, formattedPlan);
 
-    // Move ticket to Backlog - waiting for human approval
+    // Move ticket to Todo - waiting for human approval
     // This allows user to filter tickets needing their attention
-    await linearClient.updateIssueState(task.ticketId, "Backlog");
-    console.log("📋 Plan posted to Linear - ticket moved to Backlog (awaiting approval)");
+    await linearClient.updateIssueState(task.ticketId, "Todo");
+    console.log("📋 Plan posted to Linear - ticket moved to Todo (awaiting approval)");
     console.log("✅ Plan posted to Linear, awaiting human approval");
 }
 
@@ -587,8 +601,21 @@ async function handleExecuteOnlyMode(
             if (task.isIteration) {
                 await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
             } else {
+                // Create PR first, then wait for Linear auto-switch
                 const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
-                await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+                console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                // Check if Linear auto-switched, only update if needed
+                const linearClient = new RalphLinearClient();
+                const currentState = await linearClient.getIssueState(task.ticketId);
+                if (currentState?.toLowerCase() !== 'in review') {
+                    console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
+                    await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+                } else {
+                    console.log("✅ Linear auto-switched to In Review, just adding comment");
+                    await linearClient.postComment(task.ticketId, "✅ Done. PR: " + prUrl);
+                }
             }
         } else {
             console.warn("⚠️ No files changed.");
