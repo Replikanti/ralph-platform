@@ -358,12 +358,12 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
             // Check if Linear auto-switched, only update if needed
             const linearClient = new RalphLinearClient();
             const currentState = await linearClient.getIssueState(ctx.task.ticketId);
-            if (currentState?.toLowerCase() !== 'in review') {
-                console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
-                await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
-            } else {
+            if (currentState?.toLowerCase() === 'in review') {
                 console.log("✅ Linear auto-switched to In Review, just adding comment");
                 await linearClient.postComment(ctx.task.ticketId, "✅ Done. PR: " + prUrl);
+            } else {
+                console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
+                await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
             }
         } else {
             console.warn("⚠️ No files changed.");
@@ -501,6 +501,66 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
     });
 };
 
+async function handleIterationCompletion(task: Task): Promise<void> {
+    await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
+}
+
+async function handlePRCreationAndStateUpdate(task: Task): Promise<void> {
+    // Create PR first, then wait for Linear auto-switch
+    const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
+    console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Check if Linear auto-switched, only update if needed
+    const linearClient = new RalphLinearClient();
+    const currentState = await linearClient.getIssueState(task.ticketId);
+    if (currentState?.toLowerCase() === 'in review') {
+        console.log("✅ Linear auto-switched to In Review, just adding comment");
+        await linearClient.postComment(task.ticketId, "✅ Done. PR: " + prUrl);
+    } else {
+        console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
+        await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+    }
+}
+
+async function handleValidationSuccess(task: Task, git: any, redis?: IORedis): Promise<void> {
+    await git.add('.');
+    const status = await git.status();
+
+    if (status.staged.length > 0) {
+        await git.commit("feat: " + task.title);
+
+        // For iterations, don't force push (preserve PR history)
+        // For new work, force push to ensure clean history
+        const pushArgs = task.isIteration ? [] : ['--force'];
+        await git.push('origin', task.branchName, pushArgs);
+
+        // Only create PR if this is not an iteration (PR already exists)
+        if (task.isIteration) {
+            await handleIterationCompletion(task);
+        } else {
+            await handlePRCreationAndStateUpdate(task);
+        }
+    } else {
+        console.warn("⚠️ No files changed.");
+        await updateLinearIssue(task.ticketId, "Todo", "⚠️ No changes necessary.");
+    }
+
+    // Clean up stored plan (but keep it for iterations to allow further fixes)
+    if (redis && !task.isIteration) {
+        await deletePlan(redis, task.ticketId);
+    }
+}
+
+async function handleValidationFailure(task: Task, validationOutput: string): Promise<void> {
+    console.warn("⚠️ Validation failed after execution:\n" + validationOutput);
+    await updateLinearIssue(
+        task.ticketId,
+        "Todo",
+        "❌ Execution completed but validation failed.\n\n```\n" + validationOutput.substring(0, 1000) + "\n```"
+    );
+}
+
 async function handlePlanOnlyMode(
     task: Task,
     workDir: string,
@@ -556,10 +616,9 @@ async function handlePlanOnlyMode(
     const formattedPlan = formatPlanForLinear(plan, task.title);
     await linearClient.postComment(task.ticketId, formattedPlan);
 
-    // Move ticket to Todo - waiting for human approval
-    // This allows user to filter tickets needing their attention
+    // Move ticket to Todo state - signals plan is ready for human review
+    // This allows users to filter tickets that need their approval
     await linearClient.updateIssueState(task.ticketId, "Todo");
-    console.log("📋 Plan posted to Linear - ticket moved to Todo (awaiting approval)");
     console.log("✅ Plan posted to Linear, awaiting human approval");
 }
 
@@ -586,52 +645,8 @@ async function handleExecuteOnlyMode(
 
     if (check.success) {
         console.log("✅ Validation passed!");
-        await git.add('.');
-        const status = await git.status();
-
-        if (status.staged.length > 0) {
-            await git.commit("feat: " + task.title);
-
-            // For iterations, don't force push (preserve PR history)
-            // For new work, force push to ensure clean history
-            const pushArgs = task.isIteration ? [] : ['--force'];
-            await git.push('origin', task.branchName, pushArgs);
-
-            // Only create PR if this is not an iteration (PR already exists)
-            if (task.isIteration) {
-                await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
-            } else {
-                // Create PR first, then wait for Linear auto-switch
-                const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
-                console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
-                await new Promise(resolve => setTimeout(resolve, 3000));
-
-                // Check if Linear auto-switched, only update if needed
-                const linearClient = new RalphLinearClient();
-                const currentState = await linearClient.getIssueState(task.ticketId);
-                if (currentState?.toLowerCase() !== 'in review') {
-                    console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
-                    await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
-                } else {
-                    console.log("✅ Linear auto-switched to In Review, just adding comment");
-                    await linearClient.postComment(task.ticketId, "✅ Done. PR: " + prUrl);
-                }
-            }
-        } else {
-            console.warn("⚠️ No files changed.");
-            await updateLinearIssue(task.ticketId, "Todo", "⚠️ No changes necessary.");
-        }
-
-        // Clean up stored plan (but keep it for iterations to allow further fixes)
-        if (redis && !task.isIteration) {
-            await deletePlan(redis, task.ticketId);
-        }
+        await handleValidationSuccess(task, git, redis);
     } else {
-        console.warn("⚠️ Validation failed after execution:\n" + check.output);
-        await updateLinearIssue(
-            task.ticketId,
-            "Todo",
-            "❌ Execution completed but validation failed.\n\n```\n" + check.output.substring(0, 1000) + "\n```"
-        );
+        await handleValidationFailure(task, check.output);
     }
 }
