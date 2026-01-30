@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 const { spawn } = require('child_process');
 
 console.log("Running tests... (filtering output)");
