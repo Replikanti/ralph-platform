@@ -5,8 +5,9 @@ Ralph is an event-driven AI coding agent that automatically processes Linear iss
 ## 🎯 What is Ralph?
 
 Ralph automates the software development workflow by:
-- **Planning** with Claude Opus (strategic, high-level)
-- **Coding** with Claude Sonnet (tactical, implementation)
+- **Planning** with Claude Sonnet 4.5 (implementation plans with $0.50 budget limit)
+- **Coding** with Claude Sonnet 4.5 (code execution with $2.00 budget limit)
+- **Error Summarization** with Claude Haiku 4.5 (cost-efficient failure analysis with $0.10 budget)
 - **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, Semgrep)
 - **Iterating** based on human feedback and CI results
 
@@ -16,6 +17,7 @@ Ralph automates the software development workflow by:
 - **PR Iteration Workflow** - Continuously improve PRs with CI/SonarQube feedback
 - **Multi-Repository Support** - Map Linear teams to different GitHub repositories
 - **Polyglot Validation** - Auto-detect and validate TypeScript, JavaScript, and Python projects
+- **Cost-Optimized** - Budget limits per phase, Haiku for summaries, TOON format for token reduction
 - **Security-First** - Command allowlists, sandbox isolation, secret scanning
 - **Observable** - Full tracing with Langfuse
 
@@ -143,8 +145,9 @@ graph LR
     Linear[Linear Webhook] -->|POST| API[API Server]
     API -->|Enqueue| Redis[(Redis)]
     Redis -->|Dequeue| Worker[Worker]
-    Worker -->|Plan| Opus[Claude Opus]
-    Worker -->|Code| Sonnet[Claude Sonnet]
+    Worker -->|Plan $0.50| Sonnet[Claude Sonnet 4.5]
+    Worker -->|Code $2.00| Sonnet
+    Worker -->|Summarize $0.10| Haiku[Claude Haiku 4.5]
     Worker -->|Validate| Tools[Polyglot Tools]
     Worker -->|Push| GitHub[GitHub PR]
     Worker -->|Trace| Langfuse[Langfuse]

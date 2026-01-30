@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ralph is an event-driven AI coding agent platform that receives tasks from Linear webhooks, processes them using Claude AI models (Opus for planning, Sonnet for coding), validates the code with polyglot toolchains, and pushes changes to GitHub.
+Ralph is an event-driven AI coding agent platform that receives tasks from Linear webhooks, processes them using Claude AI models (Sonnet 4.5 for planning and coding with budget limits, Haiku 4.5 for error summarization), validates the code with polyglot toolchains, and pushes changes to GitHub.
 
 **Self-Evolution**: Ralph is an evolving platform. When a task requires adding new capabilities, refactoring the agentic loop, or extending the API, Ralph IS authorized and expected to modify his own source code in `src/`.
 
 **Key components:**
 - **API Server** (src/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
 - **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
-- **Agent** (src/agent.ts): Core AI workflow - planning (Opus), coding (Sonnet), validation (polyglot tools)
+- **Agent** (src/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
 - **Workspace** (src/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
 - **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, Semgrep)
 - **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
@@ -24,7 +24,7 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
-3. Agent runs **plan-only mode** (Opus generates implementation plan)
+3. Agent runs **plan-only mode** (Sonnet 4.5 generates implementation plan with $0.50 budget)
 4. Plan posted to Linear as comment, issue moved to "plan-review" state
 5. **Human reviews plan**:
    - Comment "LGTM", "approved", "proceed", or "ship it" → Execution job queued
@@ -39,8 +39,8 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
 3. Agent runs **full mode** (plan + execute in one go):
-   - Planning phase (Claude Opus)
-   - Execution phase (Claude Sonnet)
+   - Planning phase (Claude Sonnet 4.5, $0.50 budget)
+   - Execution phase (Claude Sonnet 4.5, $2.00 budget)
 4. Polyglot validation runs on generated code
 5. Push to GitHub (creates PR branch)
 6. Langfuse trace captures entire execution
@@ -52,7 +52,7 @@ Ralph supports **human-in-the-loop** plan review, allowing developers to approve
 ### How It Works
 
 **1. Plan Generation**
-- When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Opus
+- When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Sonnet 4.5
 - The plan is posted as a comment on the Linear issue
 - The issue is automatically moved to the "plan-review" state (or synonym: "pending review", "awaiting approval")
 
@@ -97,7 +97,7 @@ Any other comment content is treated as revision feedback.
 ### Plan Storage
 
 Plans are stored in Redis with the key pattern `ralph:plan:{issueId}` and include:
-- Implementation plan (Opus output)
+- Implementation plan (Sonnet 4.5 output)
 - Original task context (title, description, repo, branch)
 - Feedback history (accumulated revision requests)
 - Status (`pending-review`, `approved`, `needs-revision`)
@@ -206,9 +206,9 @@ Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The w
 
 ### Agent Execution Modes
 The agent (src/agent.ts) supports three execution modes controlled by `task.mode`:
-1. **plan-only**: Opus generates implementation plan, posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
-2. **execute-only**: Sonnet executes pre-approved plan from Redis (triggered by approval comment)
-3. **full**: Legacy mode - Opus plans, Sonnet executes in one job (default when PLAN_REVIEW_ENABLED=false)
+1. **plan-only**: Sonnet 4.5 generates implementation plan ($0.50 budget), posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
+2. **execute-only**: Sonnet 4.5 executes pre-approved plan from Redis ($2.00 budget) (triggered by approval comment)
+3. **full**: Legacy mode - Sonnet 4.5 plans then executes in one job (default when PLAN_REVIEW_ENABLED=false)
 
 Mode is set by the webhook handler based on webhook type (issue vs comment) and plan review configuration.
 
@@ -271,7 +271,7 @@ Worker (src/worker.ts:26-30):
 ### Langfuse Tracing
 All agent executions are traced hierarchically:
 - Top-level trace: "Ralph-Task" with ticketId
-- Spans: "Planning" (Opus), "Coding" (Sonnet), "Validation" (polyglot)
+- Spans: "Planning" (Sonnet 4.5, $0.50), "Coding" (Sonnet 4.5, $2.00), "Error Summary" (Haiku 4.5, $0.10), "Validation" (polyglot)
 - Errors automatically captured in trace metadata
 
 ### Token Optimization (TOON)

@@ -1,13 +1,13 @@
 # Ralph Platform - AI Coding Agent
 
-Ralph is an event-driven AI coding agent platform that automates software development tasks. It processes Linear issues, utilizes Claude AI (Opus for planning, Sonnet for execution) to generate code, validates changes using polyglot toolchains, and pushes pull requests to GitHub.
+Ralph is an event-driven AI coding agent platform that automates software development tasks. It processes Linear issues, utilizes Claude AI (Sonnet 4.5 for planning and execution with budget limits, Haiku 4.5 for error summarization) to generate code, validates changes using polyglot toolchains, and pushes pull requests to GitHub.
 
 ## Project Overview
 
 *   **Type:** TypeScript / Node.js Application
 *   **Architecture:** Event-driven microservices (API + Worker) backed by Redis.
 *   **Infrastructure:** Kubernetes (GKE), Terraform, Helm.
-*   **AI Models:** Anthropic Claude (Opus & Sonnet).
+*   **AI Models:** Anthropic Claude (Sonnet 4.5 for planning & coding, Haiku 4.5 for error summarization).
 
 ## Architecture & Data Flow
 
@@ -16,7 +16,7 @@ Ralph is an event-driven AI coding agent platform that automates software develo
 3.  **Worker Service (`src/worker.ts`):** Dequeues the task and initializes the Agent.
 4.  **Agent (`src/agent.ts`):**
     *   **Workspace:** Clones the target repository into an ephemeral directory (`/tmp/ralph-workspaces`).
-    *   **Planning:** Uses Claude Opus to create an implementation plan.
+    *   **Planning:** Uses Claude Sonnet 4.5 to create an implementation plan ($0.50 budget limit).
     *   **Coding:** Uses Claude Sonnet to generate code based on the plan.
     *   **Validation:** Runs language-specific tools (Biome, TSC, Ruff, Mypy) via `src/tools.ts`.
 5.  **Output:** Commits changes and pushes a new branch/PR to GitHub.
