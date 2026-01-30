@@ -2,7 +2,7 @@ import { LinearClient as LinearSDK } from "@linear/sdk";
 import { findTargetState } from "./linear-utils";
 
 export class LinearClient {
-    private client: LinearSDK | null = null;
+    private readonly client: LinearSDK | null = null;
 
     constructor() {
         const apiKey = process.env.LINEAR_API_KEY;

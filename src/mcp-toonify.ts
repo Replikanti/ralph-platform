@@ -93,4 +93,4 @@ async function run() {
     await server.connect(transport);
 }
 
-run().catch(console.error);
+void run();

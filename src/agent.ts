@@ -6,12 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { LinearClient } from "@linear/sdk";
 import IORedis from 'ioredis';
 import { storePlan, deletePlan } from './plan-store';
 import { formatPlanForLinear } from './plan-formatter';
 import { LinearClient as RalphLinearClient } from './linear-client';
-import { findTargetState } from './linear-utils';
 
 const langfuse = new Langfuse();
 
@@ -370,11 +368,93 @@ async function handleFailureFallback(workDir: string, homeDir: string, task: Tas
     await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
+async function setupClaudeEnvironment(targetClaudeDir: string, workDir: string, homeDir: string): Promise<string> {
+    await fsPromises.mkdir(targetClaudeDir, { recursive: true });
+    const sourceClaudeDir = path.join(os.homedir(), '.claude');
+
+    try {
+        await copyClaudeCredentials(sourceClaudeDir, targetClaudeDir);
+        await configureClaudeSettings(targetClaudeDir);
+        await ensureClaudeCredentialsExist(targetClaudeDir);
+    } catch (e: any) {
+        console.warn("Seed failed: " + e.message);
+    }
+
+    await seedClaudeCache(targetClaudeDir);
+    await prepareClaudeSkills(workDir, homeDir);
+    return await listAvailableSkills(workDir);
+}
+
+async function copyClaudeCredentials(sourceDir: string, targetDir: string): Promise<void> {
+    const files = ['.credentials.json', 'settings.json'];
+    for (const f of files) {
+        const src = path.join(sourceDir, f);
+        const dst = path.join(targetDir, f);
+        if (fs.existsSync(src)) {
+            await fsPromises.copyFile(src, dst);
+        }
+    }
+}
+
+async function configureClaudeSettings(targetClaudeDir: string): Promise<void> {
+    const settingsFile = path.join(targetClaudeDir, 'settings.json');
+    let settings: any = {};
+
+    if (fs.existsSync(settingsFile)) {
+        try {
+            settings = JSON.parse(await fsPromises.readFile(settingsFile, 'utf-8'));
+        } catch {
+            settings = {};
+        }
+    }
+
+    if (!settings.mcpServers) {
+        settings.mcpServers = {};
+    }
+
+    settings.mcpServers.toonify = {
+        command: "node",
+        args: ["/app/dist/mcp-toonify.js"]
+    };
+
+    await fsPromises.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+
+    const toonifyConfig = path.join(targetClaudeDir, 'toonify-config.json');
+    if (!fs.existsSync(toonifyConfig)) {
+        await fsPromises.writeFile(toonifyConfig, JSON.stringify({
+            "enabled": true,
+            "minTokensThreshold": 50,
+            "minSavingsThreshold": 30,
+            "skipToolPatterns": ["Bash", "Write", "Edit"]
+        }, null, 2));
+    }
+}
+
+async function ensureClaudeCredentialsExist(targetClaudeDir: string): Promise<void> {
+    const credsFile = path.join(targetClaudeDir, '.credentials.json');
+    if (!fs.existsSync(credsFile)) {
+        await fsPromises.writeFile(credsFile, JSON.stringify({ "token": "dummy", "email": "ralph@duvo.ai" }));
+    }
+}
+
+async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, trace: any, availableSkills: string, targetClaudeDir: string): Promise<void> {
+    await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph started working\n\n📋 **Job ID:** \`${task.jobId}\``);
+
+    let previousErrors = "";
+    for (let i = 0; i < 3; i++) {
+        const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
+        await persistClaudeCache(targetClaudeDir);
+        if (result.success) {
+            return;
+        }
+        previousErrors = result.output || "Unknown error";
+    }
+    await handleFailureFallback(workDir, homeDir, task, git, previousErrors, 3);
+}
+
 export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
     const mode = task.mode || 'full';
     const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
-
-    // If plan review is enabled and mode is 'full', switch to 'plan-only'
     const actualMode = (mode === 'full' && planReviewEnabled) ? 'plan-only' : mode;
 
     console.log(`🎯 Running agent in mode: ${actualMode}`);
@@ -385,64 +465,13 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
         const targetClaudeDir = path.join(homeDir, '.claude');
 
         try {
-            await fsPromises.mkdir(targetClaudeDir, { recursive: true });
-            const sourceClaudeDir = path.join(os.homedir(), '.claude');
-            try {
-                const files = ['.credentials.json', 'settings.json'];
-                for (const f of files) {
-                    const src = path.join(sourceClaudeDir, f);
-                    const dst = path.join(targetClaudeDir, f);
-                    if (fs.existsSync(src)) await fsPromises.copyFile(src, dst);
-                }
+            const availableSkills = await setupClaudeEnvironment(targetClaudeDir, workDir, homeDir);
 
-                // 1. Configure local Toonify MCP server
-                const settingsFile = path.join(targetClaudeDir, 'settings.json');
-                let settings: any = {};
-                if (fs.existsSync(settingsFile)) {
-                    try {
-                        settings = JSON.parse(await fsPromises.readFile(settingsFile, 'utf-8'));
-                    } catch { settings = {}; }
-                }
-                if (!settings.mcpServers) settings.mcpServers = {};
-                
-                // Point to the compiled JS file in the container
-                settings.mcpServers.toonify = { 
-                    command: "node",
-                    args: ["/app/dist/mcp-toonify.js"] 
-                };
-                
-                await fsPromises.writeFile(settingsFile, JSON.stringify(settings, null, 2));
-
-                // 2. Create toonify-config.json
-                const toonifyConfig = path.join(targetClaudeDir, 'toonify-config.json');
-                if (!fs.existsSync(toonifyConfig)) {
-                    await fsPromises.writeFile(toonifyConfig, JSON.stringify({
-                        "enabled": true,
-                        "minTokensThreshold": 50,
-                        "minSavingsThreshold": 30,
-                        "skipToolPatterns": ["Bash", "Write", "Edit"]
-                    }, null, 2));
-                }
-                
-                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
-                const credsFile = path.join(targetClaudeDir, '.credentials.json');
-
-                if (!fs.existsSync(credsFile)) {
-                    await fsPromises.writeFile(credsFile, JSON.stringify({ "token": "dummy", "email": "ralph@duvo.ai" }));
-                }
-            } catch (e: any) { console.warn("Seed failed: " + e.message); }
-
-            await seedClaudeCache(targetClaudeDir);
-            await prepareClaudeSkills(workDir, homeDir);
-            const availableSkills = await listAvailableSkills(workDir);
-
-            // MODE: plan-only
             if (actualMode === 'plan-only') {
                 await handlePlanOnlyMode(task, workDir, homeDir, trace, availableSkills, redis);
                 return;
             }
 
-            // MODE: execute-only
             if (actualMode === 'execute-only') {
                 if (!task.existingPlan) {
                     throw new Error("execute-only mode requires existingPlan");
@@ -451,18 +480,10 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
                 return;
             }
 
-            // MODE: full (legacy - plan + execute in one go)
-            await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph started working\n\n📋 **Job ID:** \`${task.jobId}\``);
-
-            let previousErrors = "";
-            for (let i = 0; i < 3; i++) {
-                const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
-                await persistClaudeCache(targetClaudeDir);
-                if (result.success) return;
-                previousErrors = result.output || "Unknown error";
-            }
-            await handleFailureFallback(workDir, homeDir, task, git, previousErrors, 3);
-        } finally { cleanup(); }
+            await runFullMode(task, workDir, homeDir, git, trace, availableSkills, targetClaudeDir);
+        } finally {
+            cleanup();
+        }
     });
 };
 
@@ -562,11 +583,11 @@ async function handleExecuteOnlyMode(
             await git.push('origin', task.branchName, pushArgs);
 
             // Only create PR if this is not an iteration (PR already exists)
-            if (!task.isIteration) {
+            if (task.isIteration) {
+                await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
+            } else {
                 const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
                 await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
-            } else {
-                await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
             }
         } else {
             console.warn("⚠️ No files changed.");
