@@ -1,7 +1,6 @@
 import { setupWorkspace } from '../src/workspace';
 import simpleGit from 'simple-git';
 import fs from 'node:fs';
-import fsPromises from 'node:fs/promises';
 
 jest.mock('simple-git');
 jest.mock('node:fs');

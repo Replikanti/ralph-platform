@@ -190,6 +190,196 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
     }
 }
 
+async function handlePlanApproval(issueId: string, storedPlan: any, res: express.Response): Promise<express.Response> {
+    console.log(`✅ [API] Plan approved for issue ${issueId}`);
+
+    const jobId = `${issueId}-exec-${Date.now()}`;
+    const jobData = {
+        ticketId: issueId,
+        title: storedPlan.taskContext.title,
+        description: storedPlan.taskContext.description,
+        repoUrl: storedPlan.taskContext.repoUrl,
+        branchName: storedPlan.taskContext.branchName,
+        mode: 'execute-only',
+        existingPlan: storedPlan.plan,
+        isIteration: storedPlan.taskContext.isIteration
+    };
+
+    return enqueueJob({
+        jobId,
+        jobData,
+        logContext: {
+            type: 'execution',
+            details: [`Repo: ${jobData.repoUrl}`, `Branch: ${jobData.branchName}`]
+        }
+    }, res);
+}
+
+async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
+    console.log(`💭 [API] Revision feedback received for issue ${issueId}`);
+
+    const jobId = `${issueId}-replan-${Date.now()}`;
+    const jobData = {
+        ticketId: issueId,
+        title: storedPlan.taskContext.title,
+        description: storedPlan.taskContext.description,
+        repoUrl: storedPlan.taskContext.repoUrl,
+        branchName: storedPlan.taskContext.branchName,
+        mode: 'plan-only',
+        additionalFeedback: commentBody
+    };
+
+    return enqueueJob({
+        jobId,
+        jobData,
+        logContext: {
+            type: 'replanning',
+            details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
+        }
+    }, res);
+}
+
+async function handleIterationRequest(issueId: string, issue: any, commentBody: string, res: express.Response): Promise<express.Response> {
+    console.log(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
+    console.log(`   Creating new plan for iterative fixes...`);
+
+    const issueTitle = issue?.title || 'Iterative fix';
+    const issueDescription = issue?.description || commentBody;
+    const teamKey = issue?.team?.key;
+    const identifier = issue?.identifier || issueId;
+
+    const repoUrl = await getRepoForTeam(teamKey);
+    if (!repoUrl) {
+        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`);
+        return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
+    }
+
+    const jobId = `${issueId}-iterate-${Date.now()}`;
+    const jobData = {
+        ticketId: issueId,
+        title: issueTitle,
+        description: issueDescription,
+        repoUrl,
+        branchName: `ralph/feat-${identifier}`,
+        mode: 'plan-only',
+        additionalFeedback: commentBody,
+        isIteration: true
+    };
+
+    return enqueueJob({
+        jobId,
+        jobData,
+        logContext: {
+            type: 'iteration',
+            details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
+        }
+    }, res);
+}
+
+async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
+    const inPlanReviewState = isStateInPlanReview(issueState);
+    if (!inPlanReviewState) {
+        console.warn(`⚠️ [API] Issue ${issueId} has stored plan but is in "${issueState}" state (expected plan-review)`);
+        console.warn(`   💡 This might indicate plan-review state is missing in Linear workspace`);
+        console.warn(`   🔄 Processing comment anyway since stored plan exists...`);
+    }
+
+    if (isApprovalComment(commentBody)) {
+        return handlePlanApproval(issueId, storedPlan, res);
+    }
+    return handlePlanRevisionFeedback(issueId, storedPlan, commentBody, res);
+}
+
+async function handleCommentWebhook(data: any, res: express.Response): Promise<express.Response> {
+    const issue = data.issue;
+    const commentBody = data.body || '';
+    const issueState = issue?.state?.name || '';
+
+    console.log(`💬 [API] Comment received:`);
+    console.log(`   Issue ID: ${issue?.id}`);
+    console.log(`   Issue State: "${issueState}"`);
+    console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
+
+    const issueId = issue?.id;
+    if (!issueId) {
+        console.warn(`⚠️ [API] Comment event missing issue ID`);
+        return res.status(400).send({ error: 'missing_issue_id' });
+    }
+
+    const storedPlan = await getPlan(connection, issueId);
+    if (storedPlan) {
+        return handleStoredPlanComment(issueId, issueState, storedPlan, commentBody, res);
+    }
+
+    const inReviewState = issueState.toLowerCase().includes('review') || issueState.toLowerCase() === 'in review';
+    if (inReviewState) {
+        return handleIterationRequest(issueId, issue, commentBody, res);
+    }
+
+    console.log(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
+    return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
+}
+
+function shouldSkipIssueUpdate(action: string, statusName: string): boolean {
+    if (action !== 'update') {
+        return false;
+    }
+    const terminalStates = ['in progress', 'in review', 'completed', 'canceled', 'done'];
+    return terminalStates.includes(statusName);
+}
+
+async function handleIssueWebhook(data: any, action: string, res: express.Response): Promise<express.Response> {
+    const labels = data.labels || [];
+    const labelNames = labels.map((l: { name: string }) => l.name);
+    const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
+
+    if (!hasRalphLabel) {
+        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`);
+        return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
+    }
+
+    const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
+    console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
+
+    if (shouldSkipIssueUpdate(action, statusName)) {
+        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
+        return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
+    }
+
+    const teamKey = data.team?.key;
+    const repoUrl = await getRepoForTeam(teamKey);
+
+    if (!repoUrl) {
+        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
+        return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
+    }
+
+    console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
+
+    try {
+        await ralphQueue.add('coding-task', {
+            ticketId: data.id,
+            title: data.title,
+            description: data.description,
+            repoUrl,
+            branchName: `ralph/feat-${data.identifier}`
+        }, {
+            jobId: data.id,
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 2000
+            },
+            removeOnComplete: { age: 3600 },
+            removeOnFail: { age: 86400 }
+        });
+        return res.status(200).send({ status: 'queued' });
+    } catch (e) {
+        console.error("❌ [API] Failed to add job to queue:", e);
+        return res.status(500).send({ error: 'queue_failed' });
+    }
+}
+
 app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (!verifyLinearSignature(req)) {
         console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
@@ -198,7 +388,6 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
 
     const { action, data, type } = req.body;
 
-    // DEBUG: Log everything
     console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
     if (data?.labels) {
         console.log(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`);
@@ -206,188 +395,15 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
         console.log(`🏷️ [API] No labels in payload.`);
     }
 
-    // Handle Comment Events (Plan Review Approvals/Feedback)
     if (type === 'Comment' && action === 'create') {
-        const issue = data.issue;
-        const commentBody = data.body || '';
-        const issueState = issue?.state?.name || '';
-
-        console.log(`💬 [API] Comment received:`);
-        console.log(`   Issue ID: ${issue?.id}`);
-        console.log(`   Issue State: "${issueState}"`);
-        console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
-
-        const issueId = issue?.id;
-        if (!issueId) {
-            console.warn(`⚠️ [API] Comment event missing issue ID`);
-            return res.status(400).send({ error: 'missing_issue_id' });
-        }
-
-        // Retrieve stored plan to check if we're in plan review mode
-        const storedPlan = await getPlan(connection, issueId);
-        if (storedPlan) {
-            // If we have a stored plan, we're in plan review regardless of state
-            // But also check state as a sanity check
-            const inPlanReviewState = isStateInPlanReview(issueState);
-            if (!inPlanReviewState) {
-                console.warn(`⚠️ [API] Issue ${issueId} has stored plan but is in "${issueState}" state (expected plan-review)`);
-                console.warn(`   💡 This might indicate plan-review state is missing in Linear workspace`);
-                console.warn(`   🔄 Processing comment anyway since stored plan exists...`);
-            }
-
-            // Check if comment is approval or feedback
-        if (isApprovalComment(commentBody)) {
-            console.log(`✅ [API] Plan approved for issue ${issueId}`);
-
-            const jobId = `${issueId}-exec-${Date.now()}`;
-            const jobData = {
-                ticketId: issueId,
-                title: storedPlan.taskContext.title,
-                description: storedPlan.taskContext.description,
-                repoUrl: storedPlan.taskContext.repoUrl,
-                branchName: storedPlan.taskContext.branchName,
-                mode: 'execute-only',
-                existingPlan: storedPlan.plan,
-                isIteration: storedPlan.taskContext.isIteration
-            };
-
-            return enqueueJob({
-                jobId,
-                jobData,
-                logContext: {
-                    type: 'execution',
-                    details: [`Repo: ${jobData.repoUrl}`, `Branch: ${jobData.branchName}`]
-                }
-            }, res);
-        } else {
-            console.log(`💭 [API] Revision feedback received for issue ${issueId}`);
-
-            const jobId = `${issueId}-replan-${Date.now()}`;
-            const jobData = {
-                ticketId: issueId,
-                title: storedPlan.taskContext.title,
-                description: storedPlan.taskContext.description,
-                repoUrl: storedPlan.taskContext.repoUrl,
-                branchName: storedPlan.taskContext.branchName,
-                mode: 'plan-only',
-                additionalFeedback: commentBody
-            };
-
-            return enqueueJob({
-                jobId,
-                jobData,
-                logContext: {
-                    type: 'replanning',
-                    details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
-                }
-            }, res);
-        }
-        } else {
-            // No stored plan - check if this is a PR iteration request
-            const inReviewState = issueState.toLowerCase().includes('review') || issueState.toLowerCase() === 'in review';
-
-            if (inReviewState) {
-                console.log(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
-                console.log(`   Creating new plan for iterative fixes...`);
-
-                // Get issue details for iteration context
-                const issueTitle = issue?.title || 'Iterative fix';
-                const issueDescription = issue?.description || commentBody;
-                const teamKey = issue?.team?.key;
-                const identifier = issue?.identifier || issueId;
-
-                const repoUrl = await getRepoForTeam(teamKey);
-                if (!repoUrl) {
-                    console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`);
-                    return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
-                }
-
-                const jobId = `${issueId}-iterate-${Date.now()}`;
-                const jobData = {
-                    ticketId: issueId,
-                    title: issueTitle,
-                    description: issueDescription,
-                    repoUrl,
-                    branchName: `ralph/feat-${identifier}`,
-                    mode: 'plan-only',
-                    additionalFeedback: commentBody,
-                    isIteration: true // Flag to indicate this is PR iteration
-                };
-
-                return enqueueJob({
-                    jobId,
-                    jobData,
-                    logContext: {
-                        type: 'iteration',
-                        details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
-                    }
-                }, res);
-            }
-
-            // Not in review state and no stored plan - ignore
-            console.log(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
-            return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
-        }
+        return handleCommentWebhook(data, res);
     }
-
-    // Filter: Only issues with label "Ralph"
-    const labels = data.labels || [];
-    const labelNames = labels.map((l: { name: string }) => l.name);
-    const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
 
     if (type === 'Issue' && (action === 'create' || action === 'update')) {
-        if (!hasRalphLabel) {
-            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`);
-            return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
-        }
-
-        // Avoid re-triggering if already in progress or review
-        const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
-        console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
-        
-        if (action === 'update' && (statusName === 'in progress' || statusName === 'in review' || statusName === 'completed' || statusName === 'canceled' || statusName === 'done')) {
-            console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
-            return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
-        }
-
-        const teamKey = data.team?.key;
-        const repoUrl = await getRepoForTeam(teamKey);
-
-        if (!repoUrl) {
-            console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
-            return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
-        }
-
-        console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
-        
-        // Use data.id as jobId for deduplication. 
-        // BullMQ will ignore duplicates if a job with this ID is already waiting, active, or completed (within retention period).
-        try {
-            await ralphQueue.add('coding-task', {
-                ticketId: data.id,
-                title: data.title,
-                description: data.description,
-                repoUrl,
-                branchName: `ralph/feat-${data.identifier}`
-            }, {
-                jobId: data.id, 
-                attempts: 3,
-                backoff: {
-                    type: 'exponential',
-                    delay: 2000
-                },
-                // Keep jobs for 1 hour to ensure identical webhooks are deduplicated
-                removeOnComplete: { age: 3600 }, 
-                removeOnFail: { age: 86400 } // Keep failed for 24h
-            });
-            res.status(200).send({ status: 'queued' });
-        } catch (e) {
-            console.error("❌ [API] Failed to add job to queue:", e);
-            res.status(500).send({ error: 'queue_failed' });
-        }
-    } else {
-        res.status(200).send({ status: 'ignored' });
+        return handleIssueWebhook(data, action, res);
     }
+
+    return res.status(200).send({ status: 'ignored' });
 });
 
 app.get('/health', (_req, res) => {

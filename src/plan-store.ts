@@ -1,7 +1,7 @@
 import IORedis from 'ioredis';
 import { StoredPlan } from './agent';
 
-const PLAN_TTL_DAYS = parseInt(process.env.PLAN_TTL_DAYS || '7', 10);
+const PLAN_TTL_DAYS = Number.parseInt(process.env.PLAN_TTL_DAYS || '7', 10);
 const PLAN_TTL_SECONDS = PLAN_TTL_DAYS * 24 * 60 * 60;
 
 function getPlanKey(taskId: string): string {
