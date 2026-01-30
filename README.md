@@ -8,7 +8,7 @@ Ralph automates the software development workflow by:
 - **Planning** with Claude Sonnet 4.5 (implementation plans with $0.50 budget limit)
 - **Coding** with Claude Sonnet 4.5 (code execution with $2.00 budget limit)
 - **Error Summarization** with Claude Haiku 4.5 (cost-efficient failure analysis with $0.10 budget)
-- **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, Semgrep)
+- **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, Trivy)
 - **Iterating** based on human feedback and CI results
 
 ## ✨ Key Features
