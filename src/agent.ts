@@ -90,8 +90,13 @@ async function summarizeFailurePhase(task: Task, homeDir: string, errors: string
         "TASK: " + task.title + " ERRORS: " + errors.substring(0, 2000) + 
         " Explain why it failed in 2 sentences.";
     try {
-        // Use sonnet for summary to save money
-        const { stdout } = await runClaude(['-p', prompt, '--model', 'sonnet', '--tools', ''], process.cwd(), homeDir);
+        // Use Haiku 4.5 for summary to save money
+        const { stdout } = await runClaude([
+            '-p', prompt, 
+            '--model', 'claude-haiku-4-5-20251001', 
+            '--tools', '',
+            '--max-budget-usd', '0.10'
+        ], process.cwd(), homeDir);
         return stdout.trim();
     } catch {
         return "Task failed due to persistent validation errors.";
@@ -219,10 +224,10 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
         "SKILLS: " + availableSkills + "\n" + (previousErrors ? "PREV ERRORS: " + previousErrors : "") + "\n" +
         "GOAL: Step-by-step plan using native skills. Output inside <plan> tags. BE CONCISE.";
 
-    // Switch to Sonnet and add budget limit
+    // Switch to Sonnet 4.5 and add budget limit
     const { stdout } = await runClaude([
         '-p', prompt, 
-        '--model', 'sonnet', 
+        '--model', 'claude-sonnet-4-5-20250929', 
         '--tools', '', 
         '--max-budget-usd', '0.50',
         '--no-session-persistence'
