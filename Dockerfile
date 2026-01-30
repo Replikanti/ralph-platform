@@ -7,7 +7,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --no-cache-dir --break-system-packages ruff mypy uv && \
-    npm install -g @biomejs/biome typescript tsx && \
+    npm install -g @biomejs/biome typescript tsx @ktseng/claude-code-toonify && \
     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
     curl -fsSL https://claude.ai/install.sh | bash && \
     install -m 755 /root/.local/bin/claude /usr/local/bin/claude

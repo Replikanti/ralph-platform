@@ -349,7 +349,32 @@ export const runAgent = async (task: Task): Promise<void> => {
                     const src = path.join(sourceClaudeDir, f);
                     if (fs.existsSync(src)) await fsPromises.copyFile(src, path.join(targetClaudeDir, f));
                 }
+
+                // 1. Ensure settings.json has Toonify MCP configured
+                const settingsFile = path.join(targetClaudeDir, 'settings.json');
+                let settings: any = {};
+                if (fs.existsSync(settingsFile)) {
+                    try {
+                        settings = JSON.parse(await fsPromises.readFile(settingsFile, 'utf-8'));
+                    } catch { settings = {}; }
+                }
+                if (!settings.mcpServers) settings.mcpServers = {};
+                settings.mcpServers.toonify = { command: "claude-code-toonify" };
+                await fsPromises.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+
+                // 2. Create toonify-config.json with optimized defaults
+                const toonifyConfig = path.join(targetClaudeDir, 'toonify-config.json');
+                if (!fs.existsSync(toonifyConfig)) {
+                    await fsPromises.writeFile(toonifyConfig, JSON.stringify({
+                        "enabled": true,
+                        "minTokensThreshold": 50,
+                        "minSavingsThreshold": 30,
+                        "skipToolPatterns": ["Bash", "Write", "Edit"]
+                    }, null, 2));
+                }
+
                 const credsFile = path.join(targetClaudeDir, '.credentials.json');
+
                 if (!fs.existsSync(credsFile)) {
                     await fsPromises.writeFile(credsFile, JSON.stringify({ "token": "dummy", "email": "ralph@duvo.ai" }));
                 }
