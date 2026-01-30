@@ -88,9 +88,5 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error("Tool not found");
 });
 
-async function run() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-}
-
-void run();
+const transport = new StdioServerTransport();
+await server.connect(transport);
