@@ -16,6 +16,7 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 - **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, Semgrep)
 - **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
 - **Linear Client** (src/linear-client.ts): Integration for posting plans and updating issue states
+- **Linear Utils** (src/linear-utils.ts): Shared utilities including state synonym mapping
 
 ## Architecture Flow
 
@@ -104,6 +105,33 @@ Plans are stored in Redis with the key pattern `ralph:plan:{issueId}` and includ
 
 Plans are automatically deleted after successful execution or TTL expiration.
 
+### Setup Requirements for Plan Review
+
+To use human-in-the-loop planning, you must:
+1. Set `LINEAR_API_KEY` in your environment (requires write access)
+2. Create a "plan-review" state in Linear (or synonym: "pending review", "awaiting approval")
+3. Place it between "Todo" and "In Progress" in your workflow
+
+If `LINEAR_API_KEY` is missing or plan-review state doesn't exist, Ralph will log errors but continue in legacy mode.
+
+**State Synonym Mapping** (src/linear-utils.ts):
+- "plan-review": plan review, pending review, awaiting approval
+- "in review": under review, peer review, review, pr
+- "todo": triage, backlog, todo, unstarted, ready
+
+This allows flexibility in Linear workspace naming conventions.
+
+## Claude Code Commands (Skills)
+
+Ralph includes custom Claude Code commands in `.claude/commands/` for efficient codebase navigation:
+
+- **/ralph-platform** - Project-specific instructions and context
+- **/project-map** - Generate token-optimized project structure (uses tree-toon.js)
+- **/trace-deps** - Trace dependencies for a file (uses trace-deps.js)
+- **/test-filter** - Filter tests by pattern (uses test-filter.js)
+
+These commands invoke helper scripts in `.claude/scripts/` that output TOON format for reduced token usage.
+
 ## Development Commands
 
 ### Build
@@ -120,9 +148,14 @@ npm test
 # Run specific test file
 NODE_OPTIONS=--experimental-vm-modules npx jest tests/server.test.ts
 
+# Run specific test pattern
+NODE_OPTIONS=--experimental-vm-modules npx jest -t "webhook signature"
+
 # Watch mode
 NODE_OPTIONS=--experimental-vm-modules npx jest --watch
 ```
+
+**Note**: Tests use `NODE_OPTIONS=--experimental-vm-modules` because Jest with ESM requires experimental module support.
 
 ### Local Development
 ```bash
@@ -171,8 +204,16 @@ Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The w
 
 **Always call `cleanup()` after job completion** to prevent disk exhaustion.
 
+### Agent Execution Modes
+The agent (src/agent.ts) supports three execution modes controlled by `task.mode`:
+1. **plan-only**: Opus generates implementation plan, posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
+2. **execute-only**: Sonnet executes pre-approved plan from Redis (triggered by approval comment)
+3. **full**: Legacy mode - Opus plans, Sonnet executes in one job (default when PLAN_REVIEW_ENABLED=false)
+
+Mode is set by the webhook handler based on webhook type (issue vs comment) and plan review configuration.
+
 ### Agent Security Layer
-The agent (src/agent.ts:12-18) has a two-tier prompt system:
+The agent has a two-tier prompt system:
 1. **SECURITY_GUARDRAILS**: Immutable security rules preventing secret exposure, destructive operations, and sandbox escapes
 2. **Repo Skills**: Mutable per-repo instructions loaded from `.ralph/skills/*.md` in the target repository
 
@@ -246,21 +287,39 @@ To save context window space, prefer **TOON (Token Optimized Object Notation)** 
   status:active
   ```
 
-### Security (STRICT)
+**MCP Toonify**: The `src/mcp-toonify.ts` module converts Model Context Protocol (MCP) tool schemas from JSON to TOON format, reducing token usage when passing tool definitions to Claude.
 
 ## Testing Strategy
 
 Tests use supertest for API endpoints and mock all external dependencies (Redis, Anthropic SDK, Langfuse, simple-git, child_process). See `tests/` for patterns.
 
+### Test Organization
+- `tests/fixtures/` - Shared test data (webhook payloads, mocks)
+- `tests/fixtures/mocks.ts` - Reusable mock factories for Redis, Anthropic, etc.
+- `tests/fixtures/webhook-payloads.ts` - Linear webhook payload samples
+
 Key test files:
-- `tests/server.test.ts`: Webhook signature verification, filtering logic
-- `tests/worker.test.ts`: Job processing, retry behavior, error handling
-- `tests/agent.test.ts`: Skill loading, LLM orchestration, tracing
+- `tests/server.test.ts`: Webhook signature verification, filtering logic, comment handling
+- `tests/worker.test.ts`: Job processing, retry behavior, error handling, mode switching
+- `tests/agent.test.ts`: Skill loading, LLM orchestration, tracing, plan-only/execute-only modes
 - `tests/workspace.test.ts`: Git operations, cleanup
 - `tests/tools.test.ts`: Polyglot validation detection
+- `tests/plan-store.test.ts`: Redis plan persistence, TTL, feedback accumulation
+- `tests/linear-client.test.ts`: Linear API integration, state updates
+- `tests/plan-formatter.test.ts`: Plan markdown formatting
 
 ## Production Deployment
 
 The platform is designed for GKE deployment (see `helm/` directory). The docker-compose setup is for local development only.
 
-**Important**: Worker pods need write access to `/tmp/ralph-workspaces` volume (mounted in docker-compose.yaml:32-33).
+**Important**:
+- Worker pods need write access to `/tmp/ralph-workspaces` volume (mounted in docker-compose.yaml:32-33)
+- Persistent volume for `/app/claude-cache` recommended to reduce API costs (see helm/ralph/templates/pvc.yaml)
+- External Secrets Operator automatically syncs secrets from GCP Secret Manager (see README.md Phase 3)
+
+### Multi-Repository Support
+Ralph maps Linear teams to GitHub repositories via `LINEAR_TEAM_REPOS` environment variable (JSON object) or ConfigMap + Redis cache. See README.md "Multi-Repository Setup" for configuration details.
+
+**Example**: `{"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}`
+
+Fallback: `DEFAULT_REPO_URL` for unmapped teams.
