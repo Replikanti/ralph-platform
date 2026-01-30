@@ -344,35 +344,16 @@ export const runAgent = async (task: Task): Promise<void> => {
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
             const sourceClaudeDir = path.join(os.homedir(), '.claude');
             try {
-                const files = ['.credentials.json', 'settings.json'];
-                for (const f of files) {
-                    const src = path.join(sourceClaudeDir, f);
-                    if (fs.existsSync(src)) await fsPromises.copyFile(src, path.join(targetClaudeDir, f));
+                const itemsToCopy = ['.credentials.json', 'settings.json', 'settings.local.json'];
+                for (const item of itemsToCopy) {
+                    const src = path.join(sourceClaudeDir, item);
+                    const dst = path.join(targetClaudeDir, item);
+                    if (fs.existsSync(src)) {
+                        await fsPromises.copyFile(src, dst);
+                    }
                 }
-
-                // 1. Ensure settings.json has Toonify MCP configured
-                const settingsFile = path.join(targetClaudeDir, 'settings.json');
-                let settings: any = {};
-                if (fs.existsSync(settingsFile)) {
-                    try {
-                        settings = JSON.parse(await fsPromises.readFile(settingsFile, 'utf-8'));
-                    } catch { settings = {}; }
-                }
-                if (!settings.mcpServers) settings.mcpServers = {};
-                settings.mcpServers.toonify = { command: "claude-code-toonify" };
-                await fsPromises.writeFile(settingsFile, JSON.stringify(settings, null, 2));
-
-                // 2. Create toonify-config.json with optimized defaults
-                const toonifyConfig = path.join(targetClaudeDir, 'toonify-config.json');
-                if (!fs.existsSync(toonifyConfig)) {
-                    await fsPromises.writeFile(toonifyConfig, JSON.stringify({
-                        "enabled": true,
-                        "minTokensThreshold": 50,
-                        "minSavingsThreshold": 30,
-                        "skipToolPatterns": ["Bash", "Write", "Edit"]
-                    }, null, 2));
-                }
-
+                
+                // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
                 const credsFile = path.join(targetClaudeDir, '.credentials.json');
 
                 if (!fs.existsSync(credsFile)) {
