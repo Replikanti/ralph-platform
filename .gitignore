@@ -4,6 +4,8 @@ coverage/
 .env
 .DS_Store
 *.log
+.claude/
+.claude-home/
 IMPLEMENTATION_PLAN.md
 
 # Terraform
