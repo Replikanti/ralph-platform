@@ -10,6 +10,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getPlan } from './plan-store';
+import { LinearClient as RalphLinearClient } from './linear-client';
 
 dotenv.config();
 const app = express();
@@ -277,12 +278,13 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 }
 
 async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    const inPlanReviewState = isStateInPlanReview(issueState);
-    if (!inPlanReviewState) {
-        console.warn(`⚠️ [API] Issue ${issueId} has stored plan but is in "${issueState}" state (expected plan-review)`);
-        console.warn(`   💡 This might indicate plan-review state is missing in Linear workspace`);
-        console.warn(`   🔄 Processing comment anyway since stored plan exists...`);
-    }
+    console.log(`📋 [API] Processing plan review comment for issue ${issueId}`);
+
+    // Move ticket back to "In Progress" when user provides feedback/approval
+    // This helps with filtering - Backlog = needs attention, In Progress = Ralph working
+    const linearClient = new RalphLinearClient();
+    await linearClient.updateIssueState(issueId, "In Progress");
+    console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`);
 
     if (isApprovalComment(commentBody)) {
         return handlePlanApproval(issueId, storedPlan, res);
