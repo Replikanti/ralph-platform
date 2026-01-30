@@ -521,9 +521,9 @@ async function handlePlanOnlyMode(
     const formattedPlan = formatPlanForLinear(plan, task.title);
     await linearClient.postComment(task.ticketId, formattedPlan);
 
-    // Update issue state to plan-review
-    await linearClient.updateIssueState(task.ticketId, "plan-review");
-
+    // Keep ticket in "In Progress" state - plan is posted, awaiting approval
+    // (Don't move to "In Review" yet - that's for when PR is created)
+    console.log("📋 Plan posted to Linear (ticket stays in In Progress, awaiting approval)");
     console.log("✅ Plan posted to Linear, awaiting human approval");
 }
 

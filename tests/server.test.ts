@@ -250,5 +250,28 @@ describe('POST /webhook', () => {
                 expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
             }
         });
+
+        it('should ignore Ralph\'s own comments to prevent auto-execution', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(createMockStoredPlan());
+
+            // Test Ralph's plan comment with approval keywords in instructions
+            const ralphPlanComment = createCommentWebhook({
+                body: '# 🤖 Ralph\'s Implementation Plan\n\n**To proceed:** Reply with LGTM, approved, proceed, or ship it',
+                issue: {
+                    id: 'issue-123',
+                    state: { name: 'In Progress' }
+                }
+            });
+
+            ralphPlanComment.data.user = { name: 'Ralph Bot', displayName: 'Ralph' };
+
+            const res = await request(app)
+                .post('/webhook')
+                .set('linear-signature', getSignatureWithTestSecret(ralphPlanComment))
+                .send(ralphPlanComment);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: 'ignored', reason: 'ralph_comment' });
+        });
     });
 });

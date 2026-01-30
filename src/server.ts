@@ -154,12 +154,6 @@ function isApprovalComment(body: string): boolean {
     return approvalPatterns.some(pattern => pattern.test(body));
 }
 
-function isStateInPlanReview(stateName: string): boolean {
-    const normalized = stateName.toLowerCase().trim();
-    const planReviewSynonyms = ['plan-review', 'plan review', 'pending review', 'awaiting approval'];
-    return planReviewSynonyms.includes(normalized);
-}
-
 interface JobConfig {
     jobId: string;
     jobData: any;
@@ -211,10 +205,12 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
         const issue = data.issue;
         const commentBody = data.body || '';
         const issueState = issue?.state?.name || '';
+        const commentAuthor = data.user?.name || data.user?.displayName || '';
 
         console.log(`💬 [API] Comment received:`);
         console.log(`   Issue ID: ${issue?.id}`);
         console.log(`   Issue State: "${issueState}"`);
+        console.log(`   Comment Author: "${commentAuthor}"`);
         console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
 
         const issueId = issue?.id;
@@ -223,17 +219,22 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
             return res.status(400).send({ error: 'missing_issue_id' });
         }
 
+        // CRITICAL: Ignore Ralph's own comments to prevent auto-execution
+        // Ralph's comments contain approval keywords in instructions (LGTM, approved, etc.)
+        const isRalphComment = commentAuthor.toLowerCase().includes('ralph') ||
+                              commentAuthor.toLowerCase().includes('bot') ||
+                              commentBody.includes('🤖 Ralph') ||
+                              commentBody.includes('Ralph\'s Implementation Plan');
+
+        if (isRalphComment) {
+            console.log(`🤖 [API] Ignoring Ralph's own comment (prevents auto-execution)`);
+            return res.status(200).send({ status: 'ignored', reason: 'ralph_comment' });
+        }
+
         // Retrieve stored plan to check if we're in plan review mode
         const storedPlan = await getPlan(connection, issueId);
         if (storedPlan) {
-            // If we have a stored plan, we're in plan review regardless of state
-            // But also check state as a sanity check
-            const inPlanReviewState = isStateInPlanReview(issueState);
-            if (!inPlanReviewState) {
-                console.warn(`⚠️ [API] Issue ${issueId} has stored plan but is in "${issueState}" state (expected plan-review)`);
-                console.warn(`   💡 This might indicate plan-review state is missing in Linear workspace`);
-                console.warn(`   🔄 Processing comment anyway since stored plan exists...`);
-            }
+            console.log(`📋 [API] Found stored plan for issue ${issueId} - processing as plan review comment`);
 
             // Check if comment is approval or feedback
         if (isApprovalComment(commentBody)) {
