@@ -6,5 +6,5 @@ Use this to save tokens when debugging failures.
 /test-filter
 
 ## Implementation
-~/.claude/scripts/test-filter.js
+$HOME/.claude/scripts/test-filter.js
 

@@ -6,5 +6,5 @@ Use this instead of `ls -R` to quickly understand the codebase layout.
 /project-map
 
 ## Implementation
-~/.claude/scripts/tree-toon.js
+$HOME/.claude/scripts/tree-toon.js
 

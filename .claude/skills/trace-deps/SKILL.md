@@ -6,5 +6,5 @@ Useful for checking impact before modifying a file.
 /trace-deps <filename>
 
 ## Implementation
-~/.claude/scripts/trace-deps.js $1
+$HOME/.claude/scripts/trace-deps.js $1
 
