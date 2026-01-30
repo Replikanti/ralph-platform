@@ -8,6 +8,7 @@ coverage/
 # Ignore Claude CLI local data but keep skills
 .claude/*
 !.claude/skills/
+!.claude/scripts/
 !.claude/config.json
 !.claude/memory/
 IMPLEMENTATION_PLAN.md

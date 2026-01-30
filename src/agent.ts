@@ -284,16 +284,46 @@ async function persistClaudeCache(sourceClaudeDir: string) {
 }
 
 async function prepareClaudeSkills(workDir: string, homeDir: string) {
+
     const targetSkillsDir = path.join(homeDir, '.claude', 'skills');
+
     const sourceSkillsDir = path.join(workDir, '.claude', 'skills');
+
+    const targetScriptsDir = path.join(homeDir, '.claude', 'scripts');
+
+    const sourceScriptsDir = path.join(workDir, '.claude', 'scripts');
+
+
+
     try {
+
         if (await fsPromises.stat(sourceSkillsDir).then(() => true).catch(() => false)) {
+
             await fsPromises.mkdir(targetSkillsDir, { recursive: true });
+
             await fsPromises.cp(sourceSkillsDir, targetSkillsDir, { recursive: true });
-            console.log("Loaded skills into isolated Claude environment");
+
         }
-    } catch (e: any) { console.warn("Failed to load skills: " + e.message); }
+
+        if (await fsPromises.stat(sourceScriptsDir).then(() => true).catch(() => false)) {
+
+            await fsPromises.mkdir(targetScriptsDir, { recursive: true });
+
+            await fsPromises.cp(sourceScriptsDir, targetScriptsDir, { recursive: true });
+
+        }
+
+        console.log("Loaded skills into isolated Claude environment");
+
+    } catch (e: any) {
+
+        console.warn("Failed to load skills: " + e.message);
+
+    }
+
 }
+
+
 
 async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
     console.log("🤖 Iteration " + iteration);
