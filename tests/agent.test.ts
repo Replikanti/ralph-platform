@@ -115,6 +115,14 @@ describe('runAgent', () => {
             commit: jest.fn(),
             push: jest.fn(),
             status: jest.fn().mockResolvedValue({ staged: ['README.md'] }),
+            diffSummary: jest.fn().mockResolvedValue({
+                files: [
+                    { file: 'src/agent.ts', insertions: 50, deletions: 20 },
+                    { file: 'tests/agent.test.ts', insertions: 30, deletions: 5 }
+                ],
+                insertions: 80,
+                deletions: 25
+            }),
         };
         mockCleanup = jest.fn();
 
