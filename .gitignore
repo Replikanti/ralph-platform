@@ -4,6 +4,13 @@ coverage/
 .env
 .DS_Store
 *.log
+.claude-home/
+# Ignore Claude CLI local data but keep skills
+.claude/*
+!.claude/commands/
+!.claude/scripts/
+!.claude/config.json
+!.claude/memory/
 IMPLEMENTATION_PLAN.md
 
 # Terraform
