@@ -168,7 +168,9 @@ describe('POST /webhook', () => {
             jest.clearAllMocks();
         });
 
-        it('should ignore comments on issues not in plan-review state', async () => {
+        it('should ignore comments when no stored plan exists', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(null);
+
             const body = createCommentWebhook({
                 body: 'LGTM',
                 issue: {
@@ -183,7 +185,7 @@ describe('POST /webhook', () => {
                 .send(body);
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'ignored', reason: 'not_in_plan_review' });
+            expect(res.body).toEqual({ status: 'ignored', reason: 'no_stored_plan' });
         });
 
         it('should handle approval comment and queue execution job', async () => {
@@ -230,14 +232,14 @@ describe('POST /webhook', () => {
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
-        it('should ignore comments when no stored plan exists', async () => {
-            (getPlan as jest.Mock).mockResolvedValue(null);
+        it('should process comments with stored plan even if state is not plan-review', async () => {
+            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
 
             const body = createCommentWebhook({
                 body: 'LGTM',
                 issue: {
                     id: 'issue-123',
-                    state: { name: 'plan-review' }
+                    state: { name: 'In Review' } // Wrong state, but has stored plan
                 }
             });
 
@@ -247,7 +249,8 @@ describe('POST /webhook', () => {
                 .send(body);
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'ignored', reason: 'no_stored_plan' });
+            expect(res.body.status).toBe('execution_queued');
+            expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
         });
 
         it('should recognize various approval phrases', async () => {

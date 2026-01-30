@@ -187,26 +187,25 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
         console.log(`   Issue State: "${issueState}"`);
         console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
 
-        // Only process comments on issues in plan-review state
-        if (!isStateInPlanReview(issueState)) {
-            console.log(`ℹ️ [API] Skipping comment - issue not in plan-review state (current: "${issueState}")`);
-            return res.status(200).send({ status: 'ignored', reason: 'not_in_plan_review' });
-        }
-
         const issueId = issue?.id;
         if (!issueId) {
             console.warn(`⚠️ [API] Comment event missing issue ID`);
             return res.status(400).send({ error: 'missing_issue_id' });
         }
 
-        // Retrieve stored plan
+        // Retrieve stored plan to check if we're in plan review mode
         const storedPlan = await getPlan(connection, issueId);
-        if (!storedPlan) {
-            console.warn(`⚠️ [API] No stored plan found for issue ${issueId}`);
-            return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
-        }
+        if (storedPlan) {
+            // If we have a stored plan, we're in plan review regardless of state
+            // But also check state as a sanity check
+            const inPlanReviewState = isStateInPlanReview(issueState);
+            if (!inPlanReviewState) {
+                console.warn(`⚠️ [API] Issue ${issueId} has stored plan but is in "${issueState}" state (expected plan-review)`);
+                console.warn(`   💡 This might indicate plan-review state is missing in Linear workspace`);
+                console.warn(`   🔄 Processing comment anyway since stored plan exists...`);
+            }
 
-        // Check if comment is approval or feedback
+            // Check if comment is approval or feedback
         if (isApprovalComment(commentBody)) {
             console.log(`✅ [API] Plan approved for issue ${issueId}`);
 
@@ -220,7 +219,8 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
                     repoUrl: storedPlan.taskContext.repoUrl,
                     branchName: storedPlan.taskContext.branchName,
                     mode: 'execute-only',
-                    existingPlan: storedPlan.plan
+                    existingPlan: storedPlan.plan,
+                    isIteration: storedPlan.taskContext.isIteration
                 };
 
                 console.log(`📥 [API] Adding execution job to queue:`);
@@ -276,6 +276,64 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
                 console.error("❌ [API] Failed to enqueue re-planning job:", e);
                 return res.status(500).send({ error: 'queue_failed' });
             }
+        }
+        } else {
+            // No stored plan - check if this is a PR iteration request
+            const inReviewState = issueState.toLowerCase().includes('review') || issueState.toLowerCase() === 'in review';
+
+            if (inReviewState) {
+                console.log(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
+                console.log(`   Creating new plan for iterative fixes...`);
+
+                // Get issue details for iteration context
+                const issueTitle = issue?.title || 'Iterative fix';
+                const issueDescription = issue?.description || commentBody;
+                const teamKey = issue?.team?.key;
+                const identifier = issue?.identifier || issueId;
+
+                const repoUrl = await getRepoForTeam(teamKey);
+                if (!repoUrl) {
+                    console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`);
+                    return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
+                }
+
+                // Enqueue plan-only job for iteration
+                try {
+                    const jobId = `${issueId}-iterate-${Date.now()}`;
+                    const jobData = {
+                        ticketId: issueId,
+                        title: issueTitle,
+                        description: issueDescription,
+                        repoUrl,
+                        branchName: `ralph/feat-${identifier}`,
+                        mode: 'plan-only',
+                        additionalFeedback: commentBody,
+                        isIteration: true // Flag to indicate this is PR iteration
+                    };
+
+                    console.log(`📥 [API] Adding iteration planning job to queue:`);
+                    console.log(`   Job ID: ${jobId}`);
+                    console.log(`   Feedback: "${commentBody.substring(0, 100)}..."`);
+
+                    await ralphQueue.add('coding-task', jobData, {
+                        jobId,
+                        attempts: 3,
+                        backoff: { type: 'exponential', delay: 2000 },
+                        removeOnComplete: { age: 3600 },
+                        removeOnFail: { age: 86400 }
+                    });
+
+                    console.log(`✅ [API] Successfully enqueued iteration planning job ${jobId}`);
+                    return res.status(200).send({ status: 'iteration_queued', jobId });
+                } catch (e) {
+                    console.error("❌ [API] Failed to enqueue iteration job:", e);
+                    return res.status(500).send({ error: 'queue_failed' });
+                }
+            }
+
+            // Not in review state and no stored plan - ignore
+            console.log(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
+            return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
         }
     }
 

@@ -29,6 +29,7 @@ export interface Task {
     mode?: 'full' | 'plan-only' | 'execute-only';
     existingPlan?: string;
     additionalFeedback?: string;
+    isIteration?: boolean; // Flag indicating this is a PR iteration (fix request)
 }
 
 export interface StoredPlan {
@@ -40,6 +41,7 @@ export interface StoredPlan {
         description?: string;
         repoUrl: string;
         branchName: string;
+        isIteration?: boolean; // Flag for PR iteration workflow
     };
     feedbackHistory: string[];
     createdAt: Date;
@@ -59,26 +61,16 @@ interface IterationContext {
 
 export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
     if (!process.env.LINEAR_API_KEY) return;
-    
+
     try {
-        const linear = new LinearClient({ apiKey: process.env.LINEAR_API_KEY });
-        const issue = await linear.issue(issueId);
-        const team = await issue.team;
-        if (!team) return;
+        const linearClient = new RalphLinearClient();
 
-        const targetState = await findTargetState(team, statusName);
+        // Update state with fallback support
+        await linearClient.updateIssueState(issueId, statusName);
 
-        if (targetState) {
-            const currentState = await issue.state;
-            if (currentState?.id !== targetState.id) {
-                console.log("Updating Linear status to: " + statusName);
-                await linear.updateIssue(issueId, { stateId: targetState.id });
-            }
-        }
-
+        // Add comment if provided
         if (comment) {
-            console.log("Adding comment to Linear issue " + issueId);
-            await linear.createComment({ issueId, body: comment });
+            await linearClient.postComment(issueId, comment);
         }
     } catch (e: any) {
         console.error("Linear update failed: " + e.message);
@@ -220,12 +212,20 @@ async function planPhase(workDir: string, homeDir: string, task: any, availableS
     let guide = "";
     try { guide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8'); } catch { guide = "None."; }
 
+    const iterationContext = task.isIteration ?
+        "\n\n⚠️ ITERATION MODE: This is a fix/improvement for an existing PR." +
+        "\n- A PR already exists on branch: " + task.branchName +
+        "\n- You will be working on the existing code/branch" +
+        "\n- Focus on addressing the specific feedback provided" +
+        "\n- Review recent changes with git log/diff before planning" : "";
+
     const prompt = "You are the Architect. Create a step-by-step implementation plan for the task.\n\n" +
         "PROJECT GUIDE:\n" + guide + "\n\n" +
         "TASK: " + task.title + "\n" +
         "DESCRIPTION: " + task.description + "\n" +
         "AVAILABLE SLASH COMMANDS: " + availableSkills + "\n" +
-        (previousErrors ? "\nPREVIOUS ATTEMPT ERRORS:\n" + previousErrors : "") + "\n\n" +
+        (previousErrors ? "\nPREVIOUS ATTEMPT ERRORS:\n" + previousErrors : "") +
+        iterationContext + "\n\n" +
         "GOALS:\n1. Detailed plan.\n2. Mention slash commands to use.\n3. Address only the task.\n\n" +
         "Output your plan inside <plan> tags.";
 
@@ -474,12 +474,21 @@ async function handlePlanOnlyMode(
     availableSkills: string,
     redis?: IORedis
 ): Promise<void> {
-    console.log("📝 Running plan-only mode");
-
     const linearClient = new RalphLinearClient();
 
-    // Notify Linear that Ralph is generating a plan
-    await linearClient.postComment(task.ticketId, `🤖 Ralph is generating implementation plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
+    if (task.isIteration) {
+        console.log("🔄 Running plan-only mode for PR iteration");
+
+        // For iterations, issue is already in "In Review" - move back to In Progress
+        await linearClient.updateIssueState(task.ticketId, "In Progress");
+        await linearClient.postComment(task.ticketId, `🔄 Ralph is creating iteration plan based on your feedback...\n\n📋 **Job ID:** \`${task.jobId}\``);
+    } else {
+        console.log("📝 Running plan-only mode");
+
+        // Move ticket to In Progress state when Ralph starts working
+        await linearClient.updateIssueState(task.ticketId, "In Progress");
+        await linearClient.postComment(task.ticketId, `🤖 Ralph is generating implementation plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
+    }
 
     // Generate plan with Opus
     const planSpan = trace.span({ name: "Planning-Opus-Plan-Review", metadata: { mode: 'plan-only' } });
@@ -498,7 +507,8 @@ async function handlePlanOnlyMode(
                 title: task.title,
                 description: task.description,
                 repoUrl: task.repoUrl,
-                branchName: task.branchName
+                branchName: task.branchName,
+                isIteration: task.isIteration
             },
             feedbackHistory: task.additionalFeedback ? [task.additionalFeedback] : [],
             createdAt: new Date(),
@@ -545,16 +555,26 @@ async function handleExecuteOnlyMode(
 
         if (status.staged.length > 0) {
             await git.commit("feat: " + task.title);
-            await git.push('origin', task.branchName, ['--force']);
-            const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
-            await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+
+            // For iterations, don't force push (preserve PR history)
+            // For new work, force push to ensure clean history
+            const pushArgs = task.isIteration ? [] : ['--force'];
+            await git.push('origin', task.branchName, pushArgs);
+
+            // Only create PR if this is not an iteration (PR already exists)
+            if (!task.isIteration) {
+                const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, task.description || '');
+                await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+            } else {
+                await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
+            }
         } else {
             console.warn("⚠️ No files changed.");
             await updateLinearIssue(task.ticketId, "Todo", "⚠️ No changes necessary.");
         }
 
-        // Clean up stored plan
-        if (redis) {
+        // Clean up stored plan (but keep it for iterations to allow further fixes)
+        if (redis && !task.isIteration) {
             await deletePlan(redis, task.ticketId);
         }
     } else {

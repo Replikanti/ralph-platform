@@ -30,10 +30,10 @@ export class LinearClient {
         }
     }
 
-    async updateIssueState(issueId: string, stateName: string): Promise<void> {
+    async updateIssueState(issueId: string, stateName: string): Promise<boolean> {
         if (!this.client) {
             console.warn("⚠️ LINEAR_API_KEY not set, skipping state update");
-            return;
+            return false;
         }
 
         try {
@@ -41,23 +41,39 @@ export class LinearClient {
             const team = await issue.team;
             if (!team) {
                 console.warn(`⚠️ No team found for issue ${issueId}`);
-                return;
+                return false;
             }
 
-            const targetState = await findTargetState(team, stateName);
-            if (!targetState) {
+            let targetState = await findTargetState(team, stateName);
+
+            // Fallback mechanism for missing plan-review state
+            if (!targetState && stateName.toLowerCase() === 'plan-review') {
+                console.warn(`⚠️ State "plan-review" not found in Linear workspace`);
+                console.warn(`   💡 TIP: Create a "Plan Review" state in Linear Settings → Workflow → States`);
+                console.warn(`   🔄 Falling back to "In Review" state...`);
+
+                targetState = await findTargetState(team, 'in review');
+                if (!targetState) {
+                    console.error(`❌ Fallback state "In Review" also not found! Cannot update issue state.`);
+                    console.error(`   Please create either "Plan Review" or "In Review" state in your Linear workspace.`);
+                    return false;
+                }
+            } else if (!targetState) {
                 console.warn(`⚠️ State "${stateName}" not found for issue ${issueId}`);
-                return;
+                return false;
             }
 
             const currentState = await issue.state;
             if (currentState?.id !== targetState.id) {
                 await this.client.updateIssue(issueId, { stateId: targetState.id });
-                console.log(`📊 Updated Linear issue ${issueId} to state: ${stateName}`);
+                console.log(`📊 Updated Linear issue ${issueId} to state: ${targetState.name}`);
+                return true;
             }
+
+            return true;
         } catch (e: any) {
             console.error(`❌ Failed to update Linear state: ${e.message}`);
-            throw e;
+            return false;
         }
     }
 
