@@ -8,6 +8,31 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 
 **Self-Evolution**: Ralph is an evolving platform. When a task requires adding new capabilities, refactoring the agentic loop, or extending the API, Ralph IS authorized and expected to modify his own source code in `src/`.
 
+## Git Workflow Rules (CRITICAL)
+
+**NEVER push directly to main**. All changes MUST go through Pull Requests, including:
+- Code changes
+- Documentation updates
+- Configuration changes
+- Any other modifications
+
+**Branch Naming Convention**:
+- Name branches based on the content of changes
+- Use prefixes: `feat/`, `fix/`, `docs/`, `chore/`, `refactor/`
+- Examples:
+  - `docs/update-hitl-workflow` - documentation updates
+  - `feat/add-pr-iteration` - new feature
+  - `fix/auto-execution-prevention` - bug fix
+  - `chore/update-dependencies` - maintenance
+
+**Workflow**:
+1. Create feature branch from main
+2. Make changes and commit
+3. Push branch to origin
+4. Create PR (can be done manually or via `gh` CLI if needed)
+5. Wait for review and approval
+6. Merge via GitHub UI
+
 **Key components:**
 - **API Server** (src/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
 - **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
