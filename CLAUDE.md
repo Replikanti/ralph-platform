@@ -233,6 +233,21 @@ All agent executions are traced hierarchically:
 - Spans: "Planning" (Opus), "Coding" (Sonnet), "Validation" (polyglot)
 - Errors automatically captured in trace metadata
 
+### Token Optimization (TOON)
+To save context window space, prefer **TOON (Token Optimized Object Notation)** over JSON for large structured outputs (like file lists or search results) when communicating internally:
+- Use `key:value` without quotes.
+- Lists as `item1,item2,item3`.
+- Indentation for nesting, avoid `{}` and `[]`.
+- Example:
+  ```text
+  files:
+    src/agent.ts
+    src/server.ts
+  status:active
+  ```
+
+### Security (STRICT)
+
 ## Testing Strategy
 
 Tests use supertest for API endpoints and mock all external dependencies (Redis, Anthropic SDK, Langfuse, simple-git, child_process). See `tests/` for patterns.

@@ -13,6 +13,7 @@
     "@bull-board/api": "^6.16.4",
     "@bull-board/express": "^6.16.4",
     "@linear/sdk": "^72.0.0",
+    "@modelcontextprotocol/sdk": "^1.25.3",
     "@octokit/rest": "^22.0.1",
     "bullmq": "^5.4.0",
     "dotenv": "^16.4.5",
