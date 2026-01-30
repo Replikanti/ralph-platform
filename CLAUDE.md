@@ -25,14 +25,16 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
 3. Agent runs **plan-only mode** (Sonnet 4.5 generates implementation plan with $0.50 budget)
-4. Plan posted to Linear as comment, issue moved to "plan-review" state
+4. Plan posted to Linear as comment, issue moved to **"Todo"** state (awaiting approval)
 5. **Human reviews plan**:
-   - Comment "LGTM", "approved", "proceed", or "ship it" → Execution job queued
-   - Comment with feedback → Re-planning job queued with feedback context
-6. On approval: Agent runs **execute-only mode** (Sonnet implements approved plan)
+   - Comment "LGTM", "approved", "proceed", or "ship it" → Ticket moves to "In Progress" → Execution job queued
+   - Comment with feedback → Ticket moves to "In Progress" → Re-planning job queued with feedback context
+   - **Ralph's own comments are filtered to prevent auto-execution**
+6. On approval: Agent runs **execute-only mode** (Sonnet 4.5 implements approved plan, $2.00 budget)
 7. Polyglot validation runs on generated code
 8. Push to GitHub (creates PR branch)
-9. Langfuse trace captures entire execution
+9. Wait 3 seconds for Linear auto-switch to "In Review" (only manual update if needed)
+10. Langfuse trace captures entire execution
 
 ### Legacy Mode (PLAN_REVIEW_ENABLED=false)
 
@@ -54,25 +56,33 @@ Ralph supports **human-in-the-loop** plan review, allowing developers to approve
 **1. Plan Generation**
 - When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Sonnet 4.5
 - The plan is posted as a comment on the Linear issue
-- The issue is automatically moved to the "plan-review" state (or synonym: "pending review", "awaiting approval")
+- The issue is automatically moved to the **"Todo"** state (awaiting human approval)
 
 **2. Plan Review**
 Developers review the posted plan and can:
 - **Approve**: Comment with approval phrases (`LGTM`, `approved`, `proceed`, `ship it`)
-  - Triggers execution job with the approved plan
+  - API filters Ralph's own comments to prevent auto-execution
   - Issue moves to "In Progress" state
-  - Ralph executes the plan using Claude Sonnet
+  - Triggers execution job with the approved plan
+  - Ralph executes the plan using Claude Sonnet 4.5 ($2.00 budget)
 - **Request Changes**: Comment with specific feedback
+  - Issue moves to "In Progress" state
   - Triggers re-planning job with feedback incorporated
-  - Issue remains in "plan-review" state
   - Ralph generates revised plan with feedback context
+  - Issue moves back to "Todo" after revised plan is posted
 
 **3. State Transitions**
 ```
-Todo → Plan Review → In Progress → In Review → Done
-         ↑____________↓
-      (revision loop)
+Todo → In Progress (planning) → Todo (awaiting approval)
+         ↑_________________________↓ (user comments)
+         In Progress (executing) → In Review (PR created) → Done
 ```
+
+**4. PR Creation Race Condition Prevention**
+- Ralph creates PR **before** updating Linear state
+- Waits 3 seconds for Linear's automatic state switch to "In Review"
+- Only manually updates state if Linear didn't auto-switch
+- This prevents tickets from ending up in the wrong state
 
 ### Configuration
 
@@ -109,15 +119,15 @@ Plans are automatically deleted after successful execution or TTL expiration.
 
 To use human-in-the-loop planning, you must:
 1. Set `LINEAR_API_KEY` in your environment (requires write access)
-2. Create a "plan-review" state in Linear (or synonym: "pending review", "awaiting approval")
-3. Place it between "Todo" and "In Progress" in your workflow
+2. Use standard Linear states: "Todo", "In Progress", "In Review", "Done"
 
-If `LINEAR_API_KEY` is missing or plan-review state doesn't exist, Ralph will log errors but continue in legacy mode.
+Ralph uses the "Todo" state for awaiting plan approval. When you comment, the ticket automatically moves back to "In Progress".
 
 **State Synonym Mapping** (src/linear-utils.ts):
-- "plan-review": plan review, pending review, awaiting approval
+- "in progress": in progress, wip, doing
 - "in review": under review, peer review, review, pr
-- "todo": triage, backlog, todo, unstarted, ready
+- "todo": todo, triage, backlog, unstarted, ready
+- "done": done, completed, closed
 
 This allows flexibility in Linear workspace naming conventions.
 
@@ -194,8 +204,10 @@ Only Linear issues with the label "Ralph" (case-insensitive) trigger agent execu
 - Enqueues plan-only job (or full job if PLAN_REVIEW_ENABLED=false)
 
 **Comment Webhooks** (create):
-- Only processed on issues in "plan-review" state
-- Approval comments trigger execute-only job
+- **Ralph's own comments are filtered** to prevent auto-execution loops
+- Comments with stored plans trigger approval/feedback flow
+- Comments on issues in "In Review" state without stored plan trigger PR iteration
+- Approval comments trigger execute-only job (moves ticket to "In Progress")
 - Feedback comments trigger re-planning job with accumulated feedback
 - Requires stored plan in Redis (7-day TTL)
 

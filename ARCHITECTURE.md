@@ -75,9 +75,18 @@ graph TB
 **Responsibilities**:
 - Receive and validate Linear webhooks (HMAC SHA-256)
 - Filter issues by "Ralph" label
+- **Filter Ralph's own comments to prevent auto-execution**
+- Detect approval patterns (LGTM, approved, proceed, ship it)
+- Move tickets between states based on user actions
 - Enqueue tasks to BullMQ Redis queue
 - Handle comment webhooks for plan approval/iteration
 - Serve BullMQ dashboard at `/admin/queues`
+
+**Comment Filtering (Critical Security)**:
+Ralph's plan comments contain approval keywords in instructions, which could trigger auto-execution if not filtered. The API detects Ralph's comments by:
+- Checking comment author name (contains "ralph" or "bot")
+- Detecting Ralph's comment patterns ("🤖 Ralph", "Ralph's Implementation Plan")
+- Ignoring these comments entirely to prevent webhook loops
 
 **Key Endpoints**:
 - `POST /webhook` - Linear webhook handler
@@ -191,14 +200,21 @@ Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain licen
 - Post comments to issues
 - Update issue states with fallback mechanism
 - Get issue state information
-- Handle state synonyms (e.g., "plan-review" → "In Review" fallback)
+- Handle state synonyms for flexibility
 
 **State Synonyms**:
 ```typescript
-'plan-review': ['plan-review', 'plan review', 'pending review', 'awaiting approval']
+'in progress': ['in progress', 'wip', 'doing']
 'in review': ['in review', 'under review', 'peer review', 'review', 'pr']
-'todo': ['triage', 'backlog', 'todo', 'unstarted', 'ready']
+'todo': ['todo', 'triage', 'backlog', 'unstarted', 'ready']
+'done': ['done', 'completed', 'closed']
 ```
+
+**State Usage**:
+- **Todo**: Awaiting human plan approval
+- **In Progress**: Ralph actively working (planning, coding, processing feedback)
+- **In Review**: PR created, awaiting merge
+- **Done**: Task completed (manual transition)
 
 ### Plan Store (`src/plan-store.ts`)
 
@@ -250,21 +266,23 @@ sequenceDiagram
 
     Redis->>Worker: Dequeue job
     Worker->>Worker: Clone repo to workspace
-    Worker->>Linear: Update state: Backlog → In Progress
+    Worker->>Linear: Update state: → In Progress
     Worker->>Linear: Comment: "Generating plan..."
     Worker->>Sonnet: Generate plan ($0.50 budget)
     Sonnet-->>Worker: Return plan
     Worker->>Store: Store plan (TTL: 7 days)
     Worker->>Linear: Post formatted plan as comment
-    Worker->>Linear: Update state: In Progress → plan-review
+    Worker->>Linear: Update state: In Progress → Todo
     Worker-->>Redis: Job COMPLETED
 
-    Note over Linear,User: Human reviews plan
+    Note over Linear,User: Human reviews plan (ticket in Todo)
 
     alt User Approves (LGTM)
         User->>Linear: Comment: "LGTM"
         Linear->>API: Webhook: comment.create
+        API->>API: Filter Ralph's own comments
         API->>API: Detect approval pattern
+        API->>Linear: Move ticket: Todo → In Progress
         API->>Store: Retrieve stored plan
         API->>Redis: Enqueue execute-only job
         API-->>Linear: 200 OK
@@ -274,15 +292,23 @@ sequenceDiagram
         Worker->>Worker: Validate code
         Worker->>Worker: Commit & push
         Worker->>GitHub: Create PR
-        Worker->>Linear: Update state: plan-review → In Review
-        Worker->>Linear: Comment: "✅ PR created"
+        Worker->>Worker: Wait 3s for Linear auto-switch
+        Worker->>Linear: Check if auto-switched to In Review
+        alt Linear auto-switched
+            Worker->>Linear: Comment: "✅ PR created"
+        else Manual update needed
+            Worker->>Linear: Update state: In Progress → In Review
+            Worker->>Linear: Comment: "✅ PR created"
+        end
         Worker->>Store: Delete plan
         Worker-->>Redis: Job COMPLETED
 
     else User Requests Changes
         User->>Linear: Comment: "Please add error handling"
         Linear->>API: Webhook: comment.create
+        API->>API: Filter Ralph's own comments
         API->>API: Not approval → feedback
+        API->>Linear: Move ticket: Todo → In Progress
         API->>Store: Append feedback to plan
         API->>Redis: Enqueue re-planning job
         API-->>Linear: 200 OK
@@ -292,7 +318,7 @@ sequenceDiagram
         Sonnet-->>Worker: Return revised plan
         Worker->>Store: Update stored plan
         Worker->>Linear: Post revised plan
-        Worker->>Linear: State stays: plan-review
+        Worker->>Linear: Update state: In Progress → Todo
         Worker-->>Redis: Job COMPLETED
     end
 ```
@@ -334,7 +360,7 @@ sequenceDiagram
     Sonnet-->>Worker: Return iteration plan
     Worker->>Worker: Store plan (with isIteration flag)
     Worker->>Linear: Post iteration plan
-    Worker->>Linear: Update state: In Progress → plan-review
+    Worker->>Linear: Update state: In Progress → Todo
     Worker-->>Redis: Job COMPLETED
 
     User->>Linear: Comment: "approved"
@@ -346,7 +372,7 @@ sequenceDiagram
 
     Redis->>Worker: Dequeue execute job
     Worker->>Worker: Checkout existing branch
-    Worker->>Linear: Update state: plan-review → In Progress
+    Worker->>Linear: Update state: Todo → In Progress
     Worker->>Sonnet: Execute iteration plan ($2.00 budget)
     Sonnet-->>Worker: Code changes
     Worker->>Worker: Validate code
@@ -576,15 +602,18 @@ flowchart TD
     Label -->|Yes| State{Check Issue State}
 
     State -->|Backlog/Todo| Enqueue1[Enqueue plan-only job]
-    State -->|plan-review + Comment| CheckPlan{Stored Plan Exists?}
-    State -->|In Review + Comment| CheckPlan2{Stored Plan Exists?}
+    State -->|Comment| FilterComment{Ralph's Own Comment?}
 
-    CheckPlan -->|Yes + Approval| Enqueue2[Enqueue execute-only job]
-    CheckPlan -->|Yes + Feedback| Enqueue3[Enqueue re-plan job]
-    CheckPlan -->|No| Ignore
+    FilterComment -->|Yes| Ignore2[Ignore to prevent auto-exec]
+    FilterComment -->|No| CheckPlan{Stored Plan Exists?}
 
-    CheckPlan2 -->|No + In Review| Enqueue4[Enqueue iteration plan job]
-    CheckPlan2 -->|Yes| Ignore
+    CheckPlan -->|Yes + Approval| StateUpdate1[Move to In Progress]
+    CheckPlan -->|Yes + Feedback| StateUpdate2[Move to In Progress]
+    CheckPlan -->|No + In Review| Enqueue4[Enqueue iteration plan job]
+    CheckPlan -->|No + Other State| Ignore
+
+    StateUpdate1 --> Enqueue2[Enqueue execute-only job]
+    StateUpdate2 --> Enqueue3[Enqueue re-plan job]
 
     Enqueue1 --> Redis[(Redis Queue)]
     Enqueue2 --> Redis
@@ -601,7 +630,7 @@ flowchart TD
 
     Planning --> Store[Store Plan in Redis]
     Store --> PostPlan[Post to Linear]
-    PostPlan --> UpdateState1[Update State: plan-review]
+    PostPlan --> UpdateState1[Update State: Todo]
     UpdateState1 --> Complete1[Job Complete]
 
     Execution --> Validate[Validate Code]
@@ -609,7 +638,11 @@ flowchart TD
     Push --> PR{Create PR?}
     PR -->|Yes| CreatePR[Create PR]
     PR -->|No| UpdatePR[Update existing PR]
-    CreatePR --> UpdateState2[Update State: In Review]
+    CreatePR --> Wait[Wait 3s for Linear auto-switch]
+    Wait --> CheckSwitch{Linear auto-switched?}
+    CheckSwitch -->|Yes| CommentOnly[Post comment only]
+    CheckSwitch -->|No| UpdateState2[Update State: In Review]
+    UpdatePR --> UpdateState3[State: In Review]
     UpdatePR --> UpdateState2
     UpdateState2 --> Cleanup[Delete Plan if not iteration]
     Cleanup --> Complete2[Job Complete]
@@ -703,14 +736,19 @@ stateDiagram-v2
 
 Ralph recognizes multiple state names:
 
-| Canonical State | Synonyms |
-|----------------|----------|
-| `plan-review` | plan review, pending review, awaiting approval |
-| `In Progress` | in progress, wip, doing |
-| `In Review` | in review, under review, peer review, review, pr |
-| `Todo` | triage, backlog, todo, unstarted, ready |
+| Canonical State | Synonyms | Usage |
+|----------------|----------|-------|
+| `Todo` | todo, triage, backlog, unstarted, ready | Plan awaiting human approval |
+| `In Progress` | in progress, wip, doing | Ralph actively working |
+| `In Review` | in review, under review, peer review, review, pr | PR created, awaiting merge |
+| `Done` | done, completed, closed | Task completed (manual) |
 
-**Fallback Mechanism**: If `plan-review` state doesn't exist, Ralph uses `In Review` as fallback with logging warnings.
+**State Transition Flow**:
+1. **Issue created** → `In Progress` (Ralph planning)
+2. **Plan posted** → `Todo` (awaiting approval)
+3. **User comments** → `In Progress` (processing feedback/approval)
+4. **PR created** → `In Review` (with 3s wait for Linear auto-switch)
+5. **PR merged** → `Done` (manual transition)
 
 ---
 

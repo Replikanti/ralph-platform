@@ -86,10 +86,11 @@ See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for detailed workflow diagrams.
 ### 2. Review the Plan
 
 - Ralph posts implementation plan as comment
-- Issue moves to "plan-review" state
+- Issue moves to **"Todo"** state (awaiting your approval)
 - Reply with:
-  - **"LGTM"** / **"approved"** → Ralph implements
+  - **"LGTM"** / **"approved"** / **"proceed"** → Ralph implements
   - **Feedback** → Ralph revises plan
+- When you comment, issue automatically moves back to **"In Progress"**
 
 ### 3. Iterate on PR (Optional)
 

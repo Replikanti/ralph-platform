@@ -27,7 +27,7 @@ Ralph will:
 1. Move ticket to "In Progress"
 2. Generate implementation plan using Claude Sonnet 4.5 ($0.50 budget limit)
 3. Post plan as comment
-4. Move ticket to "plan-review" state
+4. Move ticket to **"Todo"** state (awaiting your approval)
 
 ### 3. Review & Approve Plan
 
@@ -35,14 +35,17 @@ Review the posted plan and reply with:
 - **Approve**: `LGTM`, `approved`, `proceed`, or `ship it`
 - **Feedback**: Any other comment (e.g., "please add error handling")
 
+**Note**: When you comment, the ticket automatically moves back to "In Progress" to indicate Ralph is processing your feedback.
+
 ### 4. Ralph Implements
 
 After approval:
 1. Moves ticket to "In Progress"
-2. Implements code using Claude Sonnet
+2. Implements code using Claude Sonnet 4.5 ($2.00 budget limit)
 3. Runs validation (Biome, TSC, Ruff, Mypy, Trivy)
-4. Creates pull request
-5. Moves ticket to "In Review"
+4. Creates pull request on GitHub
+5. Waits 3 seconds for Linear auto-switch
+6. Updates ticket to "In Review" (if Linear didn't auto-switch)
 
 ### 5. Iterate on PR (Optional)
 
@@ -72,16 +75,18 @@ PR Created → CI Fails → Comment Feedback → Plan Fix → Approve → Push t
 
 ### Required States
 
-Create these workflow states in Linear:
+Ralph uses standard Linear workflow states:
 
-| State | Purpose | Synonyms Accepted |
-|-------|---------|-------------------|
-| `plan-review` | Waiting for human plan approval | "Plan Review", "Pending Review", "Awaiting Approval" |
-| `In Progress` | Ralph is working | "WIP", "Doing" |
-| `In Review` | PR created, awaiting merge | "Under Review", "Peer Review", "PR" |
-| `Todo` | Task pending or failed | "Backlog", "Triage", "Unstarted" |
+| State | Purpose | When Used |
+|-------|---------|-----------|
+| `Todo` | Waiting for human plan approval | Ralph posts plan and moves ticket here |
+| `In Progress` | Ralph is actively working | During planning, coding, and when processing feedback |
+| `In Review` | PR created, awaiting merge | After PR is created on GitHub |
+| `Done` | Task completed | After PR is merged (manual) |
 
-**Fallback**: If `plan-review` doesn't exist, Ralph uses `In Review` with warnings.
+**State Transitions**:
+- When you comment on a ticket in "Todo", it automatically moves back to "In Progress"
+- After PR creation, Linear may auto-switch to "In Review" (Ralph waits 3s and updates only if needed)
 
 ### Webhook Configuration
 
@@ -186,9 +191,10 @@ Description: make it work
 
 ### Comment Ignored
 
-**Check Issue State**:
-- For plan approval: Must be in "plan-review" state
-- For PR iteration: Must be in "In Review" state
+**Possible Reasons**:
+1. **Ralph's own comment**: Ralph filters his own comments to prevent auto-execution
+2. **No stored plan**: For plan approval, a plan must exist in Redis
+3. **Wrong state**: For PR iteration, ticket should be in review-like state
 
 **Check Stored Plan**:
 ```bash
