@@ -40,7 +40,7 @@ Review the posted plan and reply with:
 After approval:
 1. Moves ticket to "In Progress"
 2. Implements code using Claude Sonnet
-3. Runs validation (Biome, TSC, Ruff, Mypy, Semgrep)
+3. Runs validation (Biome, TSC, Ruff, Mypy, Trivy)
 4. Creates pull request
 5. Moves ticket to "In Review"
 

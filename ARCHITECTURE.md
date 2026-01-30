@@ -164,7 +164,7 @@ const SECURITY_GUARDRAILS = `
 **Auto-Detection**:
 - **TypeScript/JavaScript**: Biome + TSC
 - **Python**: Ruff + Mypy
-- **Security**: Semgrep (all projects)
+- **Security**: Trivy (vulnerabilities, secrets, misconfigurations - MIT license)
 
 **Validation Flow**:
 1. Detect project type (`package.json`, `pyproject.toml`, etc.)
@@ -174,6 +174,14 @@ const SECURITY_GUARDRAILS = `
 5. Return aggregated results
 
 **Failures**: Still push to GitHub with `wip:` prefix to preserve work
+
+**License Compliance**: All validation tools use permissive licenses (MIT/Apache):
+- Biome: MIT
+- Ruff: MIT
+- Mypy: MIT
+- Trivy: Apache 2.0
+
+Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain license compatibility.
 
 ### Linear Client (`src/linear-client.ts`)
 
@@ -416,7 +424,7 @@ graph TD
     Resources --> Validation
     Paths --> Validation
 
-    Validation --> Scanning[Secret Scanning<br/>Trivy/Semgrep]
+    Validation --> Scanning[Security Scanning<br/>Trivy]
     Scanning --> GitHub[GitHub PR]
 
     style Webhook fill:#f9f,stroke:#333
