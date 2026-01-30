@@ -42,7 +42,7 @@ graph TB
 
         subgraph "Worker Execution Context"
             Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
-            ClaudeCLI[Claude CLI<br/>Sonnet/Opus]
+            ClaudeCLI[Claude CLI<br/>Sonnet 4.5 / Haiku 4.5]
             Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy]
         end
     end
@@ -121,7 +121,8 @@ graph TB
 
 **Responsibilities**:
 - Manage three execution modes (plan-only, execute-only, full)
-- Coordinate Claude Opus (planning) and Sonnet (coding)
+- Execute Claude Sonnet 4.5 for planning ($0.50 limit) and coding ($2.00 limit)
+- Use Claude Haiku 4.5 for error summarization ($0.10 limit)
 - Load repository skills from `.ralph/skills/`
 - Run polyglot validation
 - Create GitHub PRs
@@ -201,7 +202,7 @@ const SECURITY_GUARDRAILS = `
 ```typescript
 {
   taskId: string,
-  plan: string,                    // Opus-generated plan
+  plan: string,                    // Sonnet 4.5-generated plan
   taskContext: {
     ticketId: string,
     title: string,
@@ -229,7 +230,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Opus as Claude Opus
+    participant Sonnet as Claude Sonnet 4.5
     participant Store as Plan Store
 
     User->>Linear: Create issue with "Ralph" label
@@ -243,8 +244,8 @@ sequenceDiagram
     Worker->>Worker: Clone repo to workspace
     Worker->>Linear: Update state: Backlog → In Progress
     Worker->>Linear: Comment: "Generating plan..."
-    Worker->>Opus: Generate implementation plan
-    Opus-->>Worker: Return plan
+    Worker->>Sonnet: Generate plan ($0.50 budget)
+    Sonnet-->>Worker: Return plan
     Worker->>Store: Store plan (TTL: 7 days)
     Worker->>Linear: Post formatted plan as comment
     Worker->>Linear: Update state: In Progress → plan-review
@@ -279,8 +280,8 @@ sequenceDiagram
         API-->>Linear: 200 OK
 
         Redis->>Worker: Dequeue re-plan job
-        Worker->>Opus: Generate revised plan (with feedback)
-        Opus-->>Worker: Return revised plan
+        Worker->>Sonnet: Generate revised plan (with feedback, $0.50)
+        Sonnet-->>Worker: Return revised plan
         Worker->>Store: Update stored plan
         Worker->>Linear: Post revised plan
         Worker->>Linear: State stays: plan-review
@@ -297,8 +298,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Opus as Claude Opus
-    participant Sonnet as Claude Sonnet
+    participant Sonnet as Claude Sonnet 4.5
     participant GitHub
     participant CI as CI/SonarQube
 
@@ -321,9 +321,9 @@ sequenceDiagram
     Worker->>Worker: Clone existing branch
     Worker->>Linear: Update state: In Review → In Progress
     Worker->>Linear: Comment: "Creating iteration plan..."
-    Worker->>Opus: Generate fix plan (with iteration context)
-    Note over Opus: Context includes:<br/>- Existing PR branch<br/>- User feedback<br/>- "Review git log/diff"
-    Opus-->>Worker: Return iteration plan
+    Worker->>Sonnet: Generate fix plan ($0.50 budget)
+    Note over Sonnet: Context includes:<br/>- Existing PR branch<br/>- User feedback<br/>- "Review git log/diff"
+    Sonnet-->>Worker: Return iteration plan
     Worker->>Worker: Store plan (with isIteration flag)
     Worker->>Linear: Post iteration plan
     Worker->>Linear: Update state: In Progress → plan-review
@@ -339,7 +339,7 @@ sequenceDiagram
     Redis->>Worker: Dequeue execute job
     Worker->>Worker: Checkout existing branch
     Worker->>Linear: Update state: plan-review → In Progress
-    Worker->>Sonnet: Execute iteration plan
+    Worker->>Sonnet: Execute iteration plan ($2.00 budget)
     Sonnet-->>Worker: Code changes
     Worker->>Worker: Validate code
     Worker->>Worker: Commit changes
@@ -365,8 +365,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Opus as Claude Opus
-    participant Sonnet as Claude Sonnet
+    participant Sonnet as Claude Sonnet 4.5
     participant GitHub
 
     Note over API: PLAN_REVIEW_ENABLED=false
@@ -383,10 +382,10 @@ sequenceDiagram
     Worker->>Linear: Update state: Backlog → In Progress
     Worker->>Linear: Comment: "Ralph started working"
 
-    Worker->>Opus: Generate plan
-    Opus-->>Worker: Return plan
+    Worker->>Sonnet: Generate plan ($0.50 budget)
+    Sonnet-->>Worker: Return plan
 
-    Worker->>Sonnet: Execute plan
+    Worker->>Sonnet: Execute plan ($2.00 budget)
     Sonnet-->>Worker: Code changes
 
     Worker->>Worker: Validate code
@@ -500,6 +499,62 @@ if (!resolvedPath.startsWith(workDir)) {
 4. Audit logging (Langfuse traces)
 5. Manual review (require PR approval)
 
+## Cost Optimizations
+
+Ralph implements multiple strategies to minimize API costs while maintaining quality:
+
+### Model Selection by Task
+- **Planning**: Sonnet 4.5 with **$0.50 budget limit** - Balances quality and cost for implementation plans
+- **Execution**: Sonnet 4.5 with **$2.00 budget limit** - Higher limit for complex code generation
+- **Error Summarization**: Haiku 4.5 with **$0.10 budget limit** - Cost-efficient for post-mortem analysis
+
+### Token Reduction: TOON Format
+
+Ralph uses **TOON (Token-Optimized Object Notation)** to reduce context window usage by ~30-40% compared to JSON.
+
+**MCP Server** (`src/mcp-toonify.ts`):
+- Custom Model Context Protocol server
+- Converts JSON responses to compact TOON format
+- Used by agent for file listings, search results, and structured data
+
+**Example Comparison**:
+```
+JSON (verbose):
+{
+  "files": ["src/agent.ts", "src/server.ts"],
+  "status": "active",
+  "count": 2
+}
+
+TOON (compact):
+files: src/agent.ts, src/server.ts
+status: active
+count: 2
+```
+
+### Token-Optimized Skills
+
+Ralph includes custom slash commands that output in TOON format:
+
+**Available Skills** (`.claude/commands/`):
+- `/project-map` - Tree structure in TOON format (replaces `ls -R`)
+- `/trace-deps` - Dependency analysis
+- `/test-filter` - Test file discovery
+
+**Implementation**: Skills invoke external helper scripts (`~/.claude/scripts/`) that output pre-formatted TOON data, avoiding verbose tool outputs.
+
+### Budget Enforcement
+
+Hard limits prevent runaway costs:
+```typescript
+// src/agent.ts
+'--max-budget-usd', '0.50'  // Planning phase
+'--max-budget-usd', '2.00'  // Execution phase
+'--max-budget-usd', '0.10'  // Error summary
+```
+
+If a budget is exceeded, Claude CLI automatically terminates and returns partial results.
+
 ## Data Flow
 
 ### Job Processing Pipeline
@@ -532,9 +587,9 @@ flowchart TD
     Worker --> Clone[Clone Repo]
     Clone --> Mode{Job Mode?}
 
-    Mode -->|plan-only| Planning[Opus: Generate Plan]
-    Mode -->|execute-only| Execution[Sonnet: Execute Plan]
-    Mode -->|full| Both[Opus → Sonnet]
+    Mode -->|plan-only| Planning[Sonnet 4.5: Generate Plan $0.50]
+    Mode -->|execute-only| Execution[Sonnet 4.5: Execute Plan $2.00]
+    Mode -->|full| Both[Sonnet 4.5: Plan → Execute]
 
     Planning --> Store[Store Plan in Redis]
     Store --> PostPlan[Post to Linear]

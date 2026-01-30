@@ -25,7 +25,7 @@ Description:
 
 Ralph will:
 1. Move ticket to "In Progress"
-2. Generate implementation plan using Claude Opus
+2. Generate implementation plan using Claude Sonnet 4.5 ($0.50 budget limit)
 3. Post plan as comment
 4. Move ticket to "plan-review" state
 

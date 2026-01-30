@@ -20,7 +20,7 @@ Successfully implemented interactive planning with human steering for the Ralph 
    - Includes state synonym mapping for "plan-review"
 
 3. **src/plan-formatter.ts** - Plan formatting utility
-   - Converts Opus XML plans to readable Markdown
+   - Converts Sonnet 4.5 XML plans to readable Markdown
    - Includes approval instructions
    - Formats for Linear display
 
@@ -89,7 +89,7 @@ Todo → Plan Review → In Progress → In Review → Done
    - Other text → Re-planning job with feedback
 
 ### Data Flow
-1. Opus generates plan → Store in Redis
+1. Sonnet 4.5 generates plan → Store in Redis
 2. Post formatted plan to Linear
 3. Human reviews → Comments on issue
 4. Webhook processes comment → Enqueue appropriate job
