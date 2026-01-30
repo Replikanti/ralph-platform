@@ -1,7 +1,22 @@
 jest.mock('../src/workspace');
 jest.mock('../src/tools');
 jest.mock('../src/plan-store');
-jest.mock('../src/linear-client');
+
+// Mock RalphLinearClient
+const mockUpdateIssueState = jest.fn().mockResolvedValue(true);
+const mockPostComment = jest.fn().mockResolvedValue(undefined);
+const mockGetIssueState = jest.fn().mockResolvedValue('In Progress');
+const mockIsEnabled = jest.fn().mockReturnValue(true);
+
+jest.mock('../src/linear-client', () => ({
+    LinearClient: jest.fn().mockImplementation(() => ({
+        updateIssueState: mockUpdateIssueState,
+        postComment: mockPostComment,
+        getIssueState: mockGetIssueState,
+        isEnabled: mockIsEnabled
+    }))
+}));
+
 jest.mock('ioredis');
 jest.mock('node:fs/promises', () => ({
     access: jest.fn().mockRejectedValue(new Error('No skills')),
@@ -177,7 +192,7 @@ describe('runAgent', () => {
 
         expect(mockSpawn).toHaveBeenCalled();
         expect(mockPullsCreate).toHaveBeenCalled();
-        expect(mockIssueUpdate).toHaveBeenCalled();
+        expect(mockUpdateIssueState).toHaveBeenCalled();
     });
 
     it('should retry if validation fails and eventually succeed', async () => {
@@ -214,13 +229,11 @@ describe('runAgent', () => {
             expect(mockPullsCreate).not.toHaveBeenCalledWith(expect.objectContaining({
                 title: expect.stringContaining('wip:')
             }));
-            
-            // Verify that ticket state was updated to s3
-            expect(mockIssueUpdate).toHaveBeenCalledWith('1', { stateId: 's3' });
+
+            // Verify that ticket state was updated to "Todo"
+            expect(mockUpdateIssueState).toHaveBeenCalledWith('1', 'Todo');
             // Should have added an explanation comment
-            expect(mockCommentCreate).toHaveBeenCalledWith(expect.objectContaining({
-                body: expect.stringContaining('Ralph tried to fix X')
-            }));
+            expect(mockPostComment).toHaveBeenCalledWith('1', expect.stringContaining('Ralph tried to fix X'));
         });
         it('should update Linear status to "In Review" when PR is created successfully', async () => {
         const fsModule = require('node:fs/promises');
@@ -242,8 +255,8 @@ describe('runAgent', () => {
         const task = { ticketId: 'pr-test', title: 'Test PR Creation', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         await runAgent(task);
 
-        // Verify that status was updated to "In Review" (state id 's2')
-        expect(mockIssueUpdate).toHaveBeenCalledWith('pr-test', { stateId: 's2' });
+        // Verify that status was updated to "In Review"
+        expect(mockUpdateIssueState).toHaveBeenCalledWith('pr-test', 'In Review');
         expect(mockPullsCreate).toHaveBeenCalled();
     });
 

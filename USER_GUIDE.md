@@ -1,0 +1,311 @@
+# Ralph - User Guide
+
+Quick reference for using Ralph in your daily workflow.
+
+## Quick Start
+
+### 1. Create Linear Ticket
+
+Create a new issue in Linear with:
+- **Label**: `Ralph`
+- **Title**: Clear, concise task description
+- **Description**: Detailed requirements
+
+Example:
+```
+Title: Add user authentication to login page
+Description: 
+- Implement JWT-based authentication
+- Add login form with email/password
+- Store token in localStorage
+- Redirect to dashboard on success
+```
+
+### 2. Ralph Generates Plan
+
+Ralph will:
+1. Move ticket to "In Progress"
+2. Generate implementation plan using Claude Opus
+3. Post plan as comment
+4. Move ticket to "plan-review" state
+
+### 3. Review & Approve Plan
+
+Review the posted plan and reply with:
+- **Approve**: `LGTM`, `approved`, `proceed`, or `ship it`
+- **Feedback**: Any other comment (e.g., "please add error handling")
+
+### 4. Ralph Implements
+
+After approval:
+1. Moves ticket to "In Progress"
+2. Implements code using Claude Sonnet
+3. Runs validation (Biome, TSC, Ruff, Mypy, Semgrep)
+4. Creates pull request
+5. Moves ticket to "In Review"
+
+### 5. Iterate on PR (Optional)
+
+If CI fails or you want improvements:
+1. Comment on Linear ticket (still in "In Review")
+2. Example: `fix failing tests` or `refactor per SonarQube`
+3. Ralph creates iteration plan → approve → pushes fix
+4. Repeat as needed
+
+## Workflows
+
+See **[ARCHITECTURE.md](./ARCHITECTURE.md#workflows)** for detailed sequence diagrams.
+
+### Standard Workflow
+
+```
+Create Issue → Plan → Approve → Implement → PR Created
+```
+
+### Iteration Workflow
+
+```
+PR Created → CI Fails → Comment Feedback → Plan Fix → Approve → Push to PR
+```
+
+## Linear Setup
+
+### Required States
+
+Create these workflow states in Linear:
+
+| State | Purpose | Synonyms Accepted |
+|-------|---------|-------------------|
+| `plan-review` | Waiting for human plan approval | "Plan Review", "Pending Review", "Awaiting Approval" |
+| `In Progress` | Ralph is working | "WIP", "Doing" |
+| `In Review` | PR created, awaiting merge | "Under Review", "Peer Review", "PR" |
+| `Todo` | Task pending or failed | "Backlog", "Triage", "Unstarted" |
+
+**Fallback**: If `plan-review` doesn't exist, Ralph uses `In Review` with warnings.
+
+### Webhook Configuration
+
+1. Go to **Linear → Settings → API → Webhooks**
+2. Create webhook:
+   - **URL**: `https://your-ralph-instance.com/webhook`
+   - **Events**: Enable `Issues` (Create, Update) and `Comments` (Create)
+   - **Secret**: Copy to `LINEAR_WEBHOOK_SECRET` env var
+
+## Multi-Repository Setup
+
+Map Linear teams to repositories:
+
+```bash
+# Environment variable
+LINEAR_TEAM_REPOS='{"FRONTEND":"https://github.com/org/frontend","BACKEND":"https://github.com/org/backend"}'
+
+# Or Kubernetes ConfigMap (recommended for production)
+kubectl create configmap ralph-team-repos \
+  --from-literal=repos.json='{"FRONTEND":"https://github.com/org/frontend"}'
+```
+
+**How it works**:
+- Issue in FRONTEND team → clones frontend repo
+- Issue in BACKEND team → clones backend repo
+- Unknown team → uses `DEFAULT_REPO_URL` fallback
+
+## Best Practices
+
+### Writing Good Task Descriptions
+
+**Good**:
+```
+Title: Add password reset functionality
+Description:
+- Add "Forgot Password" link to login page
+- Send reset email with token
+- Create reset password form
+- Token expires after 1 hour
+- Update password in database
+```
+
+**Bad**:
+```
+Title: Fix stuff
+Description: make it work
+```
+
+### Plan Review Tips
+
+**Be Specific**:
+- ❌ "This doesn't look right"
+- ✅ "Use bcrypt instead of plain SHA-256 for password hashing"
+
+**Ask Questions**:
+- "Should we add rate limiting to prevent brute force?"
+- "Do we need to log failed authentication attempts?"
+
+**Iterate**:
+- Don't approve if you're unsure
+- Request clarifications
+- Ralph will revise the plan
+
+### PR Iteration Examples
+
+**CI Failures**:
+```
+"fix the failing unit tests in auth.test.ts"
+"resolve TypeScript errors in LoginForm component"
+```
+
+**Code Quality**:
+```
+"refactor LoginHandler according to SonarQube suggestions"
+"reduce cognitive complexity in validatePassword function"
+"remove code duplication in error handlers"
+```
+
+**Improvements**:
+```
+"add JSDoc comments to public methods"
+"improve error messages for better UX"
+"add loading state to login button"
+```
+
+## Troubleshooting
+
+### Ralph Doesn't Respond
+
+**Check**:
+1. Issue has "Ralph" label
+2. Webhook is configured in Linear
+3. API logs: `kubectl logs -l app=ralph-api`
+4. Worker logs: `kubectl logs -l app=ralph-worker`
+
+### Plan Not Posted
+
+**Check**:
+1. `LINEAR_API_KEY` is set
+2. API key has write permissions
+3. Network connectivity to Linear API
+
+### Comment Ignored
+
+**Check Issue State**:
+- For plan approval: Must be in "plan-review" state
+- For PR iteration: Must be in "In Review" state
+
+**Check Stored Plan**:
+```bash
+# Connect to Redis
+kubectl exec -it redis-pod -- redis-cli
+
+# Check if plan exists
+GET ralph:plan:{issue-id}
+```
+
+### Validation Failures
+
+Ralph pushes code even if validation fails (with `wip:` prefix).
+
+**Check PR**:
+- Look for validation errors in PR description
+- Fix manually or ask Ralph to iterate
+
+## Advanced Usage
+
+### Disable Plan Review
+
+For auto-execution without approval:
+
+```bash
+# In .env
+PLAN_REVIEW_ENABLED=false
+```
+
+Ralph will plan + implement in one go (legacy mode).
+
+### Custom Plan TTL
+
+```bash
+# In .env
+PLAN_TTL_DAYS=14  # Default: 7
+```
+
+Plans stored longer allow for delayed approvals.
+
+### Monitor Queue
+
+Access BullMQ dashboard:
+```
+https://your-ralph-instance.com/admin/queues
+```
+
+Credentials: `ADMIN_USER` and `ADMIN_PASS` from env vars.
+
+## Examples
+
+### Example 1: Simple Feature
+
+```
+Linear Issue:
+  Title: Add dark mode toggle
+  Label: Ralph
+  Description: Add a toggle button in navbar to switch between light and dark themes
+
+Ralph's Plan:
+  1. Add theme context provider
+  2. Create toggle component
+  3. Store preference in localStorage
+  4. Apply theme classes to body
+
+You: "LGTM"
+
+Ralph: Creates PR with implementation
+```
+
+### Example 2: Fix with Iteration
+
+```
+Linear Issue:
+  Title: Fix broken search functionality
+  Label: Ralph
+
+Ralph: Creates PR #42
+
+CI: ❌ Tests failing
+
+You: "fix the failing search tests"
+
+Ralph: Posts iteration plan
+  1. Review test failures
+  2. Fix debounce timing in search
+  3. Update test mocks
+
+You: "approved"
+
+Ralph: Pushes fix to PR #42
+
+CI: ✅ Passing
+```
+
+### Example 3: Code Quality Iteration
+
+```
+Ralph: Creates PR #43
+
+SonarQube: ⚠️ Code smell - high complexity
+
+You: "reduce complexity in processOrder function as suggested by SonarQube"
+
+Ralph: Posts refactoring plan
+  1. Extract validation logic to separate function
+  2. Use early returns instead of nested ifs
+  3. Break down into smaller helpers
+
+You: "ship it"
+
+Ralph: Refactors and pushes to PR #43
+
+SonarQube: ✅ All clear
+```
+
+---
+
+For technical details, see **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+For deployment, see **[DEPLOYMENT.md](./DEPLOYMENT.md)**.

@@ -70,6 +70,33 @@ function getSignatureWithTestSecret(body: any) {
     return getSignature(body, TEST_SECRET);
 }
 
+// Helper for testing comment webhooks with stored plan
+async function sendCommentWebhookWithPlan(options: {
+    commentBody: string;
+    issueId?: string;
+    stateName?: string;
+    storedPlan?: any | null;
+}) {
+    const { commentBody, issueId = 'issue-123', stateName = 'plan-review' } = options;
+
+    // Use explicit check to allow null to be passed
+    const planValue = 'storedPlan' in options ? options.storedPlan : createMockStoredPlan();
+    (getPlan as jest.Mock).mockResolvedValue(planValue);
+
+    const body = createCommentWebhook({
+        body: commentBody,
+        issue: {
+            id: issueId,
+            state: { name: stateName }
+        }
+    });
+
+    return request(app)
+        .post('/webhook')
+        .set('linear-signature', getSignatureWithTestSecret(body))
+        .send(body);
+}
+
 describe('POST /webhook', () => {
     it('should reject requests with missing signature', async () => {
         const res = await sendWebhookWithTestSecret({ type: 'Issue' }, { withSignature: false });
@@ -162,45 +189,25 @@ describe('POST /webhook', () => {
     });
 
     describe('Comment webhooks (plan review)', () => {
-        const mockStoredPlan = createMockStoredPlan();
-
         beforeEach(() => {
             jest.clearAllMocks();
         });
 
-        it('should ignore comments on issues not in plan-review state', async () => {
-            const body = createCommentWebhook({
-                body: 'LGTM',
-                issue: {
-                    id: 'issue-123',
-                    state: { name: 'In Progress' }
-                }
+        it('should ignore comments when no stored plan exists', async () => {
+            const res = await sendCommentWebhookWithPlan({
+                commentBody: 'LGTM',
+                stateName: 'In Progress',
+                storedPlan: null
             });
 
-            const res = await request(app)
-                .post('/webhook')
-                .set('linear-signature', getSignatureWithTestSecret(body))
-                .send(body);
-
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'ignored', reason: 'not_in_plan_review' });
+            expect(res.body).toEqual({ status: 'ignored', reason: 'no_stored_plan' });
         });
 
         it('should handle approval comment and queue execution job', async () => {
-            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
-
-            const body = createCommentWebhook({
-                body: 'LGTM, let\'s proceed!',
-                issue: {
-                    id: 'issue-123',
-                    state: { name: 'plan-review' }
-                }
+            const res = await sendCommentWebhookWithPlan({
+                commentBody: 'LGTM, let\'s proceed!'
             });
-
-            const res = await request(app)
-                .post('/webhook')
-                .set('linear-signature', getSignatureWithTestSecret(body))
-                .send(body);
 
             expect(res.status).toBe(200);
             expect(res.body.status).toBe('execution_queued');
@@ -209,20 +216,9 @@ describe('POST /webhook', () => {
         });
 
         it('should handle feedback comment and queue re-planning job', async () => {
-            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
-
-            const body = createCommentWebhook({
-                body: 'Please add more error handling',
-                issue: {
-                    id: 'issue-123',
-                    state: { name: 'plan-review' }
-                }
+            const res = await sendCommentWebhookWithPlan({
+                commentBody: 'Please add more error handling'
             });
-
-            const res = await request(app)
-                .post('/webhook')
-                .set('linear-signature', getSignatureWithTestSecret(body))
-                .send(body);
 
             expect(res.status).toBe(200);
             expect(res.body.status).toBe('replanning_queued');
@@ -230,44 +226,24 @@ describe('POST /webhook', () => {
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
-        it('should ignore comments when no stored plan exists', async () => {
-            (getPlan as jest.Mock).mockResolvedValue(null);
-
-            const body = createCommentWebhook({
-                body: 'LGTM',
-                issue: {
-                    id: 'issue-123',
-                    state: { name: 'plan-review' }
-                }
+        it('should process comments with stored plan even if state is not plan-review', async () => {
+            const res = await sendCommentWebhookWithPlan({
+                commentBody: 'LGTM',
+                stateName: 'In Review' // Wrong state, but has stored plan
             });
 
-            const res = await request(app)
-                .post('/webhook')
-                .set('linear-signature', getSignatureWithTestSecret(body))
-                .send(body);
-
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'ignored', reason: 'no_stored_plan' });
+            expect(res.body.status).toBe('execution_queued');
+            expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
         });
 
         it('should recognize various approval phrases', async () => {
-            (getPlan as jest.Mock).mockResolvedValue(mockStoredPlan);
-
             const approvalPhrases = ['lgtm', 'LGTM', 'approved', 'Proceed', 'ship it', 'Ship It!'];
 
             for (const phrase of approvalPhrases) {
-                const body = createCommentWebhook({
-                    body: phrase,
-                    issue: {
-                        id: 'issue-123',
-                        state: { name: 'plan-review' }
-                    }
+                const res = await sendCommentWebhookWithPlan({
+                    commentBody: phrase
                 });
-
-                const res = await request(app)
-                    .post('/webhook')
-                    .set('linear-signature', getSignatureWithTestSecret(body))
-                    .send(body);
 
                 expect(res.status).toBe(200);
                 expect(res.body.status).toBe('execution_queued');
