@@ -452,7 +452,7 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
             }
 
             // MODE: full (legacy - plan + execute in one go)
-            await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph started task " + task.ticketId);
+            await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph started working\n\n📋 **Job ID:** \`${task.jobId}\``);
 
             let previousErrors = "";
             for (let i = 0; i < 3; i++) {
@@ -477,6 +477,9 @@ async function handlePlanOnlyMode(
     console.log("📝 Running plan-only mode");
 
     const linearClient = new RalphLinearClient();
+
+    // Notify Linear that Ralph is generating a plan
+    await linearClient.postComment(task.ticketId, `🤖 Ralph is generating implementation plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
 
     // Generate plan with Opus
     const planSpan = trace.span({ name: "Planning-Opus-Plan-Review", metadata: { mode: 'plan-only' } });
@@ -525,7 +528,7 @@ async function handleExecuteOnlyMode(
 ): Promise<void> {
     console.log("⚙️ Running execute-only mode with approved plan");
 
-    await updateLinearIssue(task.ticketId, "In Progress", "🤖 Ralph executing approved plan...");
+    await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph is executing approved plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
 
     // Execute the plan with Sonnet
     const execSpan = trace.span({ name: "Execution-Sonnet-Approved-Plan", metadata: { mode: 'execute-only' } });

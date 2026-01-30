@@ -154,6 +154,12 @@ function isApprovalComment(body: string): boolean {
     return approvalPatterns.some(pattern => pattern.test(body));
 }
 
+function isStateInPlanReview(stateName: string): boolean {
+    const normalized = stateName.toLowerCase().trim();
+    const planReviewSynonyms = ['plan-review', 'plan review', 'pending review', 'awaiting approval'];
+    return planReviewSynonyms.includes(normalized);
+}
+
 app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (!verifyLinearSignature(req)) {
         console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
@@ -174,13 +180,16 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (type === 'Comment' && action === 'create') {
         const issue = data.issue;
         const commentBody = data.body || '';
-        const issueState = (issue?.state?.name || '').toLowerCase();
+        const issueState = issue?.state?.name || '';
 
-        console.log(`💬 [API] Comment on issue ${issue?.id}, state: ${issueState}`);
+        console.log(`💬 [API] Comment received:`);
+        console.log(`   Issue ID: ${issue?.id}`);
+        console.log(`   Issue State: "${issueState}"`);
+        console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
 
         // Only process comments on issues in plan-review state
-        if (issueState !== 'plan-review' && issueState !== 'plan review' && issueState !== 'pending review' && issueState !== 'awaiting approval') {
-            console.log(`ℹ️ [API] Skipping comment - issue not in plan-review state`);
+        if (!isStateInPlanReview(issueState)) {
+            console.log(`ℹ️ [API] Skipping comment - issue not in plan-review state (current: "${issueState}")`);
             return res.status(200).send({ status: 'ignored', reason: 'not_in_plan_review' });
         }
 
@@ -203,7 +212,8 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
 
             // Enqueue execution job
             try {
-                await ralphQueue.add('coding-task', {
+                const jobId = `${issueId}-exec-${Date.now()}`;
+                const jobData = {
                     ticketId: issueId,
                     title: storedPlan.taskContext.title,
                     description: storedPlan.taskContext.description,
@@ -211,16 +221,23 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
                     branchName: storedPlan.taskContext.branchName,
                     mode: 'execute-only',
                     existingPlan: storedPlan.plan
-                }, {
-                    jobId: `${issueId}-exec-${Date.now()}`,
+                };
+
+                console.log(`📥 [API] Adding execution job to queue:`);
+                console.log(`   Job ID: ${jobId}`);
+                console.log(`   Repo: ${jobData.repoUrl}`);
+                console.log(`   Branch: ${jobData.branchName}`);
+
+                await ralphQueue.add('coding-task', jobData, {
+                    jobId,
                     attempts: 3,
                     backoff: { type: 'exponential', delay: 2000 },
                     removeOnComplete: { age: 3600 },
                     removeOnFail: { age: 86400 }
                 });
 
-                console.log(`📥 [API] Enqueued execution job for ${issueId}`);
-                return res.status(200).send({ status: 'execution_queued' });
+                console.log(`✅ [API] Successfully enqueued execution job ${jobId}`);
+                return res.status(200).send({ status: 'execution_queued', jobId });
             } catch (e) {
                 console.error("❌ [API] Failed to enqueue execution job:", e);
                 return res.status(500).send({ error: 'queue_failed' });
@@ -230,7 +247,8 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
 
             // Enqueue re-planning job with feedback
             try {
-                await ralphQueue.add('coding-task', {
+                const jobId = `${issueId}-replan-${Date.now()}`;
+                const jobData = {
                     ticketId: issueId,
                     title: storedPlan.taskContext.title,
                     description: storedPlan.taskContext.description,
@@ -238,16 +256,22 @@ app.post('/webhook', async (req: express.Request, res: express.Response) => {
                     branchName: storedPlan.taskContext.branchName,
                     mode: 'plan-only',
                     additionalFeedback: commentBody
-                }, {
-                    jobId: `${issueId}-replan-${Date.now()}`,
+                };
+
+                console.log(`📥 [API] Adding re-planning job to queue:`);
+                console.log(`   Job ID: ${jobId}`);
+                console.log(`   Feedback: "${commentBody.substring(0, 100)}..."`);
+
+                await ralphQueue.add('coding-task', jobData, {
+                    jobId,
                     attempts: 3,
                     backoff: { type: 'exponential', delay: 2000 },
                     removeOnComplete: { age: 3600 },
                     removeOnFail: { age: 86400 }
                 });
 
-                console.log(`📥 [API] Enqueued re-planning job for ${issueId}`);
-                return res.status(200).send({ status: 'replanning_queued' });
+                console.log(`✅ [API] Successfully enqueued re-planning job ${jobId}`);
+                return res.status(200).send({ status: 'replanning_queued', jobId });
             } catch (e) {
                 console.error("❌ [API] Failed to enqueue re-planning job:", e);
                 return res.status(500).send({ error: 'queue_failed' });

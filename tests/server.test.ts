@@ -203,7 +203,8 @@ describe('POST /webhook', () => {
                 .send(body);
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'execution_queued' });
+            expect(res.body.status).toBe('execution_queued');
+            expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
@@ -224,7 +225,8 @@ describe('POST /webhook', () => {
                 .send(body);
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ status: 'replanning_queued' });
+            expect(res.body.status).toBe('replanning_queued');
+            expect(res.body.jobId).toMatch(/^issue-123-replan-\d+$/);
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
@@ -268,7 +270,8 @@ describe('POST /webhook', () => {
                     .send(body);
 
                 expect(res.status).toBe(200);
-                expect(res.body).toEqual({ status: 'execution_queued' });
+                expect(res.body.status).toBe('execution_queued');
+                expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
             }
         });
     });
