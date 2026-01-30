@@ -88,19 +88,85 @@ See **[README.md](./README.md#-environment-variables)** for complete list.
 
 ### Multi-Repository Setup
 
-Map Linear teams to repositories:
+Ralph supports mapping Linear teams to different GitHub repositories. This is the **recommended approach** for organizations with multiple repositories.
 
-```bash
-# Via Helm values.yaml
+#### Configuration via Helm (Recommended)
+
+Edit `helm/ralph/values.yaml`:
+
+```yaml
+# Map Linear team keys to GitHub repository URLs
 teamRepos:
-  FRONTEND: "https://github.com/org/frontend.git"
-  BACKEND: "https://github.com/org/backend.git"
-
-# Or via environment variable
-LINEAR_TEAM_REPOS='{"FRONTEND":"https://github.com/org/frontend"}'
+  FRONTEND: "https://github.com/myorg/frontend-repo"
+  BACKEND: "https://github.com/myorg/backend-repo"
+  INFRA: "https://github.com/myorg/infrastructure"
+  MOBILE: "https://github.com/myorg/mobile-app"
 ```
 
-See **[ARCHITECTURE.md](./ARCHITECTURE.md#storage--state)** for configuration details.
+Deploy the changes:
+
+```bash
+cd helm/ralph
+helm upgrade ralph . -n ralph --values values.yaml
+```
+
+#### How It Works
+
+1. **Helm Chart Renders ConfigMap**
+   - Template: `templates/configmap.yaml`
+   - Source: `values.yaml` → `teamRepos` section
+   - Output: Kubernetes ConfigMap mounted at `/etc/ralph/config/repos.json`
+
+2. **Ralph Auto-Reloads Configuration**
+   - Checks file modification time (`mtime`)
+   - Updates Redis cache when changed
+   - **No pod restart required**
+
+3. **Webhook Routing**
+   - Issue created in FRONTEND team → clones `frontend-repo`
+   - Issue created in BACKEND team → clones `backend-repo`
+   - Unknown team → falls back to `DEFAULT_REPO_URL` (if set)
+
+#### Adding a New Repository
+
+```bash
+# 1. Edit values.yaml
+vim helm/ralph/values.yaml
+
+# Add new line:
+# teamRepos:
+#   NEWTEAM: "https://github.com/myorg/new-repo"
+
+# 2. Commit to git
+git add helm/ralph/values.yaml
+git commit -m "feat: add NEWTEAM repository mapping"
+git push
+
+# 3. Deploy via Helm
+helm upgrade ralph ./helm/ralph -n ralph
+
+# 4. Verify (optional)
+helm get values ralph -n ralph | grep -A10 teamRepos
+```
+
+#### Legacy: Environment Variable (Not Recommended)
+
+For backwards compatibility only:
+
+```yaml
+# In values.yaml under env:
+- name: LINEAR_TEAM_REPOS
+  value: '{"TEAM":"https://github.com/org/repo"}'
+```
+
+⚠️ **Limitations**:
+- Requires pod restart on changes
+- Harder to manage for multiple repositories
+- No version control via values.yaml
+
+**Use `teamRepos` in values.yaml instead.**
+
+See **[ARCHITECTURE.md](./ARCHITECTURE.md#storage--state)** for technical implementation details.
 
 ## Monitoring
 

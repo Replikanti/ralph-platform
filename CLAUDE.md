@@ -355,8 +355,22 @@ The platform is designed for GKE deployment (see `helm/` directory). The docker-
 - External Secrets Operator automatically syncs secrets from GCP Secret Manager (see README.md Phase 3)
 
 ### Multi-Repository Support
-Ralph maps Linear teams to GitHub repositories via `LINEAR_TEAM_REPOS` environment variable (JSON object) or ConfigMap + Redis cache. See README.md "Multi-Repository Setup" for configuration details.
 
-**Example**: `{"FRONT":"https://github.com/org/frontend","BACK":"https://github.com/org/backend"}`
+Ralph maps Linear teams to GitHub repositories via Helm chart configuration (`teamRepos` in `values.yaml`). The mapping is deployed as a Kubernetes ConfigMap and cached in Redis for fast lookups.
 
-Fallback: `DEFAULT_REPO_URL` for unmapped teams.
+**Configuration** (`helm/ralph/values.yaml`):
+```yaml
+teamRepos:
+  FRONTEND: "https://github.com/org/frontend"
+  BACKEND: "https://github.com/org/backend"
+```
+
+**How it works**:
+1. Helm renders ConfigMap from `values.yaml`
+2. Mounted at `/etc/ralph/config/repos.json` in pods
+3. Ralph reads file, caches in Redis
+4. Auto-reloads on file mtime change (no restart needed)
+
+**Fallback**: `DEFAULT_REPO_URL` for unmapped teams.
+
+See **[DEPLOYMENT.md](./DEPLOYMENT.md#multi-repository-setup)** for detailed setup instructions.

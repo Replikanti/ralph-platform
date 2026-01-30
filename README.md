@@ -136,7 +136,8 @@ LANGFUSE_SECRET_KEY=sk-lf-xxx           # Observability
 LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_HOST=https://cloud.langfuse.com
 DEFAULT_REPO_URL=https://github.com/org/repo  # Fallback repo
-LINEAR_TEAM_REPOS={"TEAM":"https://github.com/org/repo"}
+
+# For multi-repo setup, use Helm values.yaml (see DEPLOYMENT.md)
 ```
 
 ## 🏗️ Architecture Overview

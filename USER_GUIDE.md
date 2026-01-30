@@ -98,21 +98,51 @@ Ralph uses standard Linear workflow states:
 
 ## Multi-Repository Setup
 
-Map Linear teams to repositories:
+Ralph supports mapping Linear teams to different GitHub repositories using Helm chart configuration.
 
-```bash
-# Environment variable
-LINEAR_TEAM_REPOS='{"FRONTEND":"https://github.com/org/frontend","BACKEND":"https://github.com/org/backend"}'
+### Adding Repository Mappings (Recommended)
 
-# Or Kubernetes ConfigMap (recommended for production)
-kubectl create configmap ralph-team-repos \
-  --from-literal=repos.json='{"FRONTEND":"https://github.com/org/frontend"}'
+Edit `helm/ralph/values.yaml`:
+
+```yaml
+teamRepos:
+  FRONTEND: "https://github.com/org/frontend-repo"
+  BACKEND: "https://github.com/org/backend-repo"
+  INFRA: "https://github.com/org/infrastructure"
+  MOBILE: "https://github.com/org/mobile-app"
 ```
 
-**How it works**:
-- Issue in FRONTEND team → clones frontend repo
-- Issue in BACKEND team → clones backend repo
-- Unknown team → uses `DEFAULT_REPO_URL` fallback
+Deploy the changes:
+
+```bash
+cd helm/ralph
+helm upgrade ralph . -n ralph
+```
+
+### How It Works
+
+- **Issue in FRONTEND team** → clones `frontend-repo`
+- **Issue in BACKEND team** → clones `backend-repo`
+- **Unknown team** → uses `DEFAULT_REPO_URL` fallback (if configured)
+
+### Configuration Flow
+
+1. Helm renders `teamRepos` from `values.yaml`
+2. Creates Kubernetes ConfigMap at `/etc/ralph/config/repos.json`
+3. Ralph reads the file and caches mappings in Redis
+4. Auto-reloads when ConfigMap changes (no pod restart needed)
+
+### Legacy Environment Variable (Not Recommended)
+
+For backwards compatibility, you can use:
+
+```yaml
+# In values.yaml under env:
+- name: LINEAR_TEAM_REPOS
+  value: '{"TEAM":"https://github.com/org/repo"}'
+```
+
+⚠️ **Note**: Environment variables require pod restart on changes. Use `teamRepositories` in values.yaml instead.
 
 ## Best Practices
 
