@@ -344,13 +344,40 @@ export const runAgent = async (task: Task): Promise<void> => {
             await fsPromises.mkdir(targetClaudeDir, { recursive: true });
             const sourceClaudeDir = path.join(os.homedir(), '.claude');
             try {
-                const itemsToCopy = ['.credentials.json', 'settings.json', 'settings.local.json'];
-                for (const item of itemsToCopy) {
-                    const src = path.join(sourceClaudeDir, item);
-                    const dst = path.join(targetClaudeDir, item);
-                    if (fs.existsSync(src)) {
-                        await fsPromises.copyFile(src, dst);
-                    }
+                const files = ['.credentials.json', 'settings.json'];
+                for (const f of files) {
+                    const src = path.join(sourceClaudeDir, f);
+                    const dst = path.join(targetClaudeDir, f);
+                    if (fs.existsSync(src)) await fsPromises.copyFile(src, dst);
+                }
+
+                // 1. Configure local Toonify MCP server
+                const settingsFile = path.join(targetClaudeDir, 'settings.json');
+                let settings: any = {};
+                if (fs.existsSync(settingsFile)) {
+                    try {
+                        settings = JSON.parse(await fsPromises.readFile(settingsFile, 'utf-8'));
+                    } catch { settings = {}; }
+                }
+                if (!settings.mcpServers) settings.mcpServers = {};
+                
+                // Point to the compiled JS file in the container
+                settings.mcpServers.toonify = { 
+                    command: "node",
+                    args: ["/app/dist/mcp-toonify.js"] 
+                };
+                
+                await fsPromises.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+
+                // 2. Create toonify-config.json
+                const toonifyConfig = path.join(targetClaudeDir, 'toonify-config.json');
+                if (!fs.existsSync(toonifyConfig)) {
+                    await fsPromises.writeFile(toonifyConfig, JSON.stringify({
+                        "enabled": true,
+                        "minTokensThreshold": 50,
+                        "minSavingsThreshold": 30,
+                        "skipToolPatterns": ["Bash", "Write", "Edit"]
+                    }, null, 2));
                 }
                 
                 // CRITICAL: Ensure .credentials.json exists so Claude CLI doesn't ask for /login
