@@ -173,7 +173,7 @@ const SECURITY_GUARDRAILS = `
 **Auto-Detection**:
 - **TypeScript/JavaScript**: Biome + TSC
 - **Python**: Ruff + Mypy
-- **Go**: goimports + golangci-lint + go build
+- **Go**: goimports + staticcheck + go build
 - **Terraform**: terraform fmt + terraform validate + tflint
 - **Security**: Trivy (vulnerabilities, secrets, misconfigurations - supports all languages)
 
@@ -193,7 +193,7 @@ const SECURITY_GUARDRAILS = `
 - Ruff: MIT
 - Mypy: MIT
 - goimports: BSD-3-Clause
-- golangci-lint: GPL-3.0 (linter aggregator)
+- staticcheck: MIT
 - go toolchain: BSD-3-Clause
 - Terraform: MPL-2.0 (Mozilla Public License)
 - tflint: MPL-2.0

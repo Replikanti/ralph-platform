@@ -360,7 +360,7 @@ You: "LGTM"
 
 Ralph: Creates PR with implementation
   - Runs goimports for formatting
-  - Runs golangci-lint for code quality
+  - Runs staticcheck for code quality
   - Runs go build to verify compilation
   - Runs Trivy for security scanning
 ```

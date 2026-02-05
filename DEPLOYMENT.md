@@ -15,7 +15,7 @@ This guide covers deploying Ralph to Google Cloud Platform (GKE) with Terraform 
 | `docker` | latest | [Install Guide](https://docs.docker.com/get-docker/) |
 | `go` | 1.23.5 | Included in Docker image |
 | `goimports` | latest | Included in Docker image |
-| `golangci-lint` | 1.56.2 | Included in Docker image |
+| `staticcheck` | latest | Included in Docker image |
 | `terraform` | 1.7.5 | Included in Docker image |
 | `tflint` | 0.53.0 | Included in Docker image |
 
