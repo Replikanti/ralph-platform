@@ -288,10 +288,23 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
     return { success, log: outputLog };
 }
 
-async function validateGo(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
-    let outputLog = "";
-    let success = true;
+// Helper to run Go validation tool and handle errors
+async function runGoTool(
+    command: string,
+    toolName: string,
+    workDir: string,
+    changedFiles: string[],
+    timeout?: number
+): Promise<{ success: boolean, log: string }> {
+    try {
+        await execAsync(command, { cwd: workDir, timeout });
+        return { success: true, log: `✅ ${toolName}: Passed\n` };
+    } catch (e: unknown) {
+        return handleToolError(e, toolName, changedFiles);
+    }
+}
 
+async function validateGo(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     const relevantExtensions = ['.go', '.mod', '.sum'];
     const hasRelevantChanges = changedFiles.some((f: string) =>
         relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('go.mod') || f.includes('go.sum')
@@ -304,48 +317,26 @@ async function validateGo(workDir: string, changedFiles: string[]): Promise<{ su
     const hasGo = fs.existsSync(path.join(workDir, 'go.mod')) ||
                   (await execAsync('find . -maxdepth 2 -name "*.go"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
 
-    if (hasGo) {
-        // Install dependencies if go.mod exists
-        if (fs.existsSync(path.join(workDir, 'go.mod'))) {
-            try {
-                console.log("📦 Downloading Go dependencies...");
-                await execAsync('go mod download', { cwd: workDir, timeout: 120000 });
-            } catch (e) {
-                console.warn("⚠️ go mod download failed, continuing with validation...");
-            }
-        }
-
-        // Run goimports (formatting + import management)
-        try {
-            await execAsync('goimports -w .', { cwd: workDir });
-            outputLog += "✅ goimports: Passed\n";
-        } catch (e: unknown) {
-            const result = handleToolError(e, "goimports", changedFiles);
-            success = success && result.success;
-            outputLog += result.log;
-        }
-
-        // Run golangci-lint (comprehensive linting)
-        try {
-            await execAsync('golangci-lint run --fix --timeout 5m', { cwd: workDir, timeout: 300000 });
-            outputLog += "✅ golangci-lint: Passed\n";
-        } catch (e: unknown) {
-            const result = handleToolError(e, "golangci-lint", changedFiles);
-            success = success && result.success;
-            outputLog += result.log;
-        }
-
-        // Run go build (compilation check)
-        try {
-            await execAsync('go build ./...', { cwd: workDir, timeout: 120000 });
-            outputLog += "✅ go build: Passed\n";
-        } catch (e: unknown) {
-            const result = handleToolError(e, "go build", changedFiles);
-            success = success && result.success;
-            outputLog += result.log;
-        }
+    if (!hasGo) {
+        return { success: true, log: "" };
     }
-    return { success, log: outputLog };
+
+    // Install dependencies if go.mod exists (best effort, non-blocking)
+    if (fs.existsSync(path.join(workDir, 'go.mod'))) {
+        console.log("📦 Downloading Go dependencies...");
+        await execAsync('go mod download', { cwd: workDir, timeout: 120000 })
+            .catch(() => console.warn("⚠️ go mod download failed, continuing with validation..."));
+    }
+
+    // Run validation tools
+    const goimportsResult = await runGoTool('goimports -w .', 'goimports', workDir, changedFiles);
+    const lintResult = await runGoTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
+    const buildResult = await runGoTool('go build ./...', 'go build', workDir, changedFiles, 120000);
+
+    return {
+        success: goimportsResult.success && lintResult.success && buildResult.success,
+        log: goimportsResult.log + lintResult.log + buildResult.log
+    };
 }
 
 async function validateSecurity(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
