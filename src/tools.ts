@@ -8,6 +8,38 @@ const execAsync = promisify(exec);
 
 // --- AGENT TOOLS IMPLEMENTATION ---
 
+// Language detection for Langfuse tracking
+export async function detectProjectLanguages(workDir: string): Promise<string[]> {
+    const languages: string[] = [];
+
+    // TypeScript/JavaScript
+    if (fs.existsSync(path.join(workDir, 'package.json'))) {
+        const hasTs = fs.existsSync(path.join(workDir, 'tsconfig.json'));
+        languages.push(hasTs ? 'typescript' : 'javascript');
+    }
+
+    // Python
+    if (fs.existsSync(path.join(workDir, 'pyproject.toml')) ||
+        fs.existsSync(path.join(workDir, 'requirements.txt'))) {
+        languages.push('python');
+    }
+
+    // Go
+    if (fs.existsSync(path.join(workDir, 'go.mod'))) {
+        languages.push('go');
+    }
+
+    // Terraform (async check for .tf files)
+    try {
+        const { stdout } = await execAsync('find . -maxdepth 3 -name "*.tf" -type f | head -1', { cwd: workDir });
+        if (stdout.trim().length > 0) {
+            languages.push('terraform');
+        }
+    } catch { /* ignore */ }
+
+    return languages;
+}
+
 export async function listFiles(workDir: string, dirPath: string = "."): Promise<string> {
     const fullPath = path.resolve(workDir, dirPath);
     if (!fullPath.startsWith(workDir)) throw new Error("Access denied");
@@ -403,6 +435,23 @@ async function validateSecurity(workDir: string, changedFiles: string[]): Promis
         }
     }
     return { success, log: outputLog };
+}
+
+// Structured validation result for Langfuse tracking
+export interface ToolResult {
+    success: boolean;
+    errorCount: number;
+    relevantErrorCount: number;
+    duration?: number;
+}
+
+export interface ValidationResult {
+    success: boolean;
+    output: string;
+    languages: string[];
+    toolResults: Record<string, ToolResult>;
+    totalErrors: number;
+    relevantErrors: number;
 }
 
 export async function runPolyglotValidation(workDir: string): Promise<{ success: boolean, output: string }> {
