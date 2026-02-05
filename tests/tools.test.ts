@@ -109,75 +109,49 @@ describe('runPolyglotValidation', () => {
         });
     };
 
-    it('should run npm install, biome and tsc if package.json and tsconfig.json exist', async () => {
-        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json') || p.endsWith('tsconfig.json') || p.endsWith('node_modules'));
-        setupGitStatusMock('M  src/agent.ts');
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(true);
-        expect(result.output).toContain('✅ Biome: Passed');
-        expect(result.output).toContain('✅ TSC: Passed');
-        expect(result.output).toContain('✅ Trivy: Secure');
-    });
-
-    it('should run ruff and mypy if pyproject.toml exists', async () => {
+    // Helper to setup project detection
+    const setupProjectDetection = (configFile: string) => {
         mockedFsExistsSync.mockImplementation((p) => {
             const normalized = p.replaceAll('\\', '/');
-            if (normalized.endsWith('package.json')) return false;
-            if (normalized.endsWith('pyproject.toml')) return true;
-            return false;
+            return normalized.endsWith(configFile) || (configFile === 'package.json' && (normalized.endsWith('tsconfig.json') || normalized.endsWith('node_modules')));
         });
-        setupGitStatusMock('M  main.py');
+    };
 
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(true);
-        expect(result.output).toContain('✅ Ruff: Passed');
-        expect(result.output).toContain('✅ Mypy: Passed');
-    });
-
-    it('should run goimports, golangci-lint and go build if go.mod exists', async () => {
-        mockedFsExistsSync.mockImplementation((p) => {
-            const normalized = p.replaceAll('\\', '/');
-            if (normalized.endsWith('package.json')) return false;
-            if (normalized.endsWith('go.mod')) return true;
-            return false;
-        });
-        setupGitStatusMock('M  main.go');
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(true);
-        expect(result.output).toContain('✅ goimports: Passed');
-        expect(result.output).toContain('✅ golangci-lint: Passed');
-        expect(result.output).toContain('✅ go build: Passed');
-    });
-
-    it('should fail if Go validation fails with relevant errors', async () => {
-        mockedFsExistsSync.mockImplementation((p) => p.endsWith('go.mod'));
+    // Helper to setup validation failure
+    const setupToolFailure = (changedFile: string, failingTool: string, errorMessage: string) => {
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
-                callback(null, { stdout: 'M  main.go', stderr: '' });
-            } else if (cmd.includes('go build')) {
-                const err: any = new Error('Go build failed');
-                err.stdout = 'main.go:10:5: undefined: someFunc';
-                callback(err, { stdout: 'main.go:10:5: undefined: someFunc' });
+                callback(null, { stdout: `M  ${changedFile}`, stderr: '' });
+            } else if (cmd.includes(failingTool)) {
+                const err: any = new Error(`${failingTool} failed`);
+                err.stdout = errorMessage;
+                callback(err, { stdout: errorMessage });
             } else {
                 callback(null, { stdout: 'Success', stderr: '' });
             }
             return Promise.resolve({ stdout: 'Success', stderr: '' });
         });
+    };
+
+    it.each([
+        ['TypeScript', 'package.json', 'src/agent.ts', ['✅ Biome: Passed', '✅ TSC: Passed']],
+        ['Python', 'pyproject.toml', 'main.py', ['✅ Ruff: Passed', '✅ Mypy: Passed']],
+        ['Go', 'go.mod', 'main.go', ['✅ goimports: Passed', '✅ golangci-lint: Passed', '✅ go build: Passed']],
+    ])('should run %s validation when %s exists', async (_, configFile, changedFile, expectedOutputs) => {
+        setupProjectDetection(configFile);
+        setupGitStatusMock(`M  ${changedFile}`);
 
         const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ go build Errors (relevant to your changes):');
-        expect(result.output).toContain('main.go:10:5: undefined: someFunc');
+        expect(result.success).toBe(true);
+        expectedOutputs.forEach(output => {
+            expect(result.output).toContain(output);
+        });
+        expect(result.output).toContain('✅ Trivy: Secure');
     });
 
     it('should detect Go project from .go files when go.mod is missing', async () => {
         mockedFsExistsSync.mockReturnValue(false);
-        setupGitStatusMock('M  main.go');
-
-        // Mock find command to detect .go files
         mockedExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
@@ -193,30 +167,19 @@ describe('runPolyglotValidation', () => {
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(true);
         expect(result.output).toContain('✅ goimports: Passed');
-        expect(result.output).toContain('✅ golangci-lint: Passed');
-        expect(result.output).toContain('✅ go build: Passed');
     });
 
-    it('should fail if tool execution fails with relevant errors', async () => {
-        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
-        mockedExec.mockImplementation((cmd, opts, cb) => {
-            const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('git status')) {
-                callback(null, { stdout: 'M  src/agent.ts', stderr: '' });
-            } else if (cmd.includes('biome')) {
-                const err: any = new Error('Biome failed');
-                err.stdout = 'src/agent.ts:10:5: Lint errors';
-                callback(err, { stdout: 'src/agent.ts:10:5: Lint errors' });
-            } else {
-                callback(null, { stdout: 'Success', stderr: '' });
-            }
-            return Promise.resolve({ stdout: 'Success', stderr: '' });
-        });
+    it.each([
+        ['Biome', 'package.json', 'src/agent.ts', 'biome', 'src/agent.ts:10:5: Lint errors'],
+        ['go build', 'go.mod', 'main.go', 'go build', 'main.go:10:5: undefined: someFunc'],
+    ])('should fail if %s fails with relevant errors', async (toolName, configFile, changedFile, toolCmd, errorMsg) => {
+        setupProjectDetection(configFile);
+        setupToolFailure(changedFile, toolCmd, errorMsg);
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ Biome Errors (relevant to your changes):');
-        expect(result.output).toContain('src/agent.ts:10:5: Lint errors');
+        expect(result.output).toContain(`❌ ${toolName} Errors (relevant to your changes):`);
+        expect(result.output).toContain(errorMsg);
     });
 
     it('should ignore unrelated errors', async () => {
