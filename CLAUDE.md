@@ -300,7 +300,7 @@ The tools module (src/tools.ts) auto-detects project type and runs:
 - **Terraform**: terraform fmt (formatting with auto-fix) + terraform validate (syntax validation) + tflint (linting with partial auto-fix)
 - **Security**: Trivy (vulnerability, secret, and misconfiguration scanning - supports Go, Python, JS/TS, Terraform)
 
-Validation failures still result in a push (with "wip:" prefix) to preserve work.
+Validation failures are captured in the output and provided as feedback to the agent for fixing in the next iteration.
 
 ### BullMQ Configuration
 Worker (src/worker.ts:26-30):

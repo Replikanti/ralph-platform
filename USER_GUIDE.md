@@ -237,11 +237,12 @@ GET ralph:plan:{issue-id}
 
 ### Validation Failures
 
-Ralph pushes code even if validation fails (with `wip:` prefix).
+If validation fails, Ralph captures the errors and attempts to fix them in the next iteration (up to 3 iterations).
 
-**Check PR**:
-- Look for validation errors in PR description
-- Fix manually or ask Ralph to iterate
+**To fix validation issues**:
+- Ralph will automatically retry with error feedback
+- If all retries fail, comment on the Linear ticket with specific instructions
+- Request a new plan with fixes
 
 ## Advanced Usage
 
