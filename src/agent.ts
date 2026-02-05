@@ -1,6 +1,6 @@
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
-import { runPolyglotValidation } from "./tools";
+import { runPolyglotValidation, detectProjectLanguages } from "./tools";
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -542,6 +542,16 @@ async function runFullMode(task: Task, workDir: string, homeDir: string, git: an
     await handleFailureFallback(workDir, homeDir, task, git, previousErrors, 3);
 }
 
+// Helper to detect task type for Langfuse tracking
+function detectTaskType(title: string): string {
+    const lower = title.toLowerCase();
+    if (lower.includes('fix') || lower.includes('bug')) return 'bugfix';
+    if (lower.includes('refactor')) return 'refactor';
+    if (lower.includes('test')) return 'test';
+    if (lower.includes('doc')) return 'docs';
+    return 'feature';
+}
+
 export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
     const mode = task.mode || 'full';
     const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
@@ -549,8 +559,19 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
 
     console.log(`🎯 Running agent in mode: ${actualMode}`);
 
-    return withTrace("Ralph-Task", { ticketId: task.ticketId, mode: actualMode }, async (trace: any) => {
-        const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
+    // Setup workspace first to detect languages
+    const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
+
+    // Detect project languages for Langfuse tracking
+    const detectedLanguages = await detectProjectLanguages(workDir);
+
+    return withTrace("Ralph-Task", {
+        ticketId: task.ticketId,
+        mode: actualMode,
+        languages: detectedLanguages,
+        repository: task.repoUrl,
+        taskType: detectTaskType(task.title)
+    }, async (trace: any) => {
         const homeDir = path.join(rootDir, 'home');
         const targetClaudeDir = path.join(homeDir, '.claude');
 
