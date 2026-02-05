@@ -49,6 +49,8 @@ const ALLOWED_COMMAND_PATTERNS = [
     /^gofmt\s+/,
     /^goimports\s+/,
     /^golangci-lint\s+/,
+    /^terraform\s+(init|fmt|validate|plan)/,
+    /^tflint\s+/,
 ];
 
 const DANGEROUS_PATTERNS = [
@@ -288,8 +290,8 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
     return { success, log: outputLog };
 }
 
-// Helper to run Go validation tool and handle errors
-async function runGoTool(
+// Helper to run validation tool and handle errors (used by Go, Terraform, etc.)
+async function runValidationTool(
     command: string,
     toolName: string,
     workDir: string,
@@ -329,13 +331,48 @@ async function validateGo(workDir: string, changedFiles: string[]): Promise<{ su
     }
 
     // Run validation tools
-    const goimportsResult = await runGoTool('goimports -w .', 'goimports', workDir, changedFiles);
-    const lintResult = await runGoTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
-    const buildResult = await runGoTool('go build ./...', 'go build', workDir, changedFiles, 120000);
+    const goimportsResult = await runValidationTool('goimports -w .', 'goimports', workDir, changedFiles);
+    const lintResult = await runValidationTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
+    const buildResult = await runValidationTool('go build ./...', 'go build', workDir, changedFiles, 120000);
 
     return {
         success: goimportsResult.success && lintResult.success && buildResult.success,
         log: goimportsResult.log + lintResult.log + buildResult.log
+    };
+}
+
+async function validateTerraform(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+    const relevantExtensions = ['.tf', '.tfvars', '.hcl'];
+    const hasRelevantChanges = changedFiles.some((f: string) =>
+        relevantExtensions.some(ext => f.endsWith(ext))
+    );
+
+    if (!hasRelevantChanges) {
+        return { success: true, log: "" };
+    }
+
+    // Detect Terraform project by searching for .tf files
+    const hasTerraform = await execAsync('find . -maxdepth 3 -name "*.tf"', { cwd: workDir })
+        .then(r => r.stdout.length > 0)
+        .catch(() => false);
+
+    if (!hasTerraform) {
+        return { success: true, log: "" };
+    }
+
+    // Initialize Terraform without backend (no state file access needed)
+    console.log("🏗️ Initializing Terraform...");
+    await execAsync('terraform init -backend=false -upgrade=false', { cwd: workDir, timeout: 120000 })
+        .catch(() => console.warn("⚠️ terraform init failed, continuing with validation..."));
+
+    // Run validation tools
+    const fmtResult = await runValidationTool('terraform fmt -recursive', 'terraform fmt', workDir, changedFiles);
+    const validateResult = await runValidationTool('terraform validate', 'terraform validate', workDir, changedFiles);
+    const lintResult = await runValidationTool('tflint --recursive --fix', 'tflint', workDir, changedFiles, 120000);
+
+    return {
+        success: fmtResult.success && validateResult.success && lintResult.success,
+        log: fmtResult.log + validateResult.log + lintResult.log
     };
 }
 
@@ -390,6 +427,10 @@ export async function runPolyglotValidation(workDir: string): Promise<{ success:
     const goResult = await validateGo(workDir, changedFiles);
     allSuccess = allSuccess && goResult.success;
     outputLog += goResult.log;
+
+    const terraformResult = await validateTerraform(workDir, changedFiles);
+    allSuccess = allSuccess && terraformResult.success;
+    outputLog += terraformResult.log;
 
     const securityResult = await validateSecurity(workDir, changedFiles);
     allSuccess = allSuccess && securityResult.success;
