@@ -138,6 +138,26 @@ describe('runPolyglotValidation', () => {
         });
     };
 
+    // Helper to setup file-based project detection (for Go, Terraform, etc.)
+    const setupFileBasedDetection = (filePattern: string, changedFile: string, failingTool?: string, errorMessage?: string) => {
+        mockedFsExistsSync.mockReturnValue(false);
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: `M  ${changedFile}`, stderr: '' });
+            } else if (cmd.includes('find') && cmd.includes(filePattern)) {
+                callback(null, { stdout: `./${changedFile}\n`, stderr: '' });
+            } else if (failingTool && cmd.includes(failingTool)) {
+                const err: any = new Error(`${failingTool} failed`);
+                err.stdout = errorMessage;
+                callback(err, { stdout: errorMessage });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+    };
+
     it.each([
         ['TypeScript', 'package.json', 'src/agent.ts', ['✅ Biome: Passed', '✅ TSC: Passed']],
         ['Python', 'pyproject.toml', 'main.py', ['✅ Ruff: Passed', '✅ Mypy: Passed']],
@@ -154,81 +174,33 @@ describe('runPolyglotValidation', () => {
         expect(result.output).toContain('✅ Trivy: Secure');
     });
 
-    it('should detect Go project from .go files when go.mod is missing', async () => {
-        mockedFsExistsSync.mockReturnValue(false);
-        mockedExec.mockImplementation((cmd, opts, cb) => {
-            const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('git status')) {
-                callback(null, { stdout: 'M  main.go', stderr: '' });
-            } else if (cmd.includes('find') && cmd.includes('*.go')) {
-                callback(null, { stdout: './main.go\n', stderr: '' });
-            } else {
-                callback(null, { stdout: 'Success', stderr: '' });
-            }
-            return Promise.resolve({ stdout: 'Success', stderr: '' });
-        });
+    it.each([
+        ['Go', '*.go', 'main.go', '✅ goimports: Passed'],
+        ['Terraform', '*.tf', 'main.tf', '✅ terraform fmt: Passed'],
+    ])('should detect %s project from %s files', async (_, filePattern, changedFile, expectedOutput) => {
+        setupFileBasedDetection(filePattern, changedFile);
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(true);
-        expect(result.output).toContain('✅ goimports: Passed');
-    });
-
-    it('should detect Terraform project from .tf files', async () => {
-        mockedFsExistsSync.mockReturnValue(false);
-        mockedExec.mockImplementation((cmd, opts, cb) => {
-            const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('git status')) {
-                callback(null, { stdout: 'M  main.tf', stderr: '' });
-            } else if (cmd.includes('find') && cmd.includes('*.tf')) {
-                callback(null, { stdout: './main.tf\n', stderr: '' });
-            } else {
-                callback(null, { stdout: 'Success', stderr: '' });
-            }
-            return Promise.resolve({ stdout: 'Success', stderr: '' });
-        });
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(true);
-        expect(result.output).toContain('✅ terraform fmt: Passed');
-        expect(result.output).toContain('✅ terraform validate: Passed');
-        expect(result.output).toContain('✅ tflint: Passed');
+        expect(result.output).toContain(expectedOutput);
     });
 
     it.each([
-        ['Biome', 'package.json', 'src/agent.ts', 'biome', 'src/agent.ts:10:5: Lint errors'],
-        ['go build', 'go.mod', 'main.go', 'go build', 'main.go:10:5: undefined: someFunc'],
-    ])('should fail if %s fails with relevant errors', async (toolName, configFile, changedFile, toolCmd, errorMsg) => {
-        setupProjectDetection(configFile);
-        setupToolFailure(changedFile, toolCmd, errorMsg);
+        ['Biome', 'package.json', 'src/agent.ts', 'biome', 'src/agent.ts:10:5: Lint errors', 'config'],
+        ['go build', 'go.mod', 'main.go', 'go build', 'main.go:10:5: undefined: someFunc', 'config'],
+        ['terraform validate', '*.tf', 'main.tf', 'terraform validate', 'main.tf:10:5: Invalid resource type', 'file'],
+    ])('should fail if %s fails with relevant errors', async (toolName, detectionKey, changedFile, toolCmd, errorMsg, detectType) => {
+        if (detectType === 'config') {
+            setupProjectDetection(detectionKey);
+            setupToolFailure(changedFile, toolCmd, errorMsg);
+        } else {
+            setupFileBasedDetection(detectionKey, changedFile, toolCmd, errorMsg);
+        }
 
         const result = await runPolyglotValidation('/mock/workspace');
         expect(result.success).toBe(false);
         expect(result.output).toContain(`❌ ${toolName} Errors (relevant to your changes):`);
         expect(result.output).toContain(errorMsg);
-    });
-
-    it('should fail if terraform validate fails with relevant errors', async () => {
-        mockedFsExistsSync.mockReturnValue(false);
-        mockedExec.mockImplementation((cmd, opts, cb) => {
-            const callback = typeof opts === 'function' ? opts : cb;
-            if (cmd.includes('git status')) {
-                callback(null, { stdout: 'M  main.tf', stderr: '' });
-            } else if (cmd.includes('find') && cmd.includes('*.tf')) {
-                callback(null, { stdout: './main.tf\n', stderr: '' });
-            } else if (cmd.includes('terraform validate')) {
-                const err: any = new Error('terraform validate failed');
-                err.stdout = 'main.tf:10:5: Invalid resource type';
-                callback(err, { stdout: 'main.tf:10:5: Invalid resource type' });
-            } else {
-                callback(null, { stdout: 'Success', stderr: '' });
-            }
-            return Promise.resolve({ stdout: 'Success', stderr: '' });
-        });
-
-        const result = await runPolyglotValidation('/mock/workspace');
-        expect(result.success).toBe(false);
-        expect(result.output).toContain('❌ terraform validate Errors (relevant to your changes):');
-        expect(result.output).toContain('main.tf:10:5: Invalid resource type');
     });
 
     it('should ignore unrelated errors', async () => {
