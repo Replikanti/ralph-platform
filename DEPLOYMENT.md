@@ -13,6 +13,11 @@ This guide covers deploying Ralph to Google Cloud Platform (GKE) with Terraform 
 | `helm` | 3.x | [Install Guide](https://helm.sh/docs/intro/install/) |
 | `terraform` | >= 1.5.0 | [Install Guide](https://developer.hashicorp.com/terraform/install) |
 | `docker` | latest | [Install Guide](https://docs.docker.com/get-docker/) |
+| `go` | 1.23.5 | Included in Docker image |
+| `goimports` | latest | Included in Docker image |
+| `golangci-lint` | 1.56.2 | Included in Docker image |
+| `terraform` | 1.7.5 | Included in Docker image |
+| `tflint` | 0.53.0 | Included in Docker image |
 
 ### Required API Keys
 
@@ -25,6 +30,23 @@ Before starting, obtain these credentials (add to `terraform.tfvars`):
 | **Anthropic** | API Key | [Anthropic Console](https://console.anthropic.com/) |
 | **Linear** | Webhook Secret + API Key | Linear Settings → API → Webhooks |
 | **Langfuse** | API Keys (optional) | [Langfuse Cloud](https://cloud.langfuse.com/) |
+
+### Docker Image Size
+
+The Ralph Docker image includes all polyglot toolchains:
+
+| Component | Size Impact |
+|-----------|-------------|
+| Node.js base | ~400 MB |
+| Go toolchain | ~500 MB |
+| Terraform + tflint | ~100 MB |
+| Python tools | ~200 MB |
+| Claude CLI + Trivy | ~200 MB |
+| **Total** | **~1.4 GB** |
+
+For smaller images, consider building language-specific variants.
+
+## Deployment Steps
 
 For complete deployment steps, see the original README sections on:
 - Phase 1: GCP Project Setup

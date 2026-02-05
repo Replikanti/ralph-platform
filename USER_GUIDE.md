@@ -341,6 +341,54 @@ Ralph: Refactors and pushes to PR #43
 SonarQube: ✅ All clear
 ```
 
+### Example 4: Go Feature Implementation
+
+```
+Linear Issue:
+  Title: Add HTTP middleware for logging
+  Label: Ralph
+  Description: Add request/response logging middleware to the Go API
+
+Ralph's Plan:
+  1. Create middleware/logging.go
+  2. Implement http.Handler wrapper
+  3. Add request ID generation
+  4. Log request/response with timing
+  5. Update main.go to use middleware
+
+You: "LGTM"
+
+Ralph: Creates PR with implementation
+  - Runs goimports for formatting
+  - Runs golangci-lint for code quality
+  - Runs go build to verify compilation
+  - Runs Trivy for security scanning
+```
+
+### Example 5: Terraform Infrastructure Change
+
+```
+Linear Issue:
+  Title: Add S3 bucket for logs
+  Label: Ralph
+  Description: Create S3 bucket with lifecycle rules for log storage
+
+Ralph's Plan:
+  1. Create modules/s3-logs/main.tf
+  2. Define bucket with versioning
+  3. Add lifecycle rules (30 day transition to IA)
+  4. Add IAM policy for write access
+  5. Output bucket ARN
+
+You: "approved"
+
+Ralph: Creates PR with implementation
+  - Runs terraform fmt for formatting
+  - Runs terraform validate for syntax
+  - Runs tflint for best practices
+  - Runs Trivy for security misconfigurations
+```
+
 ---
 
 For technical details, see **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
