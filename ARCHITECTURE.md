@@ -186,7 +186,7 @@ const SECURITY_GUARDRAILS = `
 6. Run security scanners
 7. Return aggregated results
 
-**Failures**: Still push to GitHub with `wip:` prefix to preserve work
+**Failures**: Validation failures are reported in the agent output. If code doesn't pass validation, the iteration continues with error feedback to allow Ralph to fix issues.
 
 **License Compliance**: All validation tools use permissive licenses (MIT/Apache/BSD/MPL):
 - Biome: MIT
@@ -462,12 +462,12 @@ graph TD
     Validation --> Scanning[Security Scanning<br/>Trivy]
     Scanning --> GitHub[GitHub PR]
 
-    style Webhook fill:#f9f,stroke:#333
-    style Commands fill:#9ff,stroke:#333
-    style Patterns fill:#9ff,stroke:#333
-    style Resources fill:#9ff,stroke:#333
-    style Paths fill:#9ff,stroke:#333
-    style Scanning fill:#9f9,stroke:#333
+    style Webhook fill:#e1bee7,stroke:#333,color:#000
+    style Commands fill:#b3e5fc,stroke:#333,color:#000
+    style Patterns fill:#b3e5fc,stroke:#333,color:#000
+    style Resources fill:#b3e5fc,stroke:#333,color:#000
+    style Paths fill:#b3e5fc,stroke:#333,color:#000
+    style Scanning fill:#c8e6c9,stroke:#333,color:#000
 ```
 
 ### Command Execution Security
