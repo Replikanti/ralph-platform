@@ -48,7 +48,7 @@ const ALLOWED_COMMAND_PATTERNS = [
     /^go\s+(build|test|mod|vet|run|fmt)/,
     /^gofmt\s+/,
     /^goimports\s+/,
-    /^golangci-lint\s+/,
+    /^staticcheck\s+/,
     /^terraform\s+(init|fmt|validate|plan)/,
     /^tflint\s+/,
 ];

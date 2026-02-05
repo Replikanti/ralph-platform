@@ -76,7 +76,7 @@ describe('Agent Tools', () => {
         'go test',
         'go mod download',
         'goimports -w .',
-        'golangci-lint run',
+        'staticcheck ./...',
         'terraform init',
         'terraform fmt',
         'terraform validate',
@@ -161,7 +161,7 @@ describe('runPolyglotValidation', () => {
     it.each([
         ['TypeScript', 'package.json', 'src/agent.ts', ['✅ Biome: Passed', '✅ TSC: Passed']],
         ['Python', 'pyproject.toml', 'main.py', ['✅ Ruff: Passed', '✅ Mypy: Passed']],
-        ['Go', 'go.mod', 'main.go', ['✅ goimports: Passed', '✅ golangci-lint: Passed', '✅ go build: Passed']],
+        ['Go', 'go.mod', 'main.go', ['✅ goimports: Passed', '✅ staticcheck: Passed', '✅ go build: Passed']],
     ])('should run %s validation when %s exists', async (_, configFile, changedFile, expectedOutputs) => {
         setupProjectDetection(configFile);
         setupGitStatusMock(`M  ${changedFile}`);

@@ -43,7 +43,7 @@ graph TB
         subgraph "Worker Execution Context"
             Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
             ClaudeCLI[Claude CLI<br/>Sonnet 4.5 / Haiku 4.5]
-            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, golangci-lint, terraform, tflint]
+            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, staticcheck, terraform, tflint]
         end
     end
 
