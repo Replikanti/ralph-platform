@@ -45,6 +45,10 @@ const ALLOWED_COMMAND_PATTERNS = [
     /^pytest/,
     /^ruff\s+/,
     /^mypy\s+/,
+    /^go\s+(build|test|mod|vet|run|fmt)/,
+    /^gofmt\s+/,
+    /^goimports\s+/,
+    /^golangci-lint\s+/,
 ];
 
 const DANGEROUS_PATTERNS = [
@@ -284,6 +288,66 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
     return { success, log: outputLog };
 }
 
+async function validateGo(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+    let outputLog = "";
+    let success = true;
+
+    const relevantExtensions = ['.go', '.mod', '.sum'];
+    const hasRelevantChanges = changedFiles.some((f: string) =>
+        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('go.mod') || f.includes('go.sum')
+    );
+
+    if (!hasRelevantChanges) {
+        return { success: true, log: "" };
+    }
+
+    const hasGo = fs.existsSync(path.join(workDir, 'go.mod')) ||
+                  (await execAsync('find . -maxdepth 2 -name "*.go"', { cwd: workDir }).then(r => r.stdout.length > 0).catch(() => false));
+
+    if (hasGo) {
+        // Install dependencies if go.mod exists
+        if (fs.existsSync(path.join(workDir, 'go.mod'))) {
+            try {
+                console.log("📦 Downloading Go dependencies...");
+                await execAsync('go mod download', { cwd: workDir, timeout: 120000 });
+            } catch (e) {
+                console.warn("⚠️ go mod download failed, continuing with validation...");
+            }
+        }
+
+        // Run goimports (formatting + import management)
+        try {
+            await execAsync('goimports -w .', { cwd: workDir });
+            outputLog += "✅ goimports: Passed\n";
+        } catch (e: unknown) {
+            const result = handleToolError(e, "goimports", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
+        }
+
+        // Run golangci-lint (comprehensive linting)
+        try {
+            await execAsync('golangci-lint run --fix --timeout 5m', { cwd: workDir, timeout: 300000 });
+            outputLog += "✅ golangci-lint: Passed\n";
+        } catch (e: unknown) {
+            const result = handleToolError(e, "golangci-lint", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
+        }
+
+        // Run go build (compilation check)
+        try {
+            await execAsync('go build ./...', { cwd: workDir, timeout: 120000 });
+            outputLog += "✅ go build: Passed\n";
+        } catch (e: unknown) {
+            const result = handleToolError(e, "go build", changedFiles);
+            success = success && result.success;
+            outputLog += result.log;
+        }
+    }
+    return { success, log: outputLog };
+}
+
 async function validateSecurity(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
@@ -331,6 +395,10 @@ export async function runPolyglotValidation(workDir: string): Promise<{ success:
     const pythonResult = await validatePython(workDir, changedFiles);
     allSuccess = allSuccess && pythonResult.success;
     outputLog += pythonResult.log;
+
+    const goResult = await validateGo(workDir, changedFiles);
+    allSuccess = allSuccess && goResult.success;
+    outputLog += goResult.log;
 
     const securityResult = await validateSecurity(workDir, changedFiles);
     allSuccess = allSuccess && securityResult.success;

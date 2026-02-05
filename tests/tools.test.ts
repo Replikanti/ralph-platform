@@ -72,6 +72,11 @@ describe('Agent Tools', () => {
         'ls -la',
         'pwd',
         'pytest',
+        'go build',
+        'go test',
+        'go mod download',
+        'goimports -w .',
+        'golangci-lint run',
     ])('should allow safe whitelisted command: %s', async (cmd) => {
         mockedExec.mockImplementation(createMockExecCallback('ok', ''));
         const result = await runCommand(workDir, cmd);
@@ -128,6 +133,68 @@ describe('runPolyglotValidation', () => {
         expect(result.success).toBe(true);
         expect(result.output).toContain('✅ Ruff: Passed');
         expect(result.output).toContain('✅ Mypy: Passed');
+    });
+
+    it('should run goimports, golangci-lint and go build if go.mod exists', async () => {
+        mockedFsExistsSync.mockImplementation((p) => {
+            const normalized = p.replaceAll('\\', '/');
+            if (normalized.endsWith('package.json')) return false;
+            if (normalized.endsWith('go.mod')) return true;
+            return false;
+        });
+        setupGitStatusMock('M  main.go');
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('✅ goimports: Passed');
+        expect(result.output).toContain('✅ golangci-lint: Passed');
+        expect(result.output).toContain('✅ go build: Passed');
+    });
+
+    it('should fail if Go validation fails with relevant errors', async () => {
+        mockedFsExistsSync.mockImplementation((p) => p.endsWith('go.mod'));
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  main.go', stderr: '' });
+            } else if (cmd.includes('go build')) {
+                const err: any = new Error('Go build failed');
+                err.stdout = 'main.go:10:5: undefined: someFunc';
+                callback(err, { stdout: 'main.go:10:5: undefined: someFunc' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(false);
+        expect(result.output).toContain('❌ go build Errors (relevant to your changes):');
+        expect(result.output).toContain('main.go:10:5: undefined: someFunc');
+    });
+
+    it('should detect Go project from .go files when go.mod is missing', async () => {
+        mockedFsExistsSync.mockReturnValue(false);
+        setupGitStatusMock('M  main.go');
+
+        // Mock find command to detect .go files
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  main.go', stderr: '' });
+            } else if (cmd.includes('find') && cmd.includes('*.go')) {
+                callback(null, { stdout: './main.go\n', stderr: '' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('✅ goimports: Passed');
+        expect(result.output).toContain('✅ golangci-lint: Passed');
+        expect(result.output).toContain('✅ go build: Passed');
     });
 
     it('should fail if tool execution fails with relevant errors', async () => {

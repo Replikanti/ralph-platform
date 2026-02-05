@@ -1,6 +1,13 @@
 FROM node:22-bookworm
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+ENV GOPATH="/root/go"
 WORKDIR /app
+
+# Install Go toolchain
+RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
+    go install golang.org/x/tools/cmd/goimports@latest && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.56.2
 
 # Install Python & Deps & Node Tools & Trivy (Security)
 RUN apt-get update && \
