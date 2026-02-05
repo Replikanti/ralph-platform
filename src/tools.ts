@@ -454,15 +454,25 @@ export interface ValidationResult {
     relevantErrors: number;
 }
 
-export async function runPolyglotValidation(workDir: string): Promise<{ success: boolean, output: string }> {
+export async function runPolyglotValidation(workDir: string): Promise<ValidationResult> {
     let outputLog = "";
     let allSuccess = true;
+    const toolResults: Record<string, ToolResult> = {};
 
     const changedFiles = await getChangedFiles(workDir);
     if (changedFiles.length > 0) {
         console.log(`🔍 [Validation] Changed files: ${changedFiles.join(', ')}`);
     } else {
-        return { success: true, output: "⏩ Validation skipped: No files changed.\n" };
+        // Return early with detected languages even if no changes
+        const languages = await detectProjectLanguages(workDir);
+        return {
+            success: true,
+            output: "⏩ Validation skipped: No files changed.\n",
+            languages,
+            toolResults: {},
+            totalErrors: 0,
+            relevantErrors: 0
+        };
     }
 
     const nodeResult = await validateNode(workDir, changedFiles);
@@ -485,5 +495,15 @@ export async function runPolyglotValidation(workDir: string): Promise<{ success:
     allSuccess = allSuccess && securityResult.success;
     outputLog += securityResult.log;
 
-    return { success: allSuccess, output: outputLog };
+    // Detect project languages
+    const languages = await detectProjectLanguages(workDir);
+
+    return {
+        success: allSuccess,
+        output: outputLog,
+        languages,
+        toolResults, // TODO: Populate with actual tool results in future enhancement
+        totalErrors: 0, // TODO: Parse from output logs
+        relevantErrors: 0 // TODO: Parse from output logs
+    };
 }

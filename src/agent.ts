@@ -97,7 +97,7 @@ async function generatePRDescription(
     workDir: string,
     git: any,
     taskDescription: string,
-    validationResult: { success: boolean; output: string }
+    validationResult: { success: boolean; output: string; languages?: string[] }
 ): Promise<string> {
     try {
         // Get git diff stats between main and HEAD
