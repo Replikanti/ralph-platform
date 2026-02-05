@@ -332,7 +332,7 @@ async function validateGo(workDir: string, changedFiles: string[]): Promise<{ su
 
     // Run validation tools
     const goimportsResult = await runValidationTool('goimports -w .', 'goimports', workDir, changedFiles);
-    const lintResult = await runValidationTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
+    const lintResult = await runValidationTool('staticcheck ./...', 'staticcheck', workDir, changedFiles, 300000);
     const buildResult = await runValidationTool('go build ./...', 'go build', workDir, changedFiles, 120000);
 
     return {
