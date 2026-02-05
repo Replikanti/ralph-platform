@@ -414,7 +414,25 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     await executePhase(ctx.workDir, ctx.homeDir, plan);
     execSpan.end();
 
+    // Validation span with rich metadata for Langfuse
+    const validationSpan = ctx.trace.span({
+        name: "Validation",
+        metadata: { iteration }
+    });
+
     const check = await runPolyglotValidation(ctx.workDir);
+
+    validationSpan.end({
+        output: check.output,
+        metadata: {
+            success: check.success,
+            languages: check.languages,
+            toolResults: check.toolResults,
+            totalErrors: check.totalErrors,
+            relevantErrors: check.relevantErrors
+        }
+    });
+
     if (check.success) {
         console.log("✅ Validation passed!");
         await ctx.git.add('.');
