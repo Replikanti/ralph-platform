@@ -7,7 +7,7 @@ WORKDIR /app
 # Install Go, Terraform, Python, Node Tools, Trivy & Claude CLI
 RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
     go install golang.org/x/tools/cmd/goimports@latest && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.56.2 && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
     apt-get update && \
     apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip && \
     rm -rf /var/lib/apt/lists/* && \
