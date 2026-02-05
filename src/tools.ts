@@ -290,8 +290,8 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
     return { success, log: outputLog };
 }
 
-// Helper to run Go validation tool and handle errors
-async function runGoTool(
+// Helper to run validation tool and handle errors (used by Go, Terraform, etc.)
+async function runValidationTool(
     command: string,
     toolName: string,
     workDir: string,
@@ -331,30 +331,14 @@ async function validateGo(workDir: string, changedFiles: string[]): Promise<{ su
     }
 
     // Run validation tools
-    const goimportsResult = await runGoTool('goimports -w .', 'goimports', workDir, changedFiles);
-    const lintResult = await runGoTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
-    const buildResult = await runGoTool('go build ./...', 'go build', workDir, changedFiles, 120000);
+    const goimportsResult = await runValidationTool('goimports -w .', 'goimports', workDir, changedFiles);
+    const lintResult = await runValidationTool('golangci-lint run --fix --timeout 5m', 'golangci-lint', workDir, changedFiles, 300000);
+    const buildResult = await runValidationTool('go build ./...', 'go build', workDir, changedFiles, 120000);
 
     return {
         success: goimportsResult.success && lintResult.success && buildResult.success,
         log: goimportsResult.log + lintResult.log + buildResult.log
     };
-}
-
-// Helper to run Terraform validation tool and handle errors
-async function runTerraformTool(
-    command: string,
-    toolName: string,
-    workDir: string,
-    changedFiles: string[],
-    timeout?: number
-): Promise<{ success: boolean, log: string }> {
-    try {
-        await execAsync(command, { cwd: workDir, timeout });
-        return { success: true, log: `✅ ${toolName}: Passed\n` };
-    } catch (e: unknown) {
-        return handleToolError(e, toolName, changedFiles);
-    }
 }
 
 async function validateTerraform(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
@@ -382,9 +366,9 @@ async function validateTerraform(workDir: string, changedFiles: string[]): Promi
         .catch(() => console.warn("⚠️ terraform init failed, continuing with validation..."));
 
     // Run validation tools
-    const fmtResult = await runTerraformTool('terraform fmt -recursive', 'terraform fmt', workDir, changedFiles);
-    const validateResult = await runTerraformTool('terraform validate', 'terraform validate', workDir, changedFiles);
-    const lintResult = await runTerraformTool('tflint --recursive --fix', 'tflint', workDir, changedFiles, 120000);
+    const fmtResult = await runValidationTool('terraform fmt -recursive', 'terraform fmt', workDir, changedFiles);
+    const validateResult = await runValidationTool('terraform validate', 'terraform validate', workDir, changedFiles);
+    const lintResult = await runValidationTool('tflint --recursive --fix', 'tflint', workDir, changedFiles, 120000);
 
     return {
         success: fmtResult.success && validateResult.success && lintResult.success,
