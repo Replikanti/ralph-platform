@@ -77,6 +77,10 @@ describe('Agent Tools', () => {
         'go mod download',
         'goimports -w .',
         'golangci-lint run',
+        'terraform init',
+        'terraform fmt',
+        'terraform validate',
+        'tflint --recursive',
     ])('should allow safe whitelisted command: %s', async (cmd) => {
         mockedExec.mockImplementation(createMockExecCallback('ok', ''));
         const result = await runCommand(workDir, cmd);
@@ -169,6 +173,27 @@ describe('runPolyglotValidation', () => {
         expect(result.output).toContain('✅ goimports: Passed');
     });
 
+    it('should detect Terraform project from .tf files', async () => {
+        mockedFsExistsSync.mockReturnValue(false);
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  main.tf', stderr: '' });
+            } else if (cmd.includes('find') && cmd.includes('*.tf')) {
+                callback(null, { stdout: './main.tf\n', stderr: '' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('✅ terraform fmt: Passed');
+        expect(result.output).toContain('✅ terraform validate: Passed');
+        expect(result.output).toContain('✅ tflint: Passed');
+    });
+
     it.each([
         ['Biome', 'package.json', 'src/agent.ts', 'biome', 'src/agent.ts:10:5: Lint errors'],
         ['go build', 'go.mod', 'main.go', 'go build', 'main.go:10:5: undefined: someFunc'],
@@ -180,6 +205,30 @@ describe('runPolyglotValidation', () => {
         expect(result.success).toBe(false);
         expect(result.output).toContain(`❌ ${toolName} Errors (relevant to your changes):`);
         expect(result.output).toContain(errorMsg);
+    });
+
+    it('should fail if terraform validate fails with relevant errors', async () => {
+        mockedFsExistsSync.mockReturnValue(false);
+        mockedExec.mockImplementation((cmd, opts, cb) => {
+            const callback = typeof opts === 'function' ? opts : cb;
+            if (cmd.includes('git status')) {
+                callback(null, { stdout: 'M  main.tf', stderr: '' });
+            } else if (cmd.includes('find') && cmd.includes('*.tf')) {
+                callback(null, { stdout: './main.tf\n', stderr: '' });
+            } else if (cmd.includes('terraform validate')) {
+                const err: any = new Error('terraform validate failed');
+                err.stdout = 'main.tf:10:5: Invalid resource type';
+                callback(err, { stdout: 'main.tf:10:5: Invalid resource type' });
+            } else {
+                callback(null, { stdout: 'Success', stderr: '' });
+            }
+            return Promise.resolve({ stdout: 'Success', stderr: '' });
+        });
+
+        const result = await runPolyglotValidation('/mock/workspace');
+        expect(result.success).toBe(false);
+        expect(result.output).toContain('❌ terraform validate Errors (relevant to your changes):');
+        expect(result.output).toContain('main.tf:10:5: Invalid resource type');
     });
 
     it('should ignore unrelated errors', async () => {

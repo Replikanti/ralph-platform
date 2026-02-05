@@ -43,7 +43,7 @@ graph TB
         subgraph "Worker Execution Context"
             Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
             ClaudeCLI[Claude CLI<br/>Sonnet 4.5 / Haiku 4.5]
-            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, golangci-lint]
+            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, golangci-lint, terraform, tflint]
         end
     end
 
@@ -174,25 +174,29 @@ const SECURITY_GUARDRAILS = `
 - **TypeScript/JavaScript**: Biome + TSC
 - **Python**: Ruff + Mypy
 - **Go**: goimports + golangci-lint + go build
+- **Terraform**: terraform fmt + terraform validate + tflint
 - **Security**: Trivy (vulnerabilities, secrets, misconfigurations - supports all languages)
 
 **Validation Flow**:
-1. Detect project type (`package.json`, `pyproject.toml`, `go.mod`, etc.)
-2. Run formatters with auto-fix enabled
-3. Run linters with auto-fix enabled
-4. Run type checkers / compilers
-5. Run security scanners
-6. Return aggregated results
+1. Detect project type (`package.json`, `pyproject.toml`, `go.mod`, `*.tf`, etc.)
+2. Initialize infrastructure (e.g., `terraform init -backend=false` for Terraform)
+3. Run formatters with auto-fix enabled
+4. Run linters with auto-fix enabled
+5. Run type checkers / compilers / validators
+6. Run security scanners
+7. Return aggregated results
 
 **Failures**: Still push to GitHub with `wip:` prefix to preserve work
 
-**License Compliance**: All validation tools use permissive licenses (MIT/Apache/BSD):
+**License Compliance**: All validation tools use permissive licenses (MIT/Apache/BSD/MPL):
 - Biome: MIT
 - Ruff: MIT
 - Mypy: MIT
 - goimports: BSD-3-Clause
 - golangci-lint: GPL-3.0 (linter aggregator)
 - go toolchain: BSD-3-Clause
+- Terraform: MPL-2.0 (Mozilla Public License)
+- tflint: MPL-2.0
 - Trivy: Apache 2.0
 
 Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain license compatibility.

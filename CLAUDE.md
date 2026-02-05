@@ -38,7 +38,7 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 - **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
 - **Agent** (src/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
 - **Workspace** (src/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
-- **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, golangci-lint, go build, Trivy)
+- **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, golangci-lint, go build, terraform, tflint, Trivy)
 - **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
 - **Linear Client** (src/linear-client.ts): Integration for posting plans and updating issue states
 - **Linear Utils** (src/linear-utils.ts): Shared utilities including state synonym mapping
@@ -273,8 +273,9 @@ The `runCommand` tool implements defense-in-depth against command injection:
    - Version control: `git status`, `git log`, `git diff`, `git show`
    - File operations: `ls`, `cat`, `pwd`, `echo`
    - Testing: `pytest`, `python -m pytest`
-   - Linters: `ruff`, `mypy`, `golangci-lint`
+   - Linters: `ruff`, `mypy`, `golangci-lint`, `tflint`
    - Go tools: `go build`, `go test`, `go mod`, `go vet`, `go run`, `go fmt`, `gofmt`, `goimports`
+   - Terraform tools: `terraform init`, `terraform fmt`, `terraform validate`, `terraform plan`
 
 2. **Dangerous Pattern Blocking**: Commands containing these patterns are rejected:
    - Shell metacharacters: `;`, `&`, `|`, `` ` ``, `$()`, `$()`
@@ -296,6 +297,7 @@ The tools module (src/tools.ts) auto-detects project type and runs:
 - **TypeScript/JavaScript**: Biome (formatting/linting with auto-fix) + TSC (type checking)
 - **Python**: Ruff (linting + formatting with auto-fix) + Mypy (type checking with `--ignore-missing-imports`)
 - **Go**: goimports (formatting/imports with auto-fix) + golangci-lint (linting with partial auto-fix) + go build (compilation check)
+- **Terraform**: terraform fmt (formatting with auto-fix) + terraform validate (syntax validation) + tflint (linting with partial auto-fix)
 - **Security**: Trivy (vulnerability, secret, and misconfiguration scanning - supports Go, Python, JS/TS, Terraform)
 
 Validation failures still result in a push (with "wip:" prefix) to preserve work.

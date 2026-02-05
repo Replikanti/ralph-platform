@@ -8,7 +8,7 @@ Ralph automates the software development workflow by:
 - **Planning** with Claude Sonnet 4.5 (implementation plans with $0.50 budget limit)
 - **Coding** with Claude Sonnet 4.5 (code execution with $2.00 budget limit)
 - **Error Summarization** with Claude Haiku 4.5 (cost-efficient failure analysis with $0.10 budget)
-- **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, goimports, golangci-lint, Trivy)
+- **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, goimports, golangci-lint, terraform, tflint, Trivy)
 - **Iterating** based on human feedback and CI results
 
 ## ✨ Key Features
@@ -16,7 +16,7 @@ Ralph automates the software development workflow by:
 - **Human-in-the-Loop Planning** - Review and approve implementation plans before code execution
 - **PR Iteration Workflow** - Continuously improve PRs with CI/SonarQube feedback
 - **Multi-Repository Support** - Map Linear teams to different GitHub repositories
-- **Polyglot Validation** - Auto-detect and validate TypeScript, JavaScript, Python, and Go projects
+- **Polyglot Validation** - Auto-detect and validate TypeScript, JavaScript, Python, Go, and Terraform projects
 - **Cost-Optimized** - Budget limits per phase, Haiku for summaries, TOON format for token reduction
 - **Security-First** - Command allowlists, sandbox isolation, secret scanning
 - **Observable** - Full tracing with Langfuse
