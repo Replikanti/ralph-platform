@@ -172,6 +172,8 @@ describe('runPolyglotValidation', () => {
             expect(result.output).toContain(output);
         });
         expect(result.output).toContain('✅ Trivy: Secure');
+        expect(result.languages).toBeDefined();
+        expect(Array.isArray(result.languages)).toBe(true);
     });
 
     it.each([

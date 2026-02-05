@@ -143,6 +143,10 @@ describe('runAgent', () => {
         (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
             success: true,
             output: 'Validation Passed',
+            languages: [],
+            toolResults: {},
+            totalErrors: 0,
+            relevantErrors: 0,
         });
 
         // Default spawn behavior
@@ -256,6 +260,10 @@ describe('runAgent', () => {
         (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
             success: true,
             output: 'Validation Passed',
+            languages: [],
+            toolResults: {},
+            totalErrors: 0,
+            relevantErrors: 0,
         });
 
         mockIssueUpdate.mockClear();
