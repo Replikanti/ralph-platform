@@ -43,7 +43,7 @@ graph TB
         subgraph "Worker Execution Context"
             Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
             ClaudeCLI[Claude CLI<br/>Sonnet 4.5 / Haiku 4.5]
-            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy]
+            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, golangci-lint]
         end
     end
 
@@ -173,21 +173,26 @@ const SECURITY_GUARDRAILS = `
 **Auto-Detection**:
 - **TypeScript/JavaScript**: Biome + TSC
 - **Python**: Ruff + Mypy
-- **Security**: Trivy (vulnerabilities, secrets, misconfigurations - MIT license)
+- **Go**: goimports + golangci-lint + go build
+- **Security**: Trivy (vulnerabilities, secrets, misconfigurations - supports all languages)
 
 **Validation Flow**:
-1. Detect project type (`package.json`, `pyproject.toml`, etc.)
-2. Run linters with auto-fix enabled
-3. Run type checkers
-4. Run security scanners
-5. Return aggregated results
+1. Detect project type (`package.json`, `pyproject.toml`, `go.mod`, etc.)
+2. Run formatters with auto-fix enabled
+3. Run linters with auto-fix enabled
+4. Run type checkers / compilers
+5. Run security scanners
+6. Return aggregated results
 
 **Failures**: Still push to GitHub with `wip:` prefix to preserve work
 
-**License Compliance**: All validation tools use permissive licenses (MIT/Apache):
+**License Compliance**: All validation tools use permissive licenses (MIT/Apache/BSD):
 - Biome: MIT
 - Ruff: MIT
 - Mypy: MIT
+- goimports: BSD-3-Clause
+- golangci-lint: GPL-3.0 (linter aggregator)
+- go toolchain: BSD-3-Clause
 - Trivy: Apache 2.0
 
 Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain license compatibility.
