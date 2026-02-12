@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
+import { redactText } from "./security/redactor";
 
 const execAsync = promisify(exec);
 
@@ -51,7 +52,9 @@ export async function listFiles(workDir: string, dirPath: string = "."): Promise
 export async function readFile(workDir: string, filePath: string): Promise<string> {
     const fullPath = path.resolve(workDir, filePath);
     if (!fullPath.startsWith(workDir)) throw new Error("Access denied");
-    return await fsPromises.readFile(fullPath, "utf-8");
+    
+    const content = await fsPromises.readFile(fullPath, "utf-8");
+    return await redactText(content);
 }
 
 export async function writeFile(workDir: string, filePath: string, content: string): Promise<string> {
@@ -109,22 +112,30 @@ export async function runCommand(workDir: string, command: string): Promise<stri
             maxBuffer: 1024 * 1024 // 1MB max output
         });
 
-        // Sanitize output: limit length and remove potential secrets
-        const sanitize = (str: string): string => {
+        // Sanitize output: limit length, redact secrets
+        const sanitize = async (str: string): Promise<string> => {
             const maxLen = 5000;
-            return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+            const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+            return await redactText(truncated);
         };
 
-        return `STDOUT:\n${sanitize(stdout)}\n\nSTDERR:\n${sanitize(stderr)}`;
+        const safeStdout = await sanitize(stdout);
+        const safeStderr = await sanitize(stderr);
+
+        return `STDOUT:\n${safeStdout}\n\nSTDERR:\n${safeStderr}`;
     } catch (e: unknown) {
         const error = e as { stdout?: string, stderr?: string };
-        const sanitize = (str: string): string => {
+        const sanitize = async (str: string): Promise<string> => {
             if (!str) return '';
             const maxLen = 2000;
-            return str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+            const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+            return await redactText(truncated);
         };
 
-        return `ERROR: Command failed\n${sanitize(error.stdout || '')}\n${sanitize(error.stderr || '')}`;
+        const safeStdout = await sanitize(error.stdout || '');
+        const safeStderr = await sanitize(error.stderr || '');
+
+        return `ERROR: Command failed\n${safeStdout}\n${safeStderr}`;
     }
 }
 
