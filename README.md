@@ -21,6 +21,15 @@ Ralph automates the software development workflow by:
 - **Security-First** - Command allowlists, sandbox isolation, secret scanning
 - **Observable** - Full tracing with Langfuse
 
+## 🛡️ Infrastructure-Grade Safety
+
+Unlike toy agents, Ralph is built with infrastructure primitives for production environments:
+
+- **Atomic Locking** - Distributed locks via Redis (BullMQ) ensure no race conditions during long-running LLM tasks.
+- **Input Redaction** - Deterministic PII and Secret redaction middleware filters all I/O *before* it reaches the LLM.
+- **Ephemeral Workspaces** - Strict UUID-based directory isolation for every job.
+- **Command Allowlists** - Regex-based syscall filtering to prevent destructive operations.
+
 ## 🚀 Quick Start
 
 ### Local Development
