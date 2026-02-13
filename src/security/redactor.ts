@@ -41,7 +41,7 @@ class SecretRedactor extends CustomRedactor {
                 {
                     // Generic High Entropy Assignments (e.g., api_key = "abcdef12345...")
                     // Captures: 1=KeyName, 2=SecretValue, 3=Quote/End
-                    regexp: /((?:api|secret|token|key|password|passwd)[_.-]?(?:key|id|secret)?\s*[:=]\s*["']?)([a-zA-Z0-9\/+]{20,})([\s"'])/gi,
+                    regexp: /((?:api|secret|token|key|password|passwd)[_.-]?(?:key|id|secret)?\s*[:=]\s*["']?)([a-z0-9/+]{20,})([\s"'])/gi,
                     replacement: (_match: string, p1: string, _p2: string, p3: string) => `${p1}<SECRET_REDACTED>${p3}`
                 }
             ]
