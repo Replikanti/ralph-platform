@@ -441,6 +441,23 @@ sequenceDiagram
 
 ## Security Architecture
 
+### PII & Secret Redaction (Input Protection)
+
+To prevent sensitive data from leaking to the LLM (Anthropic), Ralph implements a middleware layer that sanitizes all file content and command outputs **before** they are sent to the AI model.
+
+**Mechanism**:
+- **Library**: `@redactpii/node` (MIT licensed)
+- **Scope**: Wraps `read_file` and `run_command` in `src/tools.ts`
+- **Detection**:
+    - **PII**: Emails, IP addresses, Credit Cards, SSN (via built-in rules)
+    - **Secrets**: AWS Keys, GitHub Tokens, Linear Keys, Private Keys, Generic API Keys (via Custom Redactors)
+
+**Flow**:
+```typescript
+File Read -> Redactor (Regex) -> Sanitized Content -> LLM Prompt
+Command Output -> Redactor (Regex) -> Sanitized Output -> LLM Prompt
+```
+
 ### Defense in Depth
 
 ```mermaid

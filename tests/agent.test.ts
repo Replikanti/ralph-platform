@@ -2,6 +2,14 @@ jest.mock('../src/workspace');
 jest.mock('../src/tools');
 jest.mock('../src/plan-store');
 
+// Mock @redactpii/node to avoid ESM issues in Jest
+jest.mock('@redactpii/node', () => ({
+    AsyncRedactor: jest.fn().mockImplementation(() => ({
+        redact: jest.fn().mockImplementation((text) => Promise.resolve(text))
+    })),
+    CustomRedactor: jest.fn().mockImplementation(() => ({}))
+}));
+
 // Mock RalphLinearClient
 const mockUpdateIssueState = jest.fn().mockResolvedValue(true);
 const mockPostComment = jest.fn().mockResolvedValue(undefined);
