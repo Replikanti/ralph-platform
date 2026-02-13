@@ -44,12 +44,16 @@ export const createWorker = () => {
 
     const worker = new Worker('ralph-tasks', jobProcessor, {
         connection,
-        concurrency: 1, // Only 1 job at a time to prevent resource exhaustion
+        // Atomic locking: Ensure a task is processed by only one worker at a time.
+        // This is a distributed lock managed by Redis (BullMQ built-in).
+        concurrency: 1, 
         limiter: {
             max: 10,
             duration: 60000
         },
-        lockDuration: 600000, // 10 minutes (default is 30s) - critical for long LLM tasks
+        // Infrastructure Safety: High lock duration with auto-renewal prevents 
+        // race conditions during long-running LLM planning/execution phases.
+        lockDuration: 600000, // 10 minutes (default is 30s)
         lockRenewTime: 30000, // Renew lock every 30s
     });
 
