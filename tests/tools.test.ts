@@ -5,6 +5,14 @@ import * as fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { createMockExecCallback } from './fixtures';
 
+// Mock @redactpii/node
+jest.mock('@redactpii/node', () => ({
+    AsyncRedactor: jest.fn().mockImplementation(() => ({
+        redact: jest.fn().mockImplementation((text) => Promise.resolve(text))
+    })),
+    CustomRedactor: jest.fn().mockImplementation(() => ({}))
+}));
+
 // Mock child_process and fs
 jest.mock('node:child_process');
 jest.mock('node:fs');
