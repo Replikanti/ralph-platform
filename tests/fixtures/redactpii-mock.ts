@@ -1,10 +1,11 @@
-
 // --- MOCKS FOR @redactpii/node ---
 export class AsyncRedactor {
-    constructor(config: any) {}
-    redact(text: string) { return Promise.resolve(text); }
+    async redact(text: string): Promise<string> {
+        return text;
+    }
 }
 
 export class CustomRedactor {
-    constructor(config: any) {}
+    // Mock base class for custom redactors
+    public readonly name: string = 'mock';
 }
