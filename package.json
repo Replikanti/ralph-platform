@@ -9,7 +9,6 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules npx jest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.0",
     "@bull-board/api": "^6.16.4",
     "@bull-board/express": "^6.16.4",
     "@linear/sdk": "^72.0.0",
