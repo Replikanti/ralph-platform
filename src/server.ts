@@ -432,7 +432,36 @@ app.get('/health', (_req, res) => {
 });
 
 if (require.main === module) {
-    app.listen(3000, () => console.log('🚀 API listening on 3000'));
+    const server = app.listen(3000, () => console.log('🚀 API listening on 3000'));
+
+    // Graceful Shutdown
+    const shutdown = async (signal: string) => {
+        console.log(`🛑 ${signal} received. Closing HTTP server...`);
+        
+        server.close(async () => {
+            console.log('HTTP server closed.');
+            
+            try {
+                console.log('Closing Redis connections...');
+                await ralphQueue.close();
+                await connection.quit(); // IORedis close
+                console.log('✅ Graceful shutdown completed.');
+                process.exit(0);
+            } catch (err) {
+                console.error('❌ Error during shutdown:', err);
+                process.exit(1);
+            }
+        });
+
+        // Force exit after 10s if connections hang
+        setTimeout(() => {
+            console.error('🛑 Forced shutdown after timeout');
+            process.exit(1);
+        }, 10000);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 export { app };
