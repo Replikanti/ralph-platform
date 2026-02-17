@@ -179,8 +179,8 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
             jobId,
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 },
-            removeOnComplete: { age: 3600 },
-            removeOnFail: { age: 86400 }
+            removeOnComplete: true, // Immediate cleanup to allow re-runs
+            removeOnFail: true // Immediate cleanup to allow re-runs after failure
         });
 
         console.log(`✅ [API] Successfully enqueued ${logContext.type} job ${jobId}`);
@@ -194,7 +194,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
 async function handlePlanApproval(issueId: string, storedPlan: any, res: express.Response): Promise<express.Response> {
     console.log(`✅ [API] Plan approved for issue ${issueId}`);
 
-    const jobId = `${issueId}-exec-${Date.now()}`;
+    const jobId = `${issueId}-exec`; // Deduplication: Fixed ID prevents concurrent executions
     const jobData = {
         ticketId: issueId,
         title: storedPlan.taskContext.title,
@@ -219,7 +219,7 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
 async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
     console.log(`💭 [API] Revision feedback received for issue ${issueId}`);
 
-    const jobId = `${issueId}-replan-${Date.now()}`;
+    const jobId = `${issueId}-replan`; // Deduplication
     const jobData = {
         ticketId: issueId,
         title: storedPlan.taskContext.title,
@@ -255,7 +255,7 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
-    const jobId = `${issueId}-iterate-${Date.now()}`;
+    const jobId = `${issueId}-iterate`; // Deduplication
     const jobData = {
         ticketId: issueId,
         title: issueTitle,
@@ -386,8 +386,8 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
                 type: 'exponential',
                 delay: 2000
             },
-            removeOnComplete: { age: 3600 },
-            removeOnFail: { age: 86400 }
+            removeOnComplete: true, // Immediate cleanup
+            removeOnFail: true // Immediate cleanup to allow re-runs
         });
         return res.status(200).send({ status: 'queued' });
     } catch (e) {
