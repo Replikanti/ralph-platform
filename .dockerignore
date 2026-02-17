@@ -1,0 +1,34 @@
+# Dependency directories
+node_modules
+.npm
+.claude-home
+
+# Environment variables (Secrets!)
+.env
+.env.*
+!.env.example
+
+# Git history
+.git
+.gitignore
+.github
+
+# Testing
+tests
+coverage
+jest.config.js
+
+# Build artifacts
+dist
+*.log
+
+# Infrastructure
+infra
+helm
+docker-compose.yaml
+Dockerfile
+.dockerignore
+
+# Documentation
+*.md
+docs
