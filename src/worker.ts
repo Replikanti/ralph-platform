@@ -81,6 +81,23 @@ export const createWorker = () => {
         }
     });
 
+    // Graceful Shutdown
+    const shutdown = async (signal: string) => {
+        console.log(`🛑 ${signal} received. Shutting down worker...`);
+        try {
+            await worker.close(); // Waits for active job to finish (or timeout)
+            await connection.quit();
+            console.log('✅ Worker shut down gracefully.');
+            process.exit(0);
+        } catch (err) {
+            console.error('❌ Error during worker shutdown:', err);
+            process.exit(1);
+        }
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+
     return worker;
 };
 
