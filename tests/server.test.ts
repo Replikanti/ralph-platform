@@ -97,6 +97,12 @@ async function sendCommentWebhookWithPlan(options: {
         .send(body);
 }
 
+function expectJobQueued(res: any, type: 'execution' | 'replanning') {
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(`${type}_queued`);
+    expect(res.body.jobId).toBe(type === 'execution' ? 'issue-123-exec' : 'issue-123-replan');
+}
+
 describe('POST /webhook', () => {
     it('should reject requests with missing signature', async () => {
         const res = await sendWebhookWithTestSecret({ type: 'Issue' }, { withSignature: false });
@@ -127,33 +133,19 @@ describe('POST /webhook', () => {
         expect(res.body).toEqual({ status: 'ignored', reason: 'no_ralph_label' });
     });
 
-    it('should queue task for valid Ralph issue with DEFAULT_REPO_URL', async () => {
-        process.env.DEFAULT_REPO_URL = 'https://github.com/test/repo';
+    it.each([
+        ['DEFAULT_REPO_URL', () => { process.env.DEFAULT_REPO_URL = 'https://github.com/test/repo'; return {}; }],
+        ['LINEAR_TEAM_REPOS', () => { 
+            process.env.LINEAR_TEAM_REPOS = JSON.stringify({ 'FRONT': 'https://github.com/org/frontend' });
+            return { team: { key: 'FRONT' }, identifier: 'FRONT-123' };
+        }]
+    ])('should queue task for valid Ralph issue via %s', async (_, setup) => {
+        const overrides = setup();
         const body = createIssueWebhook({
             id: '123',
             title: 'Fix bug',
-            description: 'Fix it now',
-            identifier: '1',
-            labels: [{ name: 'Ralph' }]
-        });
-        const res = await sendWebhookWithTestSecret(body);
-
-        expect(res.status).toBe(200);
-        expect(res.body).toEqual({ status: 'queued' });
-    });
-
-    it('should use team-specific repo from LINEAR_TEAM_REPOS', async () => {
-        process.env.LINEAR_TEAM_REPOS = JSON.stringify({
-            'FRONT': 'https://github.com/org/frontend',
-            'BACK': 'https://github.com/org/backend'
-        });
-        const body = createIssueWebhook({
-            id: '456',
-            title: 'Add feature',
-            description: 'New feature',
-            identifier: 'FRONT-123',
-            team: { key: 'FRONT' },
-            labels: [{ name: 'Ralph' }]
+            labels: [{ name: 'Ralph' }],
+            ...overrides
         });
         const res = await sendWebhookWithTestSecret(body);
 
@@ -209,9 +201,7 @@ describe('POST /webhook', () => {
                 commentBody: 'LGTM, let\'s proceed!'
             });
 
-            expect(res.status).toBe(200);
-            expect(res.body.status).toBe('execution_queued');
-            expect(res.body.jobId).toBe('issue-123-exec');
+            expectJobQueued(res, 'execution');
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
@@ -220,35 +210,22 @@ describe('POST /webhook', () => {
                 commentBody: 'Please add more error handling'
             });
 
-            expect(res.status).toBe(200);
-            expect(res.body.status).toBe('replanning_queued');
-            expect(res.body.jobId).toBe('issue-123-replan');
+            expectJobQueued(res, 'replanning');
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
-        it('should process comments with stored plan even if state is not plan-review', async () => {
+        it.each([
+            ['LGTM', 'plan-review'],
+            ['approved', 'plan-review'],
+            ['ship it', 'plan-review'],
+            ['LGTM', 'In Review']
+        ])('should handle approval comment "%s" in state "%s"', async (comment, state) => {
             const res = await sendCommentWebhookWithPlan({
-                commentBody: 'LGTM',
-                stateName: 'In Review' // Wrong state, but has stored plan
+                commentBody: comment,
+                stateName: state
             });
 
-            expect(res.status).toBe(200);
-            expect(res.body.status).toBe('execution_queued');
-            expect(res.body.jobId).toBe('issue-123-exec');
-        });
-
-        it('should recognize various approval phrases', async () => {
-            const approvalPhrases = ['lgtm', 'LGTM', 'approved', 'Proceed', 'ship it', 'Ship It!'];
-
-            for (const phrase of approvalPhrases) {
-                const res = await sendCommentWebhookWithPlan({
-                    commentBody: phrase
-                });
-
-                expect(res.status).toBe(200);
-                expect(res.body.status).toBe('execution_queued');
-                expect(res.body.jobId).toBe('issue-123-exec');
-            }
+            expectJobQueued(res, 'execution');
         });
 
         it('should ignore Ralph\'s own comments to prevent auto-execution', async () => {
