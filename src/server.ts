@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import morgan from 'morgan';
 import basicAuth from 'express-basic-auth';
+import helmet from 'helmet';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
@@ -14,6 +15,9 @@ import { LinearClient as RalphLinearClient } from './linear-client';
 
 dotenv.config();
 const app = express();
+
+// Security Headers
+app.use(helmet());
 
 // HTTP Request Logging
 app.use(morgan('combined'));
@@ -122,6 +126,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
 
 // Middleware to capture raw body for signature verification
 app.use(express.json({
+    limit: '10mb',
     verify: (req: any, _res: express.Response, buf: Buffer) => {
         req.rawBody = buf;
     }
