@@ -211,7 +211,7 @@ describe('POST /webhook', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.status).toBe('execution_queued');
-            expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
+            expect(res.body.jobId).toBe('issue-123-exec');
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
@@ -222,7 +222,7 @@ describe('POST /webhook', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.status).toBe('replanning_queued');
-            expect(res.body.jobId).toMatch(/^issue-123-replan-\d+$/);
+            expect(res.body.jobId).toBe('issue-123-replan');
             expect(getPlan).toHaveBeenCalledWith(expect.anything(), 'issue-123');
         });
 
@@ -234,7 +234,7 @@ describe('POST /webhook', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.status).toBe('execution_queued');
-            expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
+            expect(res.body.jobId).toBe('issue-123-exec');
         });
 
         it('should recognize various approval phrases', async () => {
@@ -247,7 +247,7 @@ describe('POST /webhook', () => {
 
                 expect(res.status).toBe(200);
                 expect(res.body.status).toBe('execution_queued');
-                expect(res.body.jobId).toMatch(/^issue-123-exec-\d+$/);
+                expect(res.body.jobId).toBe('issue-123-exec');
             }
         });
 

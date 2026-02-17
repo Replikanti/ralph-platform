@@ -180,7 +180,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 },
             removeOnComplete: true, // Immediate cleanup to allow re-runs
-            removeOnFail: { age: 86400 }
+            removeOnFail: true // Immediate cleanup to allow re-runs after failure
         });
 
         console.log(`✅ [API] Successfully enqueued ${logContext.type} job ${jobId}`);
@@ -387,7 +387,7 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
                 delay: 2000
             },
             removeOnComplete: true, // Immediate cleanup
-            removeOnFail: { age: 86400 }
+            removeOnFail: true // Immediate cleanup to allow re-runs
         });
         return res.status(200).send({ status: 'queued' });
     } catch (e) {
