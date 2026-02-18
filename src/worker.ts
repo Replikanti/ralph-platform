@@ -57,7 +57,16 @@ export const createWorker = () => {
         lockRenewTime: 30000, // Renew lock every 30s
     });
 
-    worker.on('completed', (job) => {        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
+    worker.on('completed', async (job) => {        
+        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
+
+        // Write Tombstone for execution jobs to prevent Reopen
+        if (job.data.mode === 'execute-only' || job.data.mode === 'full') {
+            const tombstoneKey = `ralph:tombstone:${job.data.ticketId}`;
+            // Set tombstone for 1 year (31536000 seconds)
+            await connection.set(tombstoneKey, 'true', 'EX', 31536000);
+            console.log(`🪦 [Worker] Tombstone set for ticket ${job.data.ticketId}`);
+        }
     });
 
     worker.on('failed', async (job, err) => {
