@@ -283,10 +283,17 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 }
 
 async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`📋 [API] Processing plan review comment for issue ${issueId}`);
+    console.log(`📋 [API] Processing plan review comment for issue ${issueId} (Current State: ${issueState})`);
+
+    const normalizedState = issueState.toLowerCase();
+    const isProcessing = normalizedState === 'in progress' || normalizedState === 'in review';
+
+    if (isApprovalComment(commentBody) && isProcessing) {
+        console.log(`ℹ️ [API] Ignoring approval comment for issue ${issueId} - already in active state: ${issueState}`);
+        return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
+    }
 
     // Move ticket back to "In Progress" when user provides feedback/approval
-    // This helps with filtering - Backlog = needs attention, In Progress = Ralph working
     const linearClient = new RalphLinearClient();
     await linearClient.updateIssueState(issueId, "In Progress");
     console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`);
