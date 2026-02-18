@@ -350,6 +350,13 @@ function shouldSkipIssueUpdate(action: string, statusName: string): boolean {
 }
 
 async function handleIssueWebhook(data: any, action: string, res: express.Response): Promise<express.Response> {
+    // Tombstone Check: Prevent Reopen
+    const tombstone = await connection.get(`ralph:tombstone:${data.id}`);
+    if (tombstone) {
+        console.log(`🪦 [API] Ignoring ticket ${data.identifier} (ID: ${data.id}) - Tombstone found (already processed).`);
+        return res.status(200).send({ status: 'ignored', reason: 'tombstone_present' });
+    }
+
     const labels = data.labels || [];
     const labelNames = labels.map((l: { name: string }) => l.name);
     const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
