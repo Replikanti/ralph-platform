@@ -27,6 +27,8 @@ Unlike toy agents, Ralph is built with infrastructure primitives for production 
 
 - **Atomic Locking** - Distributed locks via Redis (BullMQ) ensure no race conditions during long-running LLM tasks.
 - **Input Redaction** - Deterministic PII and Secret redaction middleware filters all I/O *before* it reaches the LLM.
+- **Immutable Workflows** - Redis-based "Tombstone" locks prevent zombie tasks and accidental re-processing of completed issues.
+- **Graceful Lifecycle** - Full SIGTERM/SIGINT handling ensures workers finish active jobs before shutdown, crucial for K8s stability.
 - **Ephemeral Workspaces** - Strict UUID-based directory isolation for every job.
 - **Command Allowlists** - Regex-based syscall filtering to prevent destructive operations.
 
