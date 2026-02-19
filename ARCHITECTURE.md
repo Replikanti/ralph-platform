@@ -458,6 +458,23 @@ File Read -> Redactor (Regex) -> Sanitized Content -> LLM Prompt
 Command Output -> Redactor (Regex) -> Sanitized Output -> LLM Prompt
 ```
 
+### Immutable Workflows (Tombstone Pattern)
+
+To ensure strict execution integrity, Ralph implements a **Tombstone Lock** mechanism. Once a ticket has been successfully processed (PR created), a permanent record is written to Redis.
+
+- **Mechanism**: `SET ralph:tombstone:{issueId} "true" EX 31536000`
+- **Impact**: Any subsequent webhooks for the same issue are immediately ignored. This prevents "Zombie Issues" or accidental re-triggering of expensive AI workflows on solved tasks.
+
+### Graceful Lifecycle Management
+
+Ralph is designed for zero-downtime deployments in Kubernetes. Both the API and Worker components implement advanced signal handling:
+
+- **SIGTERM/SIGINT Handling**: Upon receiving a termination signal, the services:
+    1. Stop accepting new HTTP requests or Queue jobs.
+    2. Wait for the active LLM execution to complete (graceful wait).
+    3. Close Redis and Queue connections cleanly.
+- **Benefit**: No "stuck" locks in Redis and zero corrupted git workspaces during cluster rolling updates.
+
 ### Defense in Depth
 
 ```mermaid
