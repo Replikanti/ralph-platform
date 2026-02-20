@@ -470,6 +470,12 @@ Ralph distinguishes between two types of failures, each with a different recover
     - Instead of retrying the entire job, Ralph captures the error output (e.g., TSC or Biome errors) and feeds it back to the LLM as context for the next iteration.
     - **Self-Correction**: The agent "reasons" about the failure and attempts to fix its own code within the same execution session.
 
+3.  **Rate Limit Backpressure (API 429)**:
+    - Managed by **Smart Delay** logic in the worker.
+    - If Claude API returns `429 Too Many Requests`, the job is not failed/retried immediately.
+    - Instead, it is moved to the **Delayed Queue** in Redis for 60 seconds.
+    - This creates a natural backpressure mechanism that throttles execution without burning retry attempts or losing tasks.
+
 #### Graceful Degradation (Human Handoff)
 
 If the agent remains stuck in a logic loop after 3 iterations:
