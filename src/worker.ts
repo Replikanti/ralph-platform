@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent, updateLinearIssue, Task } from './agent';
+import { runAgent, updateLinearIssue, Task, RateLimitError } from './agent';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -28,7 +28,16 @@ export const jobProcessor = async (job: Job) => {
         additionalFeedback: job.data.additionalFeedback
     };
 
-    await runAgent(taskData, redisConnection);
+    try {
+        await runAgent(taskData, redisConnection);
+    } catch (e: any) {
+        if (e.name === 'RateLimitError') {
+            console.warn(`⏳ [Worker] Rate Limit hit for job ${job.id}. Backing off for 60s...`);
+            await job.moveToDelayed(Date.now() + 60000, job.token);
+            return;
+        }
+        throw e; // Rethrow other errors to trigger standard retry
+    }
 };
 
 export const createWorker = () => {

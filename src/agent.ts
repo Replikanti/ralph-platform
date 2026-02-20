@@ -187,6 +187,13 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
     }
 }
 
+export class RateLimitError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'RateLimitError';
+    }
+}
+
 function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
@@ -240,6 +247,13 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
 
         child.on('close', (code: number) => {
             clearTimeout(timeout);
+            
+            // Detect Rate Limits in stderr
+            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
+                reject(new RateLimitError("Anthropic Rate Limit Exceeded"));
+                return;
+            }
+
             if (code === 0) {
                 resolve({ stdout, stderr });
             } else {
