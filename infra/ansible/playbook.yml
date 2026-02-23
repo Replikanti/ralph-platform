@@ -1,0 +1,93 @@
+---
+- name: Deploy Ralph Platform to VPS
+  hosts: ralph_servers
+  become: true
+  vars_files:
+    - vars.yml
+
+  tasks:
+    # 1. System Setup
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      apt:
+        name:
+          - git
+          - curl
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+
+    # 2. Docker Installation
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+        state: present
+
+    - name: Install Docker and Docker Compose
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # 3. Application Deployment
+    - name: Create deployment directory
+      file:
+        path: "{{ deploy_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Clone/Pull Repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ deploy_dir }}"
+        version: main
+        force: yes
+
+    - name: Copy .env file (Secrets)
+      copy:
+        src: "{{ env_file_src }}"
+        dest: "{{ deploy_dir }}/.env"
+        mode: '0600'
+      # In production, consider using Ansible Vault or Doppler here
+
+    - name: Build Docker images
+      command: docker compose build
+      args:
+        chdir: "{{ deploy_dir }}"
+
+    - name: Start services (Rolling Update)
+      command: docker compose up -d --scale worker={{ worker_replicas }} --remove-orphans
+      args:
+        chdir: "{{ deploy_dir }}"
+
+    - name: Prune unused Docker images
+      command: docker system prune -f
+      
+    # 4. Maintenance (Garbage Collection)
+    - name: Setup Cron Job for Workspace Cleanup
+      cron:
+        name: "Cleanup Ralph Workspaces"
+        minute: "0"
+        job: "find /var/ralph/workspaces -mindepth 1 -maxdepth 1 -type d -mmin +120 -exec rm -rf {} +"
+        state: present
