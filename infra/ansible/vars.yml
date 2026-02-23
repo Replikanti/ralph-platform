@@ -1,0 +1,5 @@
+app_name: ralph-platform
+repo_url: https://github.com/Replikanti/ralph-platform.git
+deploy_dir: /opt/ralph
+env_file_src: ../../.env.production # Local path to env file
+worker_replicas: 2
