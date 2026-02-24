@@ -6,8 +6,10 @@
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
   "include": ["src/**/*"],
-  "exclude": ["src/mcp-toonify.ts"]
+  "exclude": ["src/mcp-toonify.ts", "src/server.ts", "src/worker.ts", "src/agent.ts"]
 }
