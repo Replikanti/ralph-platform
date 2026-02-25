@@ -6,7 +6,7 @@ import { REDIS_URL } from "../config/env";
 @Service()
 export class RedisProvider implements OnInit, OnDestroy {
     private _connection: IORedis | null = null;
-    private logger = new Logger("RedisProvider");
+    private readonly logger = new Logger("RedisProvider");
 
     get connection(): IORedis {
         if (!this._connection) {

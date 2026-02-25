@@ -132,6 +132,13 @@ app.use(express.json({
     }
 }));
 
+// Sanitizer for logging user-controlled data
+function sanitizeLog(data: any): string {
+    if (data === null || data === undefined) return '';
+    const str = typeof data === 'string' ? data : String(data);
+    return str.replace(/[\r\n\t]/g, ' ').substring(0, 150);
+}
+
 function verifyLinearSignature(req: any): boolean {
     const secret = process.env.LINEAR_WEBHOOK_SECRET;
     if (!secret) {
@@ -178,7 +185,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
     try {
         console.log(`📥 [API] Adding ${logContext.type} job to queue:`);
         console.log(`   Job ID: ${jobId}`);
-        logContext.details.forEach(detail => console.log(`   ${detail}`));
+        logContext.details.forEach(detail => console.log(`   ${sanitizeLog(detail)}`));
 
         await ralphQueue.add('coding-task', jobData, {
             jobId,
@@ -188,7 +195,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
             removeOnFail: true // Immediate cleanup to allow re-runs after failure
         });
 
-        console.log(`✅ [API] Successfully enqueued ${logContext.type} job ${jobId}`);
+        console.log(`✅ [API] Successfully enqueued ${sanitizeLog(logContext.type)} job ${sanitizeLog(jobId)}`);
         return res.status(200).send({ status: `${logContext.type}_queued`, jobId });
     } catch (e) {
         console.error(`❌ [API] Failed to enqueue ${logContext.type} job:`, e);
@@ -197,7 +204,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
 }
 
 async function handlePlanApproval(issueId: string, storedPlan: any, res: express.Response): Promise<express.Response> {
-    console.log(`✅ [API] Plan approved for issue ${issueId}`);
+    console.log(`✅ [API] Plan approved for issue ${sanitizeLog(issueId)}`);
 
     const jobId = `${issueId}-exec`; // Deduplication: Fixed ID prevents concurrent executions
     const jobData = {
@@ -216,13 +223,13 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
         jobData,
         logContext: {
             type: 'execution',
-            details: [`Repo: ${jobData.repoUrl}`, `Branch: ${jobData.branchName}`]
+            details: [`Repo: ${sanitizeLog(jobData.repoUrl)}`, `Branch: ${sanitizeLog(jobData.branchName)}`]
         }
     }, res);
 }
 
 async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`💭 [API] Revision feedback received for issue ${issueId}`);
+    console.log(`💭 [API] Revision feedback received for issue ${sanitizeLog(issueId)}`);
 
     const jobId = `${issueId}-replan`; // Deduplication
     const jobData = {
@@ -283,20 +290,20 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 }
 
 async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`📋 [API] Processing plan review comment for issue ${issueId} (Current State: ${issueState})`);
+    console.log(`📋 [API] Processing plan review comment for issue ${sanitizeLog(issueId)} (Current State: ${sanitizeLog(issueState)})`);
 
     const normalizedState = issueState.toLowerCase();
     const isProcessing = normalizedState === 'in progress' || normalizedState === 'in review';
 
     if (isApprovalComment(commentBody) && isProcessing) {
-        console.log(`ℹ️ [API] Ignoring approval comment for issue ${issueId} - already in active state: ${issueState}`);
+        console.log(`ℹ️ [API] Ignoring approval comment for issue ${sanitizeLog(issueId)} - already in active state: ${sanitizeLog(issueState)}`);
         return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
     }
 
     // Move ticket back to "In Progress" when user provides feedback/approval
     const linearClient = new RalphLinearClient();
     await linearClient.updateIssueState(issueId, "In Progress");
-    console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`);
+    console.log(`📊 [API] Moved issue ${sanitizeLog(issueId)} back to In Progress (user responded)`);
 
     if (isApprovalComment(commentBody)) {
         return handlePlanApproval(issueId, storedPlan, res);
@@ -311,10 +318,10 @@ async function handleCommentWebhook(data: any, res: express.Response): Promise<e
     const commentAuthor = data.user?.name || data.user?.displayName || '';
 
     console.log(`💬 [API] Comment received:`);
-    console.log(`   Issue ID: ${issue?.id}`);
-    console.log(`   Issue State: "${issueState}"`);
-    console.log(`   Comment Author: "${commentAuthor}"`);
-    console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
+    console.log(`   Issue ID: ${sanitizeLog(issue?.id)}`);
+    console.log(`   Issue State: "${sanitizeLog(issueState)}"`);
+    console.log(`   Comment Author: "${sanitizeLog(commentAuthor)}"`);
+    console.log(`   Comment Body: "${sanitizeLog(commentBody.substring(0, 100))}..."`);
 
     const issueId = issue?.id;
     if (!issueId) {
@@ -360,7 +367,7 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     // Tombstone Check: Prevent Reopen
     const tombstone = await connection.get(`ralph:tombstone:${data.id}`);
     if (tombstone) {
-        console.log(`🪦 [API] Ignoring ticket ${data.identifier} (ID: ${data.id}) - Tombstone found (already processed).`);
+        console.log(`🪦 [API] Ignoring ticket ${sanitizeLog(data.identifier)} (ID: ${sanitizeLog(data.id)}) - Tombstone found (already processed).`);
         return res.status(200).send({ status: 'ignored', reason: 'tombstone_present' });
     }
 
@@ -369,15 +376,15 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
 
     if (!hasRalphLabel) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`);
+        console.log(`ℹ️ [API] Skipping ticket ${sanitizeLog(data.identifier)} - Ralph label not present. Current labels: ${sanitizeLog(labelNames.join(', '))}`);
         return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
     }
 
     const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
-    console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
+    console.log(`📊 [API] Ticket ${sanitizeLog(data.identifier)} current state: "${sanitizeLog(statusName)}" (ID: ${sanitizeLog(data.stateId)})`);
 
     if (shouldSkipIssueUpdate(action, statusName)) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
+        console.log(`ℹ️ [API] Skipping ticket ${sanitizeLog(data.identifier)} - Already in active/terminal state: ${sanitizeLog(statusName)}`);
         return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
     }
 
@@ -385,11 +392,11 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     const repoUrl = await getRepoForTeam(teamKey);
 
     if (!repoUrl) {
-        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
+        console.warn(`⚠️ [API] No repository configured for team "${sanitizeLog(teamKey || 'unknown')}". Skipping issue: ${sanitizeLog(data.title)}`);
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
-    console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
+    console.log(`📥 [API] Enqueueing Ticket: ${sanitizeLog(data.title)} (team: ${sanitizeLog(teamKey || 'default')}, repo: ${sanitizeLog(repoUrl)})`);
 
     try {
         await ralphQueue.add('coding-task', {
@@ -415,30 +422,33 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     }
 }
 
-app.post('/webhook', async (req: express.Request, res: express.Response) => {
+app.post('/webhook', async (req: express.Request, res: express.Response): Promise<void> => {
     if (!verifyLinearSignature(req)) {
-        console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
-        return res.status(401).send('Invalid signature');
+        console.warn(`⚠️ [API] Invalid webhook signature from ${sanitizeLog(req.ip)}`);
+        res.status(401).send('Invalid signature');
+        return;
     }
 
     const { action, data, type } = req.body;
 
-    console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
+    console.log(`🔍 [API] Webhook received: Type=${sanitizeLog(type)}, Action=${sanitizeLog(action)}, ID=${sanitizeLog(data?.id)}`);
     if (data?.labels) {
-        console.log(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`);
+        console.log(`🏷️ [API] Labels: ${sanitizeLog(data.labels.map((l: { name: string }) => l.name).join(', '))}`);
     } else {
         console.log(`🏷️ [API] No labels in payload.`);
     }
 
     if (type === 'Comment' && action === 'create') {
-        return handleCommentWebhook(data, res);
+        await handleCommentWebhook(data, res);
+        return;
     }
 
     if (type === 'Issue' && (action === 'create' || action === 'update')) {
-        return handleIssueWebhook(data, action, res);
+        await handleIssueWebhook(data, action, res);
+        return;
     }
 
-    return res.status(200).send({ status: 'ignored' });
+    res.status(200).send({ status: 'ignored' });
 });
 
 app.get('/health', (_req, res) => {

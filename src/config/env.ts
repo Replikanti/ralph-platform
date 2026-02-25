@@ -16,7 +16,7 @@ export const LINEAR_API_KEY = process.env.LINEAR_API_KEY || "";
 
 // --- Plan Review ---
 export const PLAN_REVIEW_ENABLED = process.env.PLAN_REVIEW_ENABLED !== "false";
-export const PLAN_TTL_DAYS = parseInt(process.env.PLAN_TTL_DAYS || "7", 10);
+export const PLAN_TTL_DAYS = Number.parseInt(process.env.PLAN_TTL_DAYS || "7", 10);
 
 // --- Repository Config ---
 export const REPO_CONFIG_PATH = process.env.REPO_CONFIG_PATH || "/etc/ralph/config/repos.json";
