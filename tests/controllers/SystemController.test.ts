@@ -1,27 +1,10 @@
 // Mock Ts.ED decorators before imports
-jest.mock('@tsed/common', () => ({
-    Controller: () => (target: any) => target,
-    Service: () => (target: any) => target,
-    Get: () => (target: any, propertyKey: string, descriptor: PropertyDescriptor) => descriptor,
-    Post: () => (target: any, propertyKey: string, descriptor: PropertyDescriptor) => descriptor,
-    Res: () => (target: any, propertyKey: string, index: number) => {},
-    BodyParams: () => (target: any, propertyKey: string, index: number) => {},
-    HeaderParams: () => (target: any, propertyKey: string, index: number) => {},
-    Inject: () => (target: any, propertyKey: string) => {},
-    OnInit: jest.fn(),
-    OnDestroy: jest.fn(),
-    PlatformApplication: jest.fn(),
-    Configuration: () => (target: any) => target,
-}));
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+import { TEST_CREDENTIALS } from '../test-utils/constants';
 
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
+const mocks = mockTsEdDecorators();
+jest.mock('@tsed/common', () => mocks['@tsed/common']);
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
 
 // Mock BullBoard modules
 jest.mock('@bull-board/api', () => ({
@@ -52,8 +35,8 @@ describe("SystemController", () => {
 
     beforeAll(() => {
         // Set admin credentials
-        process.env.ADMIN_USER = "admin";
-        process.env.ADMIN_PASS = "password";
+        process.env.ADMIN_USER = TEST_CREDENTIALS.ADMIN_USER;
+        process.env.ADMIN_PASS = TEST_CREDENTIALS.ADMIN_PASSWORD;
 
         // Mock QueueService
         mockQueue = {
@@ -76,7 +59,7 @@ describe("SystemController", () => {
         app.use(
             "/admin/queues",
             basicAuth({
-                users: { admin: "password" },
+                users: { [TEST_CREDENTIALS.ADMIN_USER]: TEST_CREDENTIALS.ADMIN_PASSWORD },
                 challenge: true,
             }),
             (req, res) => res.status(200).send("OK")
@@ -110,7 +93,7 @@ describe("SystemController", () => {
         it("should allow access with valid credentials", async () => {
             const res = await request
                 .get("/admin/queues")
-                .auth("admin", "password");
+                .auth(TEST_CREDENTIALS.ADMIN_USER, TEST_CREDENTIALS.ADMIN_PASSWORD);
 
             // BullBoard returns its own response, we just check auth worked
             // (status might be 200 or 404 depending on BullBoard setup)
@@ -121,8 +104,8 @@ describe("SystemController", () => {
     describe("$onInit and setupBullBoard", () => {
         beforeEach(() => {
             // Ensure env vars are set
-            process.env.ADMIN_USER = "admin";
-            process.env.ADMIN_PASS = "password";
+            process.env.ADMIN_USER = TEST_CREDENTIALS.ADMIN_USER;
+            process.env.ADMIN_PASS = TEST_CREDENTIALS.ADMIN_PASSWORD;
         });
 
         it("should call setupBullBoard when initialized", () => {
@@ -162,7 +145,7 @@ describe("SystemController", () => {
             expect(mockApp.use).not.toHaveBeenCalled();
 
             // Restore
-            process.env.ADMIN_USER = "admin";
+            process.env.ADMIN_USER = TEST_CREDENTIALS.ADMIN_USER;
         });
 
         it("should skip dashboard setup when ADMIN_PASS not set", () => {
@@ -184,7 +167,7 @@ describe("SystemController", () => {
             expect(mockApp.use).not.toHaveBeenCalled();
 
             // Restore
-            process.env.ADMIN_PASS = "password";
+            process.env.ADMIN_PASS = TEST_CREDENTIALS.ADMIN_PASSWORD;
         });
     });
 });
