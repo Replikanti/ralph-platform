@@ -1,4 +1,5 @@
-// Mock @redactpii/node
+// Mock @redactpii/node with controllable behavior
+const mockRedact = jest.fn();
 jest.mock('@redactpii/node', () => {
     class CustomRedactor {
         constructor(public config: any) {}
@@ -10,7 +11,7 @@ jest.mock('@redactpii/node', () => {
     return {
         AsyncRedactor: jest.fn().mockImplementation((config) => {
             return {
-                redact: jest.fn().mockImplementation(async (text: string) => {
+                redact: mockRedact.mockImplementation(async (text: string) => {
                     // Simulate redaction for testing coverage
                     let result = text;
 
@@ -34,6 +35,11 @@ jest.mock('@redactpii/node', () => {
 import { redactText } from '../../src/domain/PiiRedactor';
 
 describe('PiiRedactor', () => {
+    beforeEach(() => {
+        mockRedact.mockClear();
+        mockRedact.mockImplementation(async (text: string) => text);
+    });
+
     describe('redactText', () => {
         it('should return empty string for empty input', async () => {
             const result = await redactText('');
@@ -53,6 +59,24 @@ describe('PiiRedactor', () => {
             const result = await redactText(text);
             // Verify redaction was called (mock will apply replacements)
             expect(result).toBeDefined();
+        });
+
+        it('should handle redaction failures gracefully', async () => {
+            const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+            // Make the mock throw an error
+            mockRedact.mockRejectedValueOnce(new Error('Redaction error'));
+
+            const text = 'some text';
+            const result = await redactText(text);
+
+            // Should return original text on error (fail-open)
+            expect(result).toBe(text);
+            expect(consoleWarnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('Redaction failed'),
+                expect.any(Error)
+            );
+
+            consoleWarnSpy.mockRestore();
         });
     });
 });

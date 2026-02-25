@@ -134,6 +134,15 @@ describe('PlanStoreService', () => {
             const savedPlan = JSON.parse(setCall[1]);
             expect(savedPlan.status).toBe('approved');
         });
+
+        it('should handle plan not found gracefully', async () => {
+            mockRedis.connection.get.mockResolvedValue(null);
+
+            await service.updatePlanStatus('nonexistent', 'approved');
+
+            // Should not attempt to save
+            expect(mockRedis.connection.set).not.toHaveBeenCalled();
+        });
     });
 
     describe('appendFeedback', () => {
@@ -163,6 +172,15 @@ describe('PlanStoreService', () => {
             const savedPlan = JSON.parse(setCall[1]);
             expect(savedPlan.feedbackHistory).toEqual(['First feedback', 'Second feedback']);
             expect(savedPlan.status).toBe('needs-revision');
+        });
+
+        it('should handle plan not found gracefully', async () => {
+            mockRedis.connection.get.mockResolvedValue(null);
+
+            await service.appendFeedback('nonexistent', 'Feedback');
+
+            // Should not attempt to save
+            expect(mockRedis.connection.set).not.toHaveBeenCalled();
         });
     });
 

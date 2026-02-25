@@ -23,6 +23,22 @@ jest.mock('@tsed/logger', () => ({
     })),
 }));
 
+// Mock BullBoard modules
+jest.mock('@bull-board/api', () => ({
+    createBullBoard: jest.fn().mockReturnValue({}),
+}));
+
+jest.mock('@bull-board/api/bullMQAdapter', () => ({
+    BullMQAdapter: jest.fn().mockImplementation(() => ({})),
+}));
+
+jest.mock('@bull-board/express', () => ({
+    ExpressAdapter: jest.fn().mockImplementation(() => ({
+        setBasePath: jest.fn(),
+        getRouter: jest.fn().mockReturnValue(jest.fn()),
+    })),
+}));
+
 import express, { Express } from "express";
 import SuperTest from "supertest";
 import { SystemController } from "../../src/controllers/SystemController";
@@ -99,6 +115,76 @@ describe("SystemController", () => {
             // BullBoard returns its own response, we just check auth worked
             // (status might be 200 or 404 depending on BullBoard setup)
             expect(res.status).not.toBe(401);
+        });
+    });
+
+    describe("$onInit and setupBullBoard", () => {
+        beforeEach(() => {
+            // Ensure env vars are set
+            process.env.ADMIN_USER = "admin";
+            process.env.ADMIN_PASS = "password";
+        });
+
+        it("should call setupBullBoard when initialized", () => {
+            // Need to reload the module to pick up env vars
+            jest.resetModules();
+            const { SystemController: ReloadedController } = require("../../src/controllers/SystemController");
+
+            const mockApp = {
+                use: jest.fn(),
+            };
+            const controller = new ReloadedController();
+            (controller as any).queue = mockQueue;
+            (controller as any).app = mockApp;
+
+            controller.$onInit();
+
+            // Verify setupBullBoard was called (app.use should be called)
+            expect(mockApp.use).toHaveBeenCalled();
+        });
+
+        it("should skip dashboard setup when ADMIN_USER not set", () => {
+            delete process.env.ADMIN_USER;
+
+            jest.resetModules();
+            const { SystemController: ReloadedController } = require("../../src/controllers/SystemController");
+
+            const mockApp = {
+                use: jest.fn(),
+            };
+            const controller = new ReloadedController();
+            (controller as any).queue = mockQueue;
+            (controller as any).app = mockApp;
+
+            controller.$onInit();
+
+            // App.use should not be called when credentials missing
+            expect(mockApp.use).not.toHaveBeenCalled();
+
+            // Restore
+            process.env.ADMIN_USER = "admin";
+        });
+
+        it("should skip dashboard setup when ADMIN_PASS not set", () => {
+            delete process.env.ADMIN_PASS;
+
+            jest.resetModules();
+            const { SystemController: ReloadedController } = require("../../src/controllers/SystemController");
+
+            const mockApp = {
+                use: jest.fn(),
+            };
+            const controller = new ReloadedController();
+            (controller as any).queue = mockQueue;
+            (controller as any).app = mockApp;
+
+            controller.$onInit();
+
+            // App.use should not be called when credentials missing
+            expect(mockApp.use).not.toHaveBeenCalled();
+
+            // Restore
+            process.env.ADMIN_PASS = "password";
         });
     });
 });

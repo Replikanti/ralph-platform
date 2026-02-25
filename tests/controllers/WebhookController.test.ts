@@ -327,4 +327,98 @@ describe("WebhookController", () => {
             expect(mockQueue.enqueueIteration).toHaveBeenCalled();
         });
     });
+
+    // --- Error Path Tests ---
+
+    describe("Error Handling", () => {
+        it("should handle queue failure in handleIssue", async () => {
+            mockQueue.enqueueIssue.mockRejectedValueOnce(new Error("Queue error"));
+            const body = createIssueWebhook({
+                labels: [{ name: "Ralph" }],
+            });
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: "queue_failed" });
+        });
+
+        it("should handle missing issueId in comment webhook", async () => {
+            // Create payload with missing issue.id
+            const body = {
+                type: "Comment",
+                action: "create",
+                data: {
+                    body: "Test comment",
+                    user: { name: "Test User" },
+                    issue: {
+                        // No id field
+                        state: { name: "Todo" },
+                    },
+                },
+            };
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(400);
+            expect(res.body).toEqual({ error: "missing_issue_id" });
+        });
+
+        it("should handle queue failure in handlePlanApproval", async () => {
+            mockPlanStore.getPlan.mockResolvedValueOnce(createMockStoredPlan());
+            mockQueue.enqueueExecution.mockRejectedValueOnce(new Error("Queue error"));
+            const body = createCommentWebhook({
+                body: "LGTM",
+                issue: {
+                    id: "issue-123",
+                    state: { name: "Todo" },
+                },
+            });
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: "queue_failed" });
+        });
+
+        it("should handle queue failure in handlePlanRevision", async () => {
+            mockPlanStore.getPlan.mockResolvedValueOnce(createMockStoredPlan());
+            mockQueue.enqueueReplanning.mockRejectedValueOnce(new Error("Queue error"));
+            const body = createCommentWebhook({
+                body: "Please change the approach",
+                issue: {
+                    id: "issue-123",
+                    state: { name: "Todo" },
+                },
+            });
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: "queue_failed" });
+        });
+
+        it("should handle missing repo config in handleIterationRequest", async () => {
+            mockConfig.getRepoForTeam.mockResolvedValueOnce(null); // No repo configured
+            const body = createCommentWebhook({
+                body: "Please fix",
+                issue: {
+                    id: "issue-456",
+                    state: { name: "In Review" },
+                    team: { key: "UNKNOWN" },
+                },
+            });
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ status: "ignored", reason: "no_repo_configured" });
+        });
+
+        it("should handle queue failure in handleIterationRequest", async () => {
+            mockQueue.enqueueIteration.mockRejectedValueOnce(new Error("Queue error"));
+            const body = createCommentWebhook({
+                body: "Please fix",
+                issue: {
+                    id: "issue-456",
+                    identifier: "TEST-456",
+                    state: { name: "In Review" },
+                    team: { key: "FRONT" },
+                },
+            });
+            const res = await sendWebhook(body);
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: "queue_failed" });
+        });
+    });
 });
