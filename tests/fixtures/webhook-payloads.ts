@@ -8,13 +8,20 @@ export interface IssueWebhookOptions {
     identifier?: string;
     labels?: { name: string }[];
     team?: { key: string };
+    action?: string;
+    state?: { name: string; label?: string };
 }
 
 export interface CommentWebhookOptions {
     body: string;
-    issue: {
+    user?: { name?: string; displayName?: string };
+    issue?: {
         id: string;
+        identifier?: string;
+        title?: string;
+        description?: string;
         state: { name: string };
+        team?: { key: string };
     };
 }
 
@@ -24,7 +31,7 @@ export interface CommentWebhookOptions {
 export function createIssueWebhook(data: IssueWebhookOptions = {}): any {
     return {
         type: 'Issue',
-        action: 'create',
+        action: data.action || 'create',
         data: {
             id: data.id || '123',
             title: data.title || 'Default title',
@@ -32,6 +39,7 @@ export function createIssueWebhook(data: IssueWebhookOptions = {}): any {
             identifier: data.identifier || 'TEST-1',
             labels: data.labels || [],
             team: data.team,
+            state: data.state,
         }
     };
 }
