@@ -53,11 +53,20 @@ export function createValidationResult(success: boolean, output: string = '') {
 /**
  * Creates mock git diff summary
  */
-export function createGitDiffSummary(files: string[]) {
+export function createGitDiffSummary(files: string[], insertions = 0, deletions = 0) {
     return {
         files: files.map(f => ({ file: f })),
-        insertions: files.length * 10,
-        deletions: files.length * 5,
+        insertions: insertions || files.length * 10,
+        deletions: deletions || files.length * 5,
         changed: files.length,
+    };
+}
+
+/**
+ * Creates mock git instance for GitHubService tests
+ */
+export function createMockGit() {
+    return {
+        diffSummary: jest.fn(),
     };
 }

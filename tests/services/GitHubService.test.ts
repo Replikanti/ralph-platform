@@ -176,85 +176,29 @@ describe('GitHubService', () => {
             expect(result).toContain('**Test files:** 2 modified/added');
         });
 
-        it('should parse Biome validation results', async () => {
-            mockGit.diffSummary.mockResolvedValueOnce({
-                files: [],
-                insertions: 0,
-                deletions: 0,
+        describe('validation parsing', () => {
+            test.each([
+                ['Biome', '✓ Biome checks passed', '✅ Biome'],
+                ['TSC', 'TSC: 0 errors', '✅ TSC'],
+                ['Ruff', 'Ruff: pass', '✅ Ruff'],
+                ['Mypy', 'Mypy: Success: no issues', '✅ Mypy'],
+                ['Trivy', 'Trivy: 0 vulnerabilities found', '✅ Trivy'],
+            ])('should parse %s validation', async (tool, output, expected) => {
+                mockGit.diffSummary.mockResolvedValueOnce({
+                    files: [],
+                    insertions: 0,
+                    deletions: 0,
+                });
+
+                const result = await service.generatePRDescription(
+                    mockGit,
+                    'Task',
+                    { success: true, output }
+                );
+
+                expect(result).toContain('## Validation');
+                expect(result).toContain(expected);
             });
-
-            const result = await service.generatePRDescription(
-                mockGit,
-                'Task',
-                { success: true, output: '✓ Biome checks passed' }
-            );
-
-            expect(result).toContain('## Validation');
-            expect(result).toContain('✅ Biome');
-        });
-
-        it('should parse TSC validation results', async () => {
-            mockGit.diffSummary.mockResolvedValueOnce({
-                files: [],
-                insertions: 0,
-                deletions: 0,
-            });
-
-            const result = await service.generatePRDescription(
-                mockGit,
-                'Task',
-                { success: true, output: 'TSC: 0 errors' }
-            );
-
-            expect(result).toContain('✅ TSC');
-        });
-
-        it('should parse Ruff validation results', async () => {
-            mockGit.diffSummary.mockResolvedValueOnce({
-                files: [],
-                insertions: 0,
-                deletions: 0,
-            });
-
-            const result = await service.generatePRDescription(
-                mockGit,
-                'Task',
-                { success: true, output: 'Ruff: pass' }
-            );
-
-            expect(result).toContain('✅ Ruff');
-        });
-
-        it('should parse Mypy validation results', async () => {
-            mockGit.diffSummary.mockResolvedValueOnce({
-                files: [],
-                insertions: 0,
-                deletions: 0,
-            });
-
-            const result = await service.generatePRDescription(
-                mockGit,
-                'Task',
-                { success: true, output: 'Mypy: Success: no issues' }
-            );
-
-            expect(result).toContain('✅ Mypy');
-        });
-
-        it('should parse Trivy validation results', async () => {
-            mockGit.diffSummary.mockResolvedValueOnce({
-                files: [],
-                insertions: 0,
-                deletions: 0,
-            });
-
-            const result = await service.generatePRDescription(
-                mockGit,
-                'Task',
-                { success: true, output: 'Trivy: 0 vulnerabilities found' }
-            );
-
-            expect(result).toContain('✅ Trivy');
         });
 
         it('should show warning for failed validation', async () => {
