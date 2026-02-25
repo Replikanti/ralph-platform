@@ -17,7 +17,7 @@ async function bootstrap() {
     process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-bootstrap().catch((err) => {
+bootstrap().catch((err) => { // NOSONAR - Top-level await not supported in CommonJS
     console.error("Failed to start server:", err);
     process.exit(1);
 });

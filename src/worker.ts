@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent, updateLinearIssue, Task, RateLimitError } from './agent';
+import { runAgent, updateLinearIssue, Task } from './agent';
 import dotenv from 'dotenv';
 
 dotenv.config();

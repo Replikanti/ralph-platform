@@ -1,5 +1,4 @@
 import { Configuration, Inject, PlatformApplication } from "@tsed/common";
-import { PlatformExpress } from "@tsed/platform-express";
 import "@tsed/swagger";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -21,7 +20,7 @@ import { RedisProvider } from "./services/RedisProvider";
 })
 export class Server {
     @Inject()
-    private app!: PlatformApplication;
+    private readonly app!: PlatformApplication;
 
     /**
      * Called before routes are loaded.
