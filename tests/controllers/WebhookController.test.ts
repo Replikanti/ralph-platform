@@ -1,39 +1,12 @@
 // Mock Ts.ED decorators before imports
-jest.mock('@tsed/common', () => ({
-    Controller: () => (target: any) => target,
-    Service: () => (target: any) => target,
-    Middleware: () => (target: any) => target,
-    Post: () => (target: any, propertyKey: string, descriptor: PropertyDescriptor) => descriptor,
-    Req: () => (target: any, propertyKey: string, index: number) => {},
-    Res: () => (target: any, propertyKey: string, index: number) => {},
-    UseBefore: () => (target: any) => target,
-    Inject: () => (target: any, propertyKey: string) => {},
-    OnInit: jest.fn(),
-    OnDestroy: jest.fn(),
-    Configuration: () => (target: any) => target,
-}));
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+import { TEST_CREDENTIALS } from '../test-utils/constants';
 
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
-
-jest.mock('@tsed/di', () => ({
-    Inject: () => (target: any, propertyKey: string) => {},
-}));
-
-jest.mock('@tsed/exceptions', () => ({
-    Unauthorized: class Unauthorized extends Error {
-        constructor(message: string) {
-            super(message);
-            this.name = 'Unauthorized';
-        }
-    },
-}));
+const mocks = mockTsEdDecorators();
+jest.mock('@tsed/common', () => mocks['@tsed/common']);
+jest.mock('@tsed/di', () => mocks['@tsed/di']);
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
+jest.mock('@tsed/exceptions', () => mocks['@tsed/exceptions']);
 
 import express, { Express } from "express";
 import SuperTest from "supertest";
@@ -42,7 +15,7 @@ import { WebhookController } from "../../src/controllers/WebhookController";
 import { createIssueWebhook, createCommentWebhook, getSignature } from "../fixtures/webhook-payloads";
 import { createMockStoredPlan } from "../fixtures/mocks";
 
-const TEST_SECRET = crypto.randomBytes(32).toString('hex');
+const TEST_SECRET = TEST_CREDENTIALS.WEBHOOK_SECRET;
 
 describe("WebhookController", () => {
     let app: Express;
