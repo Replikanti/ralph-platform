@@ -1,17 +1,9 @@
 // Mock Ts.ED decorators before imports
-jest.mock('@tsed/common', () => ({
-    Service: () => (target: any) => target,
-    Inject: () => (target: any, propertyKey: string) => {},
-}));
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
 
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
+const mocks = mockTsEdDecorators();
+jest.mock('@tsed/common', () => mocks['@tsed/common']);
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
 
 const mockCreateComment = jest.fn().mockResolvedValue({});
 const mockIssue = jest.fn();
