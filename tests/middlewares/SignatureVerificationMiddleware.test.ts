@@ -1,20 +1,17 @@
 // Mock Ts.ED decorators
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+import { TEST_CREDENTIALS } from '../test-utils/constants';
+
+const mocks = mockTsEdDecorators();
 jest.mock('@tsed/common', () => ({
-    Middleware: () => (target: any) => target,
-    Req: () => (target: any, propertyKey: string, index: number) => {},
+    Middleware: mocks['@tsed/common'].Middleware,
+    Req: mocks['@tsed/common'].Req,
 }));
 
-jest.mock('@tsed/exceptions', () => ({
-    Unauthorized: class Unauthorized extends Error {
-        constructor(message: string) {
-            super(message);
-            this.name = 'Unauthorized';
-        }
-    },
-}));
+jest.mock('@tsed/exceptions', () => mocks['@tsed/exceptions']);
 
 // Mock config/env
-let mockLinearWebhookSecret: string | undefined = 'test-secret';
+let mockLinearWebhookSecret: string | undefined = TEST_CREDENTIALS.WEBHOOK_SECRET;
 jest.mock('../../src/config/env', () => ({
     get LINEAR_WEBHOOK_SECRET() {
         return mockLinearWebhookSecret;
@@ -30,7 +27,7 @@ describe('SignatureVerificationMiddleware', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockLinearWebhookSecret = 'test-secret';
+        mockLinearWebhookSecret = TEST_CREDENTIALS.WEBHOOK_SECRET;
         middleware = new SignatureVerificationMiddleware();
     });
 
@@ -97,7 +94,7 @@ describe('SignatureVerificationMiddleware', () => {
 
         it('should pass with valid signature', () => {
             const body = 'test body';
-            const validSignature = createSignature(body, 'test-secret');
+            const validSignature = createSignature(body, TEST_CREDENTIALS.WEBHOOK_SECRET);
 
             const req = {
                 headers: { 'linear-signature': validSignature },
@@ -109,7 +106,7 @@ describe('SignatureVerificationMiddleware', () => {
 
         it('should handle empty body', () => {
             const body = '';
-            const validSignature = createSignature(body, 'test-secret');
+            const validSignature = createSignature(body, TEST_CREDENTIALS.WEBHOOK_SECRET);
 
             const req = {
                 headers: { 'linear-signature': validSignature },
@@ -121,7 +118,7 @@ describe('SignatureVerificationMiddleware', () => {
 
         it('should handle missing rawBody', () => {
             const body = '';
-            const validSignature = createSignature(body, 'test-secret');
+            const validSignature = createSignature(body, TEST_CREDENTIALS.WEBHOOK_SECRET);
 
             const req = {
                 headers: { 'linear-signature': validSignature },
@@ -134,7 +131,7 @@ describe('SignatureVerificationMiddleware', () => {
         it('should use timing-safe comparison', () => {
             const body = 'test body';
             // Create two signatures with same length but different content
-            const validSignature = createSignature(body, 'test-secret');
+            const validSignature = createSignature(body, TEST_CREDENTIALS.WEBHOOK_SECRET);
             // Modify one character to create invalid signature of same length
             const invalidSignature = validSignature.slice(0, -1) +
                 (validSignature[validSignature.length - 1] === 'a' ? 'b' : 'a');

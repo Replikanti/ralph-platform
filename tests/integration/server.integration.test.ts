@@ -7,6 +7,7 @@
 import express from 'express';
 import SuperTest from 'supertest';
 import crypto from 'node:crypto';
+import { TEST_CREDENTIALS } from '../test-utils/constants';
 
 /**
  * Integration test for actual HTTP endpoints
@@ -18,7 +19,7 @@ describe('HTTP Endpoints Integration', () => {
 
     beforeAll(() => {
         // Set test environment
-        process.env.LINEAR_WEBHOOK_SECRET = 'test-secret-12345';
+        process.env.LINEAR_WEBHOOK_SECRET = TEST_CREDENTIALS.WEBHOOK_SECRET;
         process.env.ADMIN_USER = 'admin';
         process.env.ADMIN_PASS = 'password';
 
@@ -44,7 +45,7 @@ describe('HTTP Endpoints Integration', () => {
                 return res.status(401).json({ error: 'Missing signature' });
             }
 
-            const hmac = crypto.createHmac('sha256', 'test-secret-12345');
+            const hmac = crypto.createHmac('sha256', TEST_CREDENTIALS.WEBHOOK_SECRET);
             const digest = hmac.update((req as any).rawBody || '').digest('hex');
 
             if (signature !== digest) {
@@ -83,7 +84,7 @@ describe('HTTP Endpoints Integration', () => {
         it('should accept requests with valid signature', async () => {
             const body = JSON.stringify({ type: 'Issue', action: 'create' });
             const validSig = crypto
-                .createHmac('sha256', 'test-secret-12345')
+                .createHmac('sha256', TEST_CREDENTIALS.WEBHOOK_SECRET)
                 .update(body)
                 .digest('hex');
 
