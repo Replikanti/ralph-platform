@@ -136,7 +136,7 @@ app.use(express.json({
 function sanitizeLog(data: any): string {
     if (data === null || data === undefined) return '';
     const str = typeof data === 'string' ? data : String(data);
-    return str.replace(/[\r\n\t]/g, ' ').substring(0, 150);
+    return str.replaceAll(/[\r\n\t]/g, ' ').substring(0, 150);
 }
 
 function verifyLinearSignature(req: any): boolean {
@@ -184,7 +184,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
 
     try {
         console.log(`📥 [API] Adding ${logContext.type} job to queue:`);
-        console.log(`   Job ID: ${jobId}`);
+        console.log(`   Job ID: ${sanitizeLog(jobId)}`);
         logContext.details.forEach(detail => console.log(`   ${sanitizeLog(detail)}`));
 
         await ralphQueue.add('coding-task', jobData, {
@@ -263,7 +263,7 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 
     const repoUrl = await getRepoForTeam(teamKey);
     if (!repoUrl) {
-        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`);
+        console.warn(`⚠️ [API] No repository configured for team "${sanitizeLog(teamKey || 'unknown')}"`);
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
