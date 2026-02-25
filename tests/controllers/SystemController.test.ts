@@ -25,7 +25,6 @@ jest.mock('@bull-board/express', () => ({
 import express, { Express } from "express";
 import SuperTest from "supertest";
 import { SystemController } from "../../src/controllers/SystemController";
-import { QueueService } from "../../src/services/QueueService";
 
 describe("SystemController", () => {
     let app: Express;

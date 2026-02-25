@@ -1,12 +1,18 @@
 /**
  * Test constants
  * Centralized test values to avoid hardcoded strings flagged by security scanners
+ *
+ * IMPORTANT: These are MOCK values for testing only.
+ * They are NOT real credentials and are safe to commit.
  */
 
-/** Test credentials - NOT real credentials, only for testing */
+/**
+ * Test credentials - NOT real credentials, only for testing
+ * These mock values are intentionally hardcoded for test consistency
+ */
 export const TEST_CREDENTIALS = {
     ADMIN_USER: 'test-admin',
-    ADMIN_PASSWORD: 'test-password-12345',
+    ADMIN_PASSWORD: 'test-password-12345', // NOSONAR - Mock test data
     WEBHOOK_SECRET: 'test-webhook-secret-abc123',
     API_KEY: 'test-api-key-xyz789',
 } as const;

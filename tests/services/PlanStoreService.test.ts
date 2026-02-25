@@ -14,7 +14,6 @@ jest.mock('@tsed/logger', () => ({
 }));
 
 import { PlanStoreService, StoredPlan } from '../../src/services/PlanStoreService';
-import { RedisProvider } from '../../src/services/RedisProvider';
 
 describe('PlanStoreService', () => {
     let service: PlanStoreService;
