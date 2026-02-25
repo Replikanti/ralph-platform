@@ -1,4 +1,4 @@
-import { setupWorkspace } from '../src/workspace';
+import { setupWorkspace } from '../src/domain/WorkspaceManager';
 import simpleGit from 'simple-git';
 import fs from 'node:fs';
 

@@ -1,4 +1,4 @@
-import { LinearClient } from '../src/linear-client';
+import { LinearClientService } from '../src/services/LinearClientService';
 
 const mockCreateComment = jest.fn().mockResolvedValue({});
 const mockIssue = jest.fn();

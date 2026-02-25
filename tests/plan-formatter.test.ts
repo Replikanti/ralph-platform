@@ -1,4 +1,4 @@
-import { formatPlanForLinear } from '../src/plan-formatter';
+import { formatPlanForLinear } from '../src/domain/PlanFormatter';
 
 describe('Plan Formatter', () => {
     it('should format a simple plan', () => {

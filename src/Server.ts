@@ -3,7 +3,21 @@ import "@tsed/swagger";
 import helmet from "helmet";
 import morgan from "morgan";
 import express from "express";
+
+// Controllers
+import { WebhookController } from "./controllers/WebhookController";
+import { SystemController } from "./controllers/SystemController";
+
+// Services (imported so Ts.ED registers them in DI container)
 import { RedisProvider } from "./services/RedisProvider";
+import { QueueService } from "./services/QueueService";
+import { WorkerService } from "./services/WorkerService";
+import { ConfigService } from "./services/ConfigService";
+import { PlanStoreService } from "./services/PlanStoreService";
+import { LinearClientService } from "./services/LinearClientService";
+import { GitHubService } from "./services/GitHubService";
+import { LangfuseService } from "./services/LangfuseService";
+import { AgentOrchestratorService } from "./services/AgentOrchestratorService";
 
 @Configuration({
     port: 3000,
@@ -14,8 +28,19 @@ import { RedisProvider } from "./services/RedisProvider";
             specVersion: "3.0.1",
         },
     ],
+    mount: {
+        "/": [WebhookController, SystemController],
+    },
     imports: [
         RedisProvider,
+        QueueService,
+        WorkerService,
+        ConfigService,
+        PlanStoreService,
+        LinearClientService,
+        GitHubService,
+        LangfuseService,
+        AgentOrchestratorService,
     ],
 })
 export class Server {
