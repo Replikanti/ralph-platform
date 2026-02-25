@@ -1,16 +1,10 @@
 // Mock Ts.ED decorators
-jest.mock('@tsed/common', () => ({
-    Service: () => (target: any) => target,
-}));
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+import { TEST_GITHUB } from '../test-utils/constants';
 
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
+const mocks = mockTsEdDecorators();
+jest.mock('@tsed/common', () => ({ Service: mocks['@tsed/common'].Service }));
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
 
 // Mock @octokit/rest
 const mockPullsCreate = jest.fn();
@@ -35,7 +29,7 @@ jest.mock('../../src/domain/WorkspaceManager', () => ({
 }));
 
 // Mock config/env
-let mockGithubToken = 'ghp_test_token';
+let mockGithubToken = TEST_GITHUB.TOKEN;
 jest.mock('../../src/config/env', () => ({
     get GITHUB_TOKEN() {
         return mockGithubToken;
@@ -49,7 +43,7 @@ describe('GitHubService', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        mockGithubToken = 'ghp_test_token';
+        mockGithubToken = TEST_GITHUB.TOKEN;
         service = new GitHubService();
     });
 
@@ -69,7 +63,7 @@ describe('GitHubService', () => {
             );
 
             expect(result).toBe('https://github.com/test/repo/pull/123');
-            expect(mockOctokit).toHaveBeenCalledWith({ auth: 'ghp_test_token' });
+            expect(mockOctokit).toHaveBeenCalledWith({ auth: TEST_GITHUB.TOKEN });
             expect(mockPullsCreate).toHaveBeenCalledWith({
                 owner: 'test',
                 repo: 'repo',
