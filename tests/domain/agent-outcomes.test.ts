@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import { resolvePlatformAction } from '../../src/domain/agent-outcomes';
-import { AgentResult, PlatformAction } from '../../src/domain/types';
+import { AgentResult } from '../../src/domain/types';
 
 describe('agent-outcomes', () => {
   describe('resolvePlatformAction', () => {

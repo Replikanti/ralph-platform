@@ -1,4 +1,3 @@
-// src/domain/agent-outcomes.ts
 import type { AgentResult, PlatformAction } from './types';
 
 /**
