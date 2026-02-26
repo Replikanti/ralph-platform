@@ -197,7 +197,7 @@ describe('AgentOrchestratorService', () => {
             const fs = require('node:fs');
             fs.existsSync.mockReturnValueOnce(false);
 
-            new AgentOrchestratorService();
+            void new AgentOrchestratorService();
 
             expect(fs.mkdirSync).toHaveBeenCalled();
         });

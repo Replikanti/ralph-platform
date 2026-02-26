@@ -112,7 +112,7 @@ describe('RedisProvider', () => {
     describe('$onDestroy', () => {
         it('should close Redis connection on destroy', async () => {
             provider = new RedisProvider();
-            await provider.$onInit();
+            provider.$onInit();
 
             await provider.$onDestroy();
 

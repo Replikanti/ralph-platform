@@ -77,6 +77,7 @@ describe("WebhookController", () => {
 
             const expectedSignature = crypto
                 .createHmac('sha256', TEST_SECRET)
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 .update((req as any).rawBody || JSON.stringify(req.body))
                 .digest('hex');
 
@@ -95,6 +96,7 @@ describe("WebhookController", () => {
         (controller as any).linear = mockLinear;
         (controller as any).redis = mockRedis;
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         app.post('/webhook', (req, res) => controller.handleWebhook(req as any, res as any));
 
         request = SuperTest(app);

@@ -1,6 +1,6 @@
 // Mock Ts.ED decorators before imports
 import { mockTsEdDecorators } from '../test-utils/common-mocks';
-import { createMockIssue, createMockTeam, createMockStates } from '../test-utils/test-helpers';
+import { createMockIssue, createMockStates } from '../test-utils/test-helpers';
 
 const mocks = mockTsEdDecorators();
 jest.mock('@tsed/common', () => mocks['@tsed/common']);

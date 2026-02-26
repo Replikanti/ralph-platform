@@ -24,31 +24,31 @@ jest.mock('bullmq', () => ({
 import { WorkerService } from '../../src/services/WorkerService';
 import { Worker } from 'bullmq';
 
+function createMockJob(data: any, overrides: any = {}) {
+    return {
+        id: '123',
+        data,
+        attemptsMade: 0,
+        opts: { attempts: 3 },
+        ...overrides,
+    };
+}
+
+function getProcessJobFn() {
+    const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
+    return workerConstructorCall[1];
+}
+
+function getEventHandler(eventName: string) {
+    const call = mockWorkerOn.mock.calls.find((c: any[]) => c[0] === eventName);
+    return call[1];
+}
+
 describe('WorkerService', () => {
     let service: WorkerService;
     let mockRedis: any;
     let mockOrchestrator: any;
     let mockLinear: any;
-
-    function createMockJob(data: any, overrides: any = {}) {
-        return {
-            id: '123',
-            data,
-            attemptsMade: 0,
-            opts: { attempts: 3 },
-            ...overrides,
-        };
-    }
-
-    function getProcessJobFn() {
-        const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
-        return workerConstructorCall[1];
-    }
-
-    function getEventHandler(eventName: string) {
-        const call = mockWorkerOn.mock.calls.find((c: any[]) => c[0] === eventName);
-        return call[1];
-    }
 
     beforeEach(() => {
         jest.clearAllMocks();

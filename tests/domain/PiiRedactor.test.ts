@@ -16,7 +16,7 @@ jest.mock('@redactpii/node', () => {
                     let result = text;
 
                     // Apply custom redactors if provided
-                    if (config.customRedactors && config.customRedactors.secrets) {
+                    if (config.customRedactors?.secrets) {
                         const secretsRedactor = config.customRedactors.secrets;
                         for (const rule of secretsRedactor.redactionRules) {
                             result = result.replace(rule.regexp, rule.replacement);
@@ -28,7 +28,7 @@ jest.mock('@redactpii/node', () => {
             };
         }),
         CustomRedactor,
-        IRedactor: class {},
+        IRedactor: class {}, // NOSONAR - Mock interface
     };
 });
 

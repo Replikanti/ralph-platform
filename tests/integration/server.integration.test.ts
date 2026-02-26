@@ -46,6 +46,7 @@ describe('HTTP Endpoints Integration', () => {
             }
 
             const hmac = crypto.createHmac('sha256', TEST_CREDENTIALS.WEBHOOK_SECRET);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const digest = hmac.update((req as any).rawBody || '').digest('hex');
 
             if (signature !== digest) {

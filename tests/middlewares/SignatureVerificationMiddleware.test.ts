@@ -22,6 +22,16 @@ import { SignatureVerificationMiddleware } from '../../src/middlewares/Signature
 import { Unauthorized } from '@tsed/exceptions';
 import crypto from 'node:crypto';
 
+function createSignature(body: string, secret: string): string {
+    return crypto.createHmac('sha256', secret).update(body).digest('hex');
+}
+
+function createRequest(signature: string | number, body?: string) {
+    const req: any = { headers: { 'linear-signature': signature } };
+    if (body !== undefined) req.rawBody = body;
+    return req;
+}
+
 describe('SignatureVerificationMiddleware', () => {
     let middleware: SignatureVerificationMiddleware;
 
@@ -30,16 +40,6 @@ describe('SignatureVerificationMiddleware', () => {
         mockLinearWebhookSecret = TEST_CREDENTIALS.WEBHOOK_SECRET;
         middleware = new SignatureVerificationMiddleware();
     });
-
-    function createSignature(body: string, secret: string): string {
-        return crypto.createHmac('sha256', secret).update(body).digest('hex');
-    }
-
-    function createRequest(signature: string | number, body?: string) {
-        const req: any = { headers: { 'linear-signature': signature } };
-        if (body !== undefined) req.rawBody = body;
-        return req;
-    }
 
     describe('use', () => {
         it('should throw Unauthorized when LINEAR_WEBHOOK_SECRET not configured', () => {
@@ -56,7 +56,7 @@ describe('SignatureVerificationMiddleware', () => {
                 ['not a string', 123, 'test body', 'Missing linear-signature header'],
                 ['wrong length', 'short', 'test body', 'Invalid webhook signature'],
             ])('should throw Unauthorized when signature is %s', (_, signature, body, errorMsg) => {
-                const req = createRequest(signature as any, body);
+                const req = createRequest(signature, body);
 
                 expect(() => middleware.use(req)).toThrow(errorMsg);
                 expect(() => middleware.use(req)).toThrow(Unauthorized);
@@ -104,7 +104,7 @@ describe('SignatureVerificationMiddleware', () => {
             const validSignature = createSignature(body, TEST_CREDENTIALS.WEBHOOK_SECRET);
             // Modify one character to create invalid signature of same length
             const invalidSignature = validSignature.slice(0, -1) +
-                (validSignature[validSignature.length - 1] === 'a' ? 'b' : 'a');
+                (validSignature.endsWith('a') ? 'b' : 'a');
             const req = createRequest(invalidSignature, body);
 
             expect(() => middleware.use(req)).toThrow('Invalid webhook signature');

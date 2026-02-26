@@ -23,7 +23,7 @@ jest.mock('@octokit/rest', () => ({
 // Mock WorkspaceManager
 jest.mock('../../src/domain/WorkspaceManager', () => ({
     parseRepoUrl: jest.fn((url: string) => {
-        const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
+        const match = /github\.com\/([^/]+)\/([^/]+)/.exec(url);
         return { owner: match?.[1] || 'owner', repo: match?.[2] || 'repo' };
     }),
 }));

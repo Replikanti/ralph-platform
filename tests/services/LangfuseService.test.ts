@@ -113,7 +113,8 @@ describe('LangfuseService', () => {
             try {
                 await service.withTrace('test', {}, fn);
             } catch (e) {
-                // Expected
+                // Error is expected and handled - testing flush behavior
+                expect(e).toBeDefined();
             }
 
             expect(mockFlushAsync).toHaveBeenCalled();
