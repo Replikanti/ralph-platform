@@ -75,7 +75,7 @@ async function sendCommentWebhookWithPlan(options: {
     commentBody: string;
     issueId?: string;
     stateName?: string;
-    storedPlan?: any | null;
+    storedPlan?: any;
 }) {
     const { commentBody, issueId = 'issue-123', stateName = 'plan-review' } = options;
 
