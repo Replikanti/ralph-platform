@@ -70,3 +70,12 @@ export function createMockGit() {
         diffSummary: jest.fn(),
     };
 }
+
+/**
+ * Creates mock state nodes for Linear tests
+ */
+export function createMockStates(states: Array<{ id: string; name: string }>) {
+    return {
+        nodes: states,
+    };
+}

@@ -1,5 +1,6 @@
 // Mock Ts.ED decorators before imports
 import { mockTsEdDecorators } from '../test-utils/common-mocks';
+import { createMockIssue, createMockTeam, createMockStates } from '../test-utils/test-helpers';
 
 const mocks = mockTsEdDecorators();
 jest.mock('@tsed/common', () => mocks['@tsed/common']);
@@ -46,25 +47,20 @@ describe('LinearClientService', () => {
         jest.clearAllMocks();
         mockLinearApiKey = undefined;
         // Reset the mock implementations
-        mockIssue.mockResolvedValue({
-            team: Promise.resolve({
-                states: mockStates
-            }),
-            state: Promise.resolve({ id: 's1', name: 'In Progress' })
-        });
+        mockIssue.mockResolvedValue(createMockIssue({
+            team: { states: mockStates },
+            state: { id: 's1', name: 'In Progress' }
+        }));
     });
 
     describe('isEnabled', () => {
-        it('should return true when LINEAR_API_KEY is set', () => {
-            mockLinearApiKey = 'test-key';
+        test.each([
+            ['set', 'test-key', true],
+            ['not set', undefined, false],
+        ])('should return %s when LINEAR_API_KEY is %s', (_, apiKey, expected) => {
+            mockLinearApiKey = apiKey as string | undefined;
             const service = new LinearClientService();
-            expect(service.isEnabled()).toBe(true);
-        });
-
-        it('should return false when LINEAR_API_KEY is not set', () => {
-            mockLinearApiKey = undefined;
-            const service = new LinearClientService();
-            expect(service.isEnabled()).toBe(false);
+            expect(service.isEnabled()).toBe(expected);
         });
     });
 
@@ -103,12 +99,10 @@ describe('LinearClientService', () => {
             const service = new LinearClientService();
 
             // Mock issue with different current state
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 'old-state', name: 'Todo' })
-            });
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 'old-state', name: 'Todo' }
+            }));
 
             const result = await service.updateIssueState('issue-123', 'In Progress');
             expect(result).toBe(true);
@@ -127,10 +121,10 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve(null),
-                state: Promise.resolve({ id: 's1', name: 'In Progress' })
-            });
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: null,
+                state: { id: 's1', name: 'In Progress' }
+            }));
 
             const result = await service.updateIssueState('issue-123', 'In Progress');
             expect(result).toBe(false);
@@ -140,22 +134,15 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            // Mock states without plan-review, but with In Review
-            const statesNodes = {
-                nodes: [
-                    { name: 'In Review', id: 's3' },
-                    { name: 'In Progress', id: 's1' }
-                ]
-            };
+            mockStates.mockResolvedValue(createMockStates([
+                { name: 'In Review', id: 's3' },
+                { name: 'In Progress', id: 's1' }
+            ]));
 
-            mockStates.mockResolvedValue(statesNodes);
-
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 's1', name: 'In Progress' })
-            });
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 's1', name: 'In Progress' }
+            }));
 
             const result = await service.updateIssueState('issue-123', 'plan-review');
             expect(result).toBe(true);
@@ -166,18 +153,11 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            const statesNodes = {
-                nodes: [{ name: 'In Progress', id: 's1' }]
-            };
-
-            mockStates.mockResolvedValue(statesNodes);
-
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 's1', name: 'In Progress' })
-            });
+            mockStates.mockResolvedValue(createMockStates([{ name: 'In Progress', id: 's1' }]));
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 's1', name: 'In Progress' }
+            }));
 
             const result = await service.updateIssueState('issue-123', 'plan-review');
             expect(result).toBe(false);
@@ -187,18 +167,11 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            const statesNodes = {
-                nodes: [{ name: 'In Progress', id: 's1' }]
-            };
-
-            mockStates.mockResolvedValue(statesNodes);
-
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 's1', name: 'In Progress' })
-            });
+            mockStates.mockResolvedValue(createMockStates([{ name: 'In Progress', id: 's1' }]));
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 's1', name: 'In Progress' }
+            }));
 
             const result = await service.updateIssueState('issue-123', 'Unknown State');
             expect(result).toBe(false);
@@ -244,12 +217,10 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            mockIssue.mockResolvedValueOnce({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve(null)
-            });
+            mockIssue.mockResolvedValueOnce(createMockIssue({
+                team: { states: mockStates },
+                state: null
+            }));
 
             const result = await service.getIssueState('issue-123');
             expect(result).toBeNull();
@@ -279,13 +250,10 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            // Mock different state to trigger update
-            mockIssue.mockResolvedValue({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 'old', name: 'Todo' })
-            });
+            mockIssue.mockResolvedValue(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 'old', name: 'Todo' }
+            }));
 
             await service.updateIssueWithComment('issue-123', 'In Progress', 'Done!');
 
@@ -300,13 +268,10 @@ describe('LinearClientService', () => {
             mockLinearApiKey = 'test-key';
             const service = new LinearClientService();
 
-            // Mock different state
-            mockIssue.mockResolvedValue({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 'old', name: 'Todo' })
-            });
+            mockIssue.mockResolvedValue(createMockIssue({
+                team: { states: mockStates },
+                state: { id: 'old', name: 'Todo' }
+            }));
 
             await service.updateIssueWithComment('issue-123', 'In Progress');
 
