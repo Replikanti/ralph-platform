@@ -1,4 +1,4 @@
-import { setupWorkspace } from '../src/domain/WorkspaceManager';
+import { setupWorkspace, parseRepoUrl } from '../src/domain/WorkspaceManager';
 import simpleGit from 'simple-git';
 import fs from 'node:fs';
 
@@ -46,11 +46,47 @@ describe('setupWorkspace', () => {
     it('should create new branch if checkout fails', async () => {
         const repoUrl = 'https://github.com/user/repo';
         const branchName = 'feature/test';
-        
+
         gitInstance.checkout.mockRejectedValue(new Error('Branch not found'));
-        
+
         await setupWorkspace(repoUrl, branchName);
-        
+
         expect(gitInstance.checkoutLocalBranch).toHaveBeenCalledWith(branchName);
+    });
+
+    it('should warn if cleanup fails', async () => {
+        const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+        const repoUrl = 'https://github.com/user/repo';
+        const branchName = 'feature/test';
+
+        mockedFsRmSync.mockImplementationOnce(() => {
+            throw new Error('Permission denied');
+        });
+
+        const { cleanup } = await setupWorkspace(repoUrl, branchName);
+        cleanup();
+
+        expect(consoleWarnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('Cleanup failed')
+        );
+
+        consoleWarnSpy.mockRestore();
+    });
+});
+
+describe('parseRepoUrl', () => {
+    it('should parse GitHub URL without .git', () => {
+        const result = parseRepoUrl('https://github.com/owner/repo');
+        expect(result).toEqual({ owner: 'owner', repo: 'repo' });
+    });
+
+    it('should parse GitHub URL with .git', () => {
+        const result = parseRepoUrl('https://github.com/owner/repo.git');
+        expect(result).toEqual({ owner: 'owner', repo: 'repo' });
+    });
+
+    it('should throw error for invalid URL', () => {
+        expect(() => parseRepoUrl('invalid-url')).toThrow('Invalid GitHub URL');
+        expect(() => parseRepoUrl('https://gitlab.com/owner/repo')).toThrow('Invalid GitHub URL');
     });
 });
