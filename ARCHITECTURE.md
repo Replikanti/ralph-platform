@@ -68,9 +68,9 @@ graph TB
 
 ## Core Components
 
-### API Server (`src/server.ts`)
+### API Server (`src/Server.ts` + `src/controllers/WebhookController.ts`)
 
-**Purpose**: Webhook ingestion and job enqueueing
+**Purpose**: Webhook ingestion and job enqueueing using Ts.ED framework
 
 **Responsibilities**:
 - Receive and validate Linear webhooks (HMAC SHA-256)
@@ -108,25 +108,28 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 }
 ```
 
-### Worker (`src/worker.ts`)
+### Worker (`src/services/WorkerService.ts`)
 
-**Purpose**: Job processing and orchestration
+**Purpose**: Job processing and orchestration using Ts.ED dependency injection
 
 **Responsibilities**:
-- Dequeue tasks from Redis
+- Dequeue tasks from Redis (BullMQ worker)
 - Initialize ephemeral workspaces
-- Orchestrate agent execution
-- Handle retry logic
+- Orchestrate agent execution via `AgentOrchestratorService`
+- Handle retry logic and rate limiting
 - Report failures to Linear
+- Auto-starts with API server via `@OnInit()` lifecycle
 
 **Job Types**:
 - `plan-only` - Generate implementation plan
 - `execute-only` - Execute approved plan
 - `full` - Plan + execute (legacy mode)
 
-### Agent (`src/agent.ts`)
+**Note**: With Ts.ED architecture, the Worker runs in the same process as the API server, eliminating the need for separate deployments.
 
-**Purpose**: AI workflow orchestration
+### Agent Orchestrator (`src/services/AgentOrchestratorService.ts`)
+
+**Purpose**: AI workflow orchestration as injectable service
 
 **Responsibilities**:
 - Manage three execution modes (plan-only, execute-only, full)
@@ -147,9 +150,9 @@ const SECURITY_GUARDRAILS = `
 `;
 ```
 
-### Workspace (`src/workspace.ts`)
+### Workspace Manager (`src/domain/WorkspaceManager.ts`)
 
-**Purpose**: Git workspace isolation
+**Purpose**: Git workspace isolation (pure domain logic)
 
 **Responsibilities**:
 - Create UUID-based ephemeral directories (`/tmp/ralph-workspaces/{uuid}`)
@@ -166,9 +169,9 @@ const SECURITY_GUARDRAILS = `
       └── .claude/   # Claude projects cache
 ```
 
-### Tools (`src/tools.ts`)
+### Agent Tools (`src/domain/AgentTools.ts`)
 
-**Purpose**: Polyglot code validation
+**Purpose**: Polyglot code validation (pure domain logic)
 
 **Auto-Detection**:
 - **TypeScript/JavaScript**: Biome + TSC
@@ -447,7 +450,7 @@ To prevent sensitive data from leaking to the LLM (Anthropic), Ralph implements 
 
 **Mechanism**:
 - **Library**: `@redactpii/node` (MIT licensed)
-- **Scope**: Wraps `read_file` and `run_command` in `src/tools.ts`
+- **Scope**: Wraps `readFile` and `runCommand` in `src/domain/AgentTools.ts`
 - **Detection**:
     - **PII**: Emails, IP addresses, Credit Cards, SSN (via built-in rules)
     - **Secrets**: AWS Keys, GitHub Tokens, Linear Keys, Private Keys, Generic API Keys (via Custom Redactors)
@@ -624,13 +627,13 @@ Ralph uses **TOON (Token-Optimized Object Notation)** to reduce context window u
 ```
 JSON (verbose):
 {
-  "files": ["src/agent.ts", "src/server.ts"],
+  "files": ["src/services/AgentOrchestratorService.ts", "src/Server.ts"],
   "status": "active",
   "count": 2
 }
 
 TOON (compact):
-files: src/agent.ts, src/server.ts
+files: src/services/AgentOrchestratorService.ts, src/Server.ts
 status: active
 count: 2
 ```
@@ -650,7 +653,7 @@ Ralph includes custom slash commands that output in TOON format:
 
 Hard limits prevent runaway costs:
 ```typescript
-// src/agent.ts
+// src/services/AgentOrchestratorService.ts
 '--max-budget-usd', '0.50'  // Planning phase
 '--max-budget-usd', '2.00'  // Execution phase
 '--max-budget-usd', '0.10'  // Error summary
