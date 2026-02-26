@@ -148,6 +148,11 @@ describe('webhook-routing', () => {
       });
     });
 
+    it('ignores if in review state but missing issue id', () => {
+      const comment = { ...mockComment, issue: { state: { name: 'In Review' } } };
+      expect(routeComment(comment as WebhookComment, null)).toEqual({ action: 'ignore', reason: 'no-stored-plan' });
+    });
+
     it('ignores if no plan and not in review', () => {
       expect(routeComment(mockComment, null)).toEqual({ action: 'ignore', reason: 'no-stored-plan' });
     });
