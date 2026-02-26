@@ -20,7 +20,7 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          command: ["node", "dist/worker.js"]
+          command: ["node", "dist/index.js"]
           volumeMounts:
             - name: workspaces
               mountPath: /tmp/ralph-workspaces

@@ -7,24 +7,14 @@ services:
     volumes:
       - redis_data:/data
 
-  api:
+  ralph:
     build: .
-    command: npm run start:api
+    command: npm start
     ports:
       - "3000:3000"
     environment:
       - REDIS_URL=redis://redis:6379
       - PORT=3000
-    env_file:
-      - .env
-    depends_on:
-      - redis
-
-  worker:
-    build: .
-    command: npm run start:worker
-    environment:
-      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
     depends_on:
