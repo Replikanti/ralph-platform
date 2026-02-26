@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
@@ -200,7 +201,7 @@ async function getChangedFiles(workDir: string): Promise<string[]> {
             .filter(line => line.trim() !== '')
             .map(line => line.substring(3).trim());
     } catch (e) {
-        console.warn("⚠️ Failed to detect changed files:", e);
+        logger.warn({ err: e }, "⚠️ Failed to detect changed files");
         return [];
     }
 }
@@ -236,7 +237,7 @@ function handleToolError(error: any, toolName: string, changedFiles: string[]): 
             relevant: true
         };
     } else {
-        console.log(`ℹ️ [Validation] Ignoring ${toolName} errors unrelated to changed files.`);
+        logger.info(`ℹ️ [Validation] Ignoring ${toolName} errors unrelated to changed files.`);
         return {
             success: true,
             log: `✅ ${toolName}: Passed (ignored unrelated errors)\n`,
@@ -261,7 +262,7 @@ async function validateNode(workDir: string, changedFiles: string[]): Promise<{ 
     if (fs.existsSync(path.join(workDir, 'package.json'))) {
         try {
             if (!fs.existsSync(path.join(workDir, 'node_modules'))) {
-                console.log("📦 Installing dependencies for validation...");
+                logger.info("📦 Installing dependencies for validation...");
                 await execAsync('npm install --no-package-lock --no-audit --quiet', { cwd: workDir });
             }
             await execAsync('biome check --apply .', { cwd: workDir });
@@ -306,10 +307,10 @@ async function validatePython(workDir: string, changedFiles: string[]): Promise<
     if (hasPython) {
         try {
             if (fs.existsSync(path.join(workDir, 'requirements.txt'))) {
-                console.log("🐍 Installing Python dependencies from requirements.txt...");
+                logger.info("🐍 Installing Python dependencies from requirements.txt...");
                 await execAsync('pip install --quiet --no-cache-dir -r requirements.txt', { cwd: workDir });
             } else if (fs.existsSync(path.join(workDir, 'pyproject.toml'))) {
-                console.log("🐍 Installing Python dependencies from pyproject.toml...");
+                logger.info("🐍 Installing Python dependencies from pyproject.toml...");
                 await execAsync('pip install --quiet --no-cache-dir .', { cwd: workDir });
             }
             await execAsync('ruff check --fix .', { cwd: workDir });
@@ -368,9 +369,9 @@ async function validateGo(workDir: string, changedFiles: string[]): Promise<{ su
 
     // Install dependencies if go.mod exists (best effort, non-blocking)
     if (fs.existsSync(path.join(workDir, 'go.mod'))) {
-        console.log("📦 Downloading Go dependencies...");
+        logger.info("📦 Downloading Go dependencies...");
         await execAsync('go mod download', { cwd: workDir, timeout: 120000 })
-            .catch(() => console.warn("⚠️ go mod download failed, continuing with validation..."));
+            .catch(() => logger.warn("⚠️ go mod download failed, continuing with validation..."));
     }
 
     // Run validation tools
@@ -404,9 +405,9 @@ async function validateTerraform(workDir: string, changedFiles: string[]): Promi
     }
 
     // Initialize Terraform without backend (no state file access needed)
-    console.log("🏗️ Initializing Terraform...");
+    logger.info("🏗️ Initializing Terraform...");
     await execAsync('terraform init -backend=false -upgrade=false', { cwd: workDir, timeout: 120000 })
-        .catch(() => console.warn("⚠️ terraform init failed, continuing with validation..."));
+        .catch(() => logger.warn("⚠️ terraform init failed, continuing with validation..."));
 
     // Run validation tools
     const fmtResult = await runValidationTool('terraform fmt -recursive', 'terraform fmt', workDir, changedFiles);
@@ -442,7 +443,7 @@ async function validateSecurity(workDir: string, changedFiles: string[]): Promis
                 await fsPromises.rm(trivyCache, { recursive: true, force: true });
             }
         } catch (e) {
-            console.warn("⚠️ Failed to cleanup trivy cache:", e);
+            logger.warn({ err: e }, "⚠️ Failed to cleanup trivy cache");
         }
     }
     return { success, log: outputLog };
@@ -472,7 +473,7 @@ export async function runPolyglotValidation(workDir: string): Promise<Validation
 
     const changedFiles = await getChangedFiles(workDir);
     if (changedFiles.length > 0) {
-        console.log(`🔍 [Validation] Changed files: ${changedFiles.join(', ')}`);
+        logger.info(`🔍 [Validation] Changed files: ${changedFiles.join(', ')}`);
     } else {
         // Return early with detected languages even if no changes
         const languages = await detectProjectLanguages(workDir);
