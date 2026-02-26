@@ -1,19 +1,13 @@
 // Mock Ts.ED decorators before imports
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+
+const mocks = mockTsEdDecorators();
 jest.mock('@tsed/common', () => ({
-    Service: () => (target: any) => target,
-    Inject: () => (target: any, propertyKey: string) => {},
+    ...mocks['@tsed/common'],
     OnInit: jest.fn(),
     OnDestroy: jest.fn(),
 }));
-
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        error: jest.fn(),
-        warn: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
 
 // Mock BullMQ Worker
 const mockWorkerOn = jest.fn();
@@ -35,6 +29,26 @@ describe('WorkerService', () => {
     let mockRedis: any;
     let mockOrchestrator: any;
     let mockLinear: any;
+
+    function createMockJob(data: any, overrides: any = {}) {
+        return {
+            id: '123',
+            data,
+            attemptsMade: 0,
+            opts: { attempts: 3 },
+            ...overrides,
+        };
+    }
+
+    function getProcessJobFn() {
+        const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
+        return workerConstructorCall[1];
+    }
+
+    function getEventHandler(eventName: string) {
+        const call = mockWorkerOn.mock.calls.find((c: any[]) => c[0] === eventName);
+        return call[1];
+    }
 
     beforeEach(() => {
         jest.clearAllMocks();
@@ -88,19 +102,8 @@ describe('WorkerService', () => {
         });
 
         it('should process job by calling runAgent', async () => {
-            const mockJob = {
-                id: '123',
-                data: {
-                    ticketId: 'TICKET-1',
-                    mode: 'full'
-                },
-                attemptsMade: 0,
-                opts: { attempts: 3 },
-            };
-
-            // Get the processJob function passed to Worker constructor
-            const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
-            const processJobFn = workerConstructorCall[1];
+            const mockJob = createMockJob({ ticketId: 'TICKET-1', mode: 'full' });
+            const processJobFn = getProcessJobFn();
 
             await processJobFn(mockJob);
 
@@ -120,17 +123,11 @@ describe('WorkerService', () => {
             rateLimitError.name = 'RateLimitError';
             mockOrchestrator.runAgent.mockRejectedValueOnce(rateLimitError);
 
-            const mockJob = {
-                id: '123',
-                data: { ticketId: 'TICKET-1' },
-                attemptsMade: 0,
-                opts: { attempts: 3 },
-                moveToDelayed: mockMoveToDelayed,
-                token: 'test-token',
-            };
-
-            const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
-            const processJobFn = workerConstructorCall[1];
+            const mockJob = createMockJob(
+                { ticketId: 'TICKET-1' },
+                { moveToDelayed: mockMoveToDelayed, token: 'test-token' }
+            );
+            const processJobFn = getProcessJobFn();
 
             await processJobFn(mockJob);
 
@@ -144,15 +141,8 @@ describe('WorkerService', () => {
             const normalError = new Error('Some other error');
             mockOrchestrator.runAgent.mockRejectedValueOnce(normalError);
 
-            const mockJob = {
-                id: '123',
-                data: { ticketId: 'TICKET-1' },
-                attemptsMade: 0,
-                opts: { attempts: 3 },
-            };
-
-            const workerConstructorCall = (Worker as unknown as jest.Mock).mock.calls[0];
-            const processJobFn = workerConstructorCall[1];
+            const mockJob = createMockJob({ ticketId: 'TICKET-1' });
+            const processJobFn = getProcessJobFn();
 
             await expect(processJobFn(mockJob)).rejects.toThrow('Some other error');
         });
@@ -163,66 +153,26 @@ describe('WorkerService', () => {
             service.$onInit();
         });
 
-        it('should set tombstone for execute-only jobs', async () => {
-            const mockJob = {
-                id: '123',
-                data: {
-                    ticketId: 'TICKET-1',
-                    mode: 'execute-only',
-                },
-            };
-
-            // Get the onCompleted handler
-            const completedCall = mockWorkerOn.mock.calls.find((call: any[]) => call[0] === 'completed');
-            const onCompletedFn = completedCall[1];
+        test.each([
+            ['execute-only', true],
+            ['full', true],
+            ['plan-only', false],
+        ])('should %s set tombstone for %s jobs', async (mode, shouldSet) => {
+            const mockJob = createMockJob({ ticketId: 'TICKET-1', mode });
+            const onCompletedFn = getEventHandler('completed');
 
             await onCompletedFn(mockJob);
 
-            expect(mockRedis.connection.set).toHaveBeenCalledWith(
-                'ralph:tombstone:TICKET-1',
-                'true',
-                'EX',
-                31536000
-            );
-        });
-
-        it('should set tombstone for full jobs', async () => {
-            const mockJob = {
-                id: '123',
-                data: {
-                    ticketId: 'TICKET-1',
-                    mode: 'full',
-                },
-            };
-
-            const completedCall = mockWorkerOn.mock.calls.find((call: any[]) => call[0] === 'completed');
-            const onCompletedFn = completedCall[1];
-
-            await onCompletedFn(mockJob);
-
-            expect(mockRedis.connection.set).toHaveBeenCalledWith(
-                'ralph:tombstone:TICKET-1',
-                'true',
-                'EX',
-                31536000
-            );
-        });
-
-        it('should not set tombstone for plan-only jobs', async () => {
-            const mockJob = {
-                id: '123',
-                data: {
-                    ticketId: 'TICKET-1',
-                    mode: 'plan-only',
-                },
-            };
-
-            const completedCall = mockWorkerOn.mock.calls.find((call: any[]) => call[0] === 'completed');
-            const onCompletedFn = completedCall[1];
-
-            await onCompletedFn(mockJob);
-
-            expect(mockRedis.connection.set).not.toHaveBeenCalled();
+            if (shouldSet) {
+                expect(mockRedis.connection.set).toHaveBeenCalledWith(
+                    'ralph:tombstone:TICKET-1',
+                    'true',
+                    'EX',
+                    31536000
+                );
+            } else {
+                expect(mockRedis.connection.set).not.toHaveBeenCalled();
+            }
         });
     });
 
@@ -231,42 +181,25 @@ describe('WorkerService', () => {
             service.$onInit();
         });
 
-        it('should report permanent failure to Linear after exhausted attempts', async () => {
-            const mockJob = {
-                id: '123',
-                data: { ticketId: 'TICKET-1' },
-                attemptsMade: 3,
-                opts: { attempts: 3 },
-            };
-            const mockError = new Error('Final error');
-
-            const failedCall = mockWorkerOn.mock.calls.find((call: any[]) => call[0] === 'failed');
-            const onFailedFn = failedCall[1];
+        test.each([
+            ['exhausted attempts', 3, true],
+            ['non-final failures', 1, false],
+        ])('should %s report to Linear on %s', async (_, attemptsMade, shouldReport) => {
+            const mockJob = createMockJob({ ticketId: 'TICKET-1' }, { attemptsMade });
+            const mockError = new Error('Test error');
+            const onFailedFn = getEventHandler('failed');
 
             await onFailedFn(mockJob, mockError);
 
-            expect(mockLinear.updateIssueWithComment).toHaveBeenCalledWith(
-                'TICKET-1',
-                'Todo',
-                expect.stringContaining('failed permanently after 3 attempts')
-            );
-        });
-
-        it('should not report to Linear on non-final failures', async () => {
-            const mockJob = {
-                id: '123',
-                data: { ticketId: 'TICKET-1' },
-                attemptsMade: 1,
-                opts: { attempts: 3 },
-            };
-            const mockError = new Error('Temporary error');
-
-            const failedCall = mockWorkerOn.mock.calls.find((call: any[]) => call[0] === 'failed');
-            const onFailedFn = failedCall[1];
-
-            await onFailedFn(mockJob, mockError);
-
-            expect(mockLinear.updateIssueWithComment).not.toHaveBeenCalled();
+            if (shouldReport) {
+                expect(mockLinear.updateIssueWithComment).toHaveBeenCalledWith(
+                    'TICKET-1',
+                    'Todo',
+                    expect.stringContaining('failed permanently after 3 attempts')
+                );
+            } else {
+                expect(mockLinear.updateIssueWithComment).not.toHaveBeenCalled();
+            }
         });
     });
 
