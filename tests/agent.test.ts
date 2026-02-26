@@ -1,6 +1,5 @@
 jest.mock('../src/workspace');
 jest.mock('../src/tools');
-jest.mock('../src/plan-store');
 
 // Mock @redactpii/node to avoid ESM issues in Jest
 jest.mock('@redactpii/node', () => ({
@@ -10,22 +9,6 @@ jest.mock('@redactpii/node', () => ({
     CustomRedactor: jest.fn().mockImplementation(() => ({}))
 }));
 
-// Mock RalphLinearClient
-const mockUpdateIssueState = jest.fn().mockResolvedValue(true);
-const mockPostComment = jest.fn().mockResolvedValue(undefined);
-const mockGetIssueState = jest.fn().mockResolvedValue('In Progress');
-const mockIsEnabled = jest.fn().mockReturnValue(true);
-
-jest.mock('../src/linear-client', () => ({
-    LinearClient: jest.fn().mockImplementation(() => ({
-        updateIssueState: mockUpdateIssueState,
-        postComment: mockPostComment,
-        getIssueState: mockGetIssueState,
-        isEnabled: mockIsEnabled
-    }))
-}));
-
-jest.mock('ioredis');
 jest.mock('node:fs/promises', () => ({
     access: jest.fn().mockRejectedValue(new Error('No skills')),
     readdir: jest.fn(),
@@ -36,13 +19,11 @@ jest.mock('node:fs/promises', () => ({
     cp: jest.fn().mockResolvedValue(undefined),
 }));
 
-// Set a longer timeout for agent tests involving CLI mocks
 jest.setTimeout(30000);
 
 process.env.LINEAR_API_KEY = 'test-key';
-process.env.PLAN_REVIEW_ENABLED = 'false'; // Disable plan review for most tests
+process.env.PLAN_REVIEW_ENABLED = 'false'; // Run in full mode for most tests
 
-// Mock child_process for spawn and exec
 const mockSpawnOn = jest.fn();
 const mockStdoutOn = jest.fn();
 const mockStderrOn = jest.fn();
@@ -50,19 +31,18 @@ const mockStderrOn = jest.fn();
 const mockSpawn = jest.fn().mockImplementation(() => ({
     stdout: { on: mockStdoutOn },
     stderr: { on: mockStderrOn },
-    stdin: { end: jest.fn() }, // Added mock for stdin.end
+    stdin: { end: jest.fn() },
     on: mockSpawnOn,
-    pid: 12345 // Added PID for debug check
+    pid: 12345,
 }));
 
 const mockExec = jest.fn();
 
 jest.mock('node:child_process', () => ({
     spawn: mockSpawn,
-    exec: mockExec
+    exec: mockExec,
 }));
 
-// Mock util.promisify
 jest.mock('node:util', () => {
     const originalUtil = jest.requireActual('node:util');
     return {
@@ -74,25 +54,8 @@ jest.mock('node:util', () => {
     };
 });
 
-// Mock Linear
-const mockIssueUpdate = jest.fn();
-const mockCommentCreate = jest.fn();
-const mockStates = jest.fn().mockResolvedValue({ nodes: [{ name: 'In Progress', id: 's1' }, { name: 'In Review', id: 's2' }, { name: 'Todo', id: 's3' }, { name: 'Done', id: 's4' }, { name: 'Triage', id: 's5' }] });
-
-jest.mock('@linear/sdk', () => ({
-    LinearClient: jest.fn().mockImplementation(() => ({
-        issue: jest.fn().mockResolvedValue({
-            team: Promise.resolve({
-                states: mockStates
-            })
-        }),
-        updateIssue: mockIssueUpdate,
-        createComment: mockCommentCreate
-    }))
-}));
-
-// Mock Octokit
-const mockPullsCreate = jest.fn().mockResolvedValue({ data: { html_url: 'https://github.com/pr/1' } });
+// Mock Octokit — PR creation still lives in agent
+const mockPullsCreate = jest.fn().mockResolvedValue({ data: { html_url: 'https://github.com/org/repo/pull/1' } });
 const mockPullsList = jest.fn().mockResolvedValue({ data: [] });
 
 jest.mock('@octokit/rest', () => ({
@@ -116,6 +79,7 @@ describe('runAgent', () => {
     let runAgent: any;
 
     beforeEach(() => {
+        jest.clearAllMocks();
         jest.resetModules();
 
         mockGit = {
@@ -129,12 +93,11 @@ describe('runAgent', () => {
                     { file: 'tests/agent.test.ts', insertions: 30, deletions: 5 }
                 ],
                 insertions: 80,
-                deletions: 25
+                deletions: 25,
             }),
         };
         mockCleanup = jest.fn();
 
-        // Re-require mocked modules
         const workspaceModule = require('../src/workspace');
         (workspaceModule.setupWorkspace as jest.Mock).mockResolvedValue({
             workDir: '/mock/workspace/repo',
@@ -144,7 +107,7 @@ describe('runAgent', () => {
         });
         (workspaceModule.parseRepoUrl as jest.Mock).mockReturnValue({
             owner: 'owner',
-            repo: 'repo'
+            repo: 'repo',
         });
 
         const toolsModule = require('../src/tools');
@@ -156,51 +119,45 @@ describe('runAgent', () => {
             totalErrors: 0,
             relevantErrors: 0,
         });
+        (toolsModule.detectProjectLanguages as jest.Mock).mockResolvedValue(['typescript']);
 
-        // Default spawn behavior
         mockSpawnOn.mockImplementation((event, cb) => {
             if (event === 'close') cb(0);
         });
         mockStdoutOn.mockImplementation((event, cb) => {
             if (event === 'data') cb(Buffer.from('Default Output'));
         });
-        
-        // Default exec behavior
+
         mockExec.mockImplementation((cmd, opts, cb) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (callback) callback(null, { stdout: '', stderr: '' });
             return Promise.resolve({ stdout: '', stderr: '' });
         });
 
-        // Setup Langfuse Mock
         mockSpanEnd = jest.fn();
         mockTraceSpan = jest.fn().mockReturnValue({ end: mockSpanEnd });
         mockTraceUpdate = jest.fn();
         mockLangfuseFlush = jest.fn();
 
-        jest.doMock('langfuse', () => {
-            return {
-                Langfuse: jest.fn().mockImplementation(() => ({
-                    trace: jest.fn().mockReturnValue({
-                        span: mockTraceSpan,
-                        update: mockTraceUpdate,
-                        shutdownAsync: jest.fn(),
-                    }),
-                    flushAsync: mockLangfuseFlush,
-                }))
-            };
-        });
+        jest.doMock('langfuse', () => ({
+            Langfuse: jest.fn().mockImplementation(() => ({
+                trace: jest.fn().mockReturnValue({
+                    span: mockTraceSpan,
+                    update: mockTraceUpdate,
+                    shutdownAsync: jest.fn(),
+                }),
+                flushAsync: mockLangfuseFlush,
+            }))
+        }));
 
         const agentModule = require('../src/agent');
         runAgent = agentModule.runAgent;
     });
 
-    it('should execute claude CLI with prompt and skills', async () => {
+    it('spawns Claude CLI and returns executed result on success', async () => {
         const fsModule = require('node:fs/promises');
         fsModule.readdir.mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
         fsModule.readFile.mockResolvedValue('CLAUDE.md content');
-
-        // Ensure we test the default path if env is not set
         delete process.env.CLAUDE_BIN_PATH;
 
         mockStdoutOn
@@ -208,81 +165,80 @@ describe('runAgent', () => {
             .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
-        await runAgent(task);
+        const result = await runAgent(task);
 
         expect(mockSpawn).toHaveBeenCalled();
         expect(mockPullsCreate).toHaveBeenCalled();
-        expect(mockUpdateIssueState).toHaveBeenCalled();
+        expect(result.status).toBe('executed');
+        expect((result as any).prUrl).toContain('github.com');
     });
 
-    it('should retry if validation fails and eventually succeed', async () => {
+    it('retries on validation failure and returns executed result on eventual success', async () => {
         const toolsModule = require('../src/tools');
         (toolsModule.runPolyglotValidation as jest.Mock)
-            .mockResolvedValueOnce({ success: false, output: 'Linter error' })
-            .mockResolvedValueOnce({ success: true, output: 'Fixed' });
+            .mockResolvedValueOnce({ success: false, output: 'Linter error', languages: [], toolResults: {}, totalErrors: 1, relevantErrors: 1 })
+            .mockResolvedValueOnce({ success: true, output: 'Fixed', languages: [], toolResults: {}, totalErrors: 0, relevantErrors: 0 });
 
         mockStdoutOn.mockImplementation((event, cb) => {
             if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
         });
 
-        await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
+        const result = await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
+
         expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(4);
-        expect(mockPullsCreate).toHaveBeenCalled();
+        expect(result.status).toBe('executed');
     });
 
-        it('should report failure to Linear and NOT push WIP if validation fails after retries', async () => {
-            const toolsModule = require('../src/tools');
-            (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
-                success: false,
-                output: 'Validation Failed',
-            });
-    
-            mockStdoutOn.mockImplementation((event, cb) => {
-                if (event === 'data') cb(Buffer.from('Ralph tried to fix X but TSC failed. A human should take over.'));
-            });
-    
-            const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
-            await runAgent(task);
-            
-            // Should NOT have committed or created a PR
-            expect(mockGit.commit).not.toHaveBeenCalledWith(expect.stringContaining('wip:'));
-            expect(mockPullsCreate).not.toHaveBeenCalledWith(expect.objectContaining({
-                title: expect.stringContaining('wip:')
-            }));
-
-            // Verify ticket moved back to backlog state
-            expect(mockUpdateIssueState).toHaveBeenCalledWith('1', 'Todo');
-            // Should have added an explanation comment
-            expect(mockPostComment).toHaveBeenCalledWith('1', expect.stringContaining('Ralph tried to fix X'));
+    it('returns validation-failed result after exhausting all retries', async () => {
+        const toolsModule = require('../src/tools');
+        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+            success: false,
+            output: 'Validation Failed',
+            languages: [],
+            toolResults: {},
+            totalErrors: 5,
+            relevantErrors: 5,
         });
-        it('should update Linear status to "In Review" when PR is created successfully', async () => {
-        const fsModule = require('node:fs/promises');
-        fsModule.readdir.mockResolvedValue([]);
-        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
+
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('Ralph tried to fix X but TSC failed.'));
+        });
+
+        const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
+        const result = await runAgent(task);
+
+        expect(result.status).toBe('validation-failed');
+        expect(mockGit.commit).not.toHaveBeenCalledWith(expect.stringContaining('wip:'));
+        expect(mockPullsCreate).not.toHaveBeenCalled();
+    });
+
+    it('returns no-changes result when git has no staged files', async () => {
+        mockGit.status.mockResolvedValue({ staged: [] });
 
         mockStdoutOn.mockImplementation((event, cb) => {
             if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
         });
 
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
-            success: true,
-            output: 'Validation Passed',
-            languages: [],
-            toolResults: {},
-            totalErrors: 0,
-            relevantErrors: 0,
-        });
+        const result = await runAgent({ ticketId: 'no-change', title: 'No Change', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
-        mockIssueUpdate.mockClear();
-
-        const task = { ticketId: 'pr-test', title: 'Test PR Creation', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
-        await runAgent(task);
-
-        // Verify that status was updated to "In Review"
-        expect(mockUpdateIssueState).toHaveBeenCalledWith('pr-test', 'In Review');
-        expect(mockPullsCreate).toHaveBeenCalled();
+        expect(result.status).toBe('no-changes');
+        expect(mockPullsCreate).not.toHaveBeenCalled();
     });
 
+    it('returns plan-generated result in plan-only mode', async () => {
+        process.env.PLAN_REVIEW_ENABLED = 'true';
+        const agentModule = require('../src/agent');
+        runAgent = agentModule.runAgent;
 
+        mockStdoutOn.mockImplementation((event, cb) => {
+            if (event === 'data') cb(Buffer.from('<plan>Step 1: do X</plan>'));
+        });
+
+        const task = { ticketId: 'plan-1', title: 'Plan Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b', mode: 'plan-only' as const };
+        const result = await runAgent(task);
+
+        expect(result.status).toBe('plan-generated');
+        expect((result as any).plan).toContain('Step 1');
+        process.env.PLAN_REVIEW_ENABLED = 'false';
+    });
 });
