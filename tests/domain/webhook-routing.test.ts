@@ -55,6 +55,14 @@ describe('webhook-routing', () => {
       expect(isRalphOwnComment(comment as WebhookComment)).toBe(true);
     });
 
+    it('recognizes ralph in displayName only', () => {
+      const comment: Partial<WebhookComment> = {
+        author: { displayName: 'Ralph Bot' },
+        body: 'x'
+      };
+      expect(isRalphOwnComment(comment as WebhookComment)).toBe(true);
+    });
+
     it('recognizes ralph bot icon in body', () => {
       const comment: Partial<WebhookComment> = {
         author: { name: 'User' },

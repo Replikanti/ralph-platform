@@ -1,4 +1,3 @@
-// src/domain/webhook-routing.ts
 import type { WebhookComment, WebhookIssue, CommentRouting, StoredPlanContext } from './types';
 
 /** Schválení plánu uživatelem */
@@ -65,14 +64,14 @@ export function routeComment(
     return { action: 'revise', storedPlan, feedback: comment.body };
   }
 
-  if (isInReviewState(issueStateName)) {
+  if (isInReviewState(issueStateName) && comment.issue?.id) {
     return {
       action: 'iterate',
-      issueId: comment.issue?.id ?? '',
-      issueTitle: comment.issue?.title ?? 'Iterative fix',
-      issueDescription: comment.issue?.description,
-      teamKey: comment.issue?.team?.key,
-      identifier: comment.issue?.identifier,
+      issueId: comment.issue.id,
+      issueTitle: comment.issue.title ?? 'Iterative fix',
+      issueDescription: comment.issue.description,
+      teamKey: comment.issue.team?.key,
+      identifier: comment.issue.identifier,
       feedback: comment.body,
     };
   }
