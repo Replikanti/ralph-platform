@@ -1,5 +1,8 @@
 process.env.LINEAR_API_KEY = 'test-key';
 
+jest.mock('../src/logger', () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }));
+const getLoggerError = () => (jest.requireMock('../src/logger').logger.error as jest.Mock);
+
 import { createWorker, jobProcessor } from '../src/worker';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
@@ -217,7 +220,6 @@ describe('Worker', () => {
 
     describe('failed event', () => {
         it('logs failure and reports permanently failed job to Linear', async () => {
-            const errorSpy = jest.spyOn(console, 'error').mockImplementation();
             createWorker();
 
             const failedHandler = mockOn.mock.calls.find((c: any[]) => c[0] === 'failed')[1];
@@ -227,9 +229,8 @@ describe('Worker', () => {
                 new Error('Final error')
             );
 
-            expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('FAILED PERMANENTLY'));
+            expect(getLoggerError()).toHaveBeenCalledWith(expect.stringContaining('FAILED PERMANENTLY'));
             expect(mockUpdateIssueState).toHaveBeenCalledWith('T-1', 'Todo');
-            errorSpy.mockRestore();
         });
     });
 });

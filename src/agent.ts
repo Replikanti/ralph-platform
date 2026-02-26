@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
@@ -122,7 +123,7 @@ async function generatePRDescription(
 
         return sections.join('\n');
     } catch (error) {
-        console.warn('⚠️ Failed to generate PR description:', error);
+        logger.warn({ err: error }, '⚠️ Failed to generate PR description');
         return taskDescription || 'Implementation completed by Ralph';
     }
 }
@@ -143,7 +144,7 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
         });
         return response.data.html_url;
     } catch (e: any) {
-        console.error("PR failed: " + e.message);
+        logger.error("PR failed: " + e.message);
         return null;
     }
 }
@@ -159,7 +160,7 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
         
-        console.log("🚀 Spawning: " + CLAUDE_PATH + " in " + cwd);
+        logger.info("🚀 Spawning: " + CLAUDE_PATH + " in " + cwd);
 
         const child = spawn(CLAUDE_PATH, args, { 
             cwd,
@@ -201,7 +202,7 @@ function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: numb
         }
 
         const timeout = setTimeout(() => {
-            console.error("🛑 Timeout after " + timeoutMs + "ms. Killing PID " + child.pid);
+            logger.error("🛑 Timeout after " + timeoutMs + "ms. Killing PID " + child.pid);
             child.kill('SIGKILL');
             reject(new Error("Claude CLI timed out after " + timeoutMs + "ms. Output: " + stdout.substring(stdout.length - 200)));
         }, timeoutMs);
@@ -304,7 +305,7 @@ async function executePhase(workDir: string, homeDir: string, plan: string) {
 const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
 if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
     try { fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true }); } catch (e: any) {
-        console.warn("Could not create cache root: " + e.message);
+        logger.warn("Could not create cache root: " + e.message);
     }
 }
 
@@ -315,9 +316,9 @@ async function syncDirectoryContents(sourceDir: string, targetDir: string, opera
     const { execSync } = await import('node:child_process');
     try {
         execSync("cp -r " + sourceDir + "/* " + targetDir + "/");
-        console.log(operation + " Claude projects cache");
+        logger.info(operation + " Claude projects cache");
     } catch (e: any) {
-        console.warn(operation + " failed: " + e.message);
+        logger.warn(operation + " failed: " + e.message);
     }
 }
 
@@ -363,11 +364,11 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 
         }
 
-        console.log("Loaded commands into isolated Claude environment");
+        logger.info("Loaded commands into isolated Claude environment");
 
     } catch (e: any) {
 
-        console.warn("Failed to load commands: " + e.message);
+        logger.warn("Failed to load commands: " + e.message);
 
     }
 
@@ -378,7 +379,7 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 
 
 async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string, agentResult?: AgentResult }> {
-    console.log("🤖 Iteration " + iteration);
+    logger.info("🤖 Iteration " + iteration);
 
     const planSpan = ctx.trace.span({ name: "Planning-Opus-Iter-" + iteration, metadata: { iteration } });
     const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
@@ -408,7 +409,7 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     });
 
     if (check.success) {
-        console.log("✅ Validation passed!");
+        logger.info("✅ Validation passed!");
         await ctx.git.add('.');
         const status = await ctx.git.status();
         if (status.staged.length > 0) {
@@ -423,11 +424,11 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
             }
             return { success: true, agentResult: { mode: 'full', status: 'executed', prUrl, isIteration: ctx.task.isIteration ?? false } };
         } else {
-            console.warn("⚠️ No files changed.");
+            logger.warn("⚠️ No files changed.");
             return { success: true, agentResult: { mode: 'full', status: 'no-changes' } };
         }
     }
-    console.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
+    logger.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
     return { success: false, output: check.output };
 }
 
@@ -440,7 +441,7 @@ async function setupClaudeEnvironment(targetClaudeDir: string, workDir: string, 
         await configureClaudeSettings(targetClaudeDir);
         await ensureClaudeCredentialsExist(targetClaudeDir);
     } catch (e: any) {
-        console.warn("Seed failed: " + e.message);
+        logger.warn("Seed failed: " + e.message);
     }
 
     await seedClaudeCache(targetClaudeDir);
@@ -529,7 +530,7 @@ export const runAgent = async (task: Task): Promise<AgentResult> => {
     const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
     const actualMode = (mode === 'full' && planReviewEnabled) ? 'plan-only' : mode;
 
-    console.log(`🎯 Running agent in mode: ${actualMode}`);
+    logger.info(`🎯 Running agent in mode: ${actualMode}`);
 
     // Setup workspace first to detect languages
     const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);

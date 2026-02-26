@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import { AsyncRedactor, CustomRedactor } from '@redactpii/node';
 
 /**
@@ -88,7 +89,7 @@ export async function redactText(text: string): Promise<string> {
     try {
         return await redactor.redact(text);
     } catch (e) {
-        console.warn('⚠️ Redaction failed, returning original text (fail-open for stability, but logged):', e);
+        logger.warn({ err: e }, '⚠️ Redaction failed, returning original text (fail-open for stability, but logged)');
         return text;
     }
 }

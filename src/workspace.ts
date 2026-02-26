@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -45,7 +46,7 @@ export async function setupWorkspace(repoUrl: string, branchName: string): Promi
             try {
                 fs.rmSync(rootDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
             } catch (e: any) {
-                console.warn(`[Workspace] Cleanup failed for ${rootDir}: ${e.message}`);
+                logger.warn(`[Workspace] Cleanup failed for ${rootDir}: ${e.message}`);
             }
         } 
     };
