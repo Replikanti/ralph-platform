@@ -42,6 +42,11 @@ jest.mock('../../src/config/env', () => ({
 
 import { LinearClientService } from '../../src/services/LinearClientService';
 
+function createService(apiKey?: string): LinearClientService {
+    mockLinearApiKey = apiKey;
+    return new LinearClientService();
+}
+
 describe('LinearClientService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -58,16 +63,14 @@ describe('LinearClientService', () => {
             ['set', 'test-key', true],
             ['not set', undefined, false],
         ])('should return %s when LINEAR_API_KEY is %s', (_, apiKey, expected) => {
-            mockLinearApiKey = apiKey as string | undefined;
-            const service = new LinearClientService();
+            const service = createService(apiKey as string | undefined);
             expect(service.isEnabled()).toBe(expected);
         });
     });
 
     describe('postComment', () => {
         it('should post comment when enabled', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             await expect(service.postComment('issue-123', 'Test comment')).resolves.not.toThrow();
             expect(mockCreateComment).toHaveBeenCalledWith({
@@ -77,15 +80,13 @@ describe('LinearClientService', () => {
         });
 
         it('should not throw when not enabled', async () => {
-            mockLinearApiKey = undefined;
-            const service = new LinearClientService();
+            const service = createService();
 
             await expect(service.postComment('issue-123', 'Test comment')).resolves.not.toThrow();
         });
 
         it('should throw and log errors', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
             const error = new Error('API error');
             mockCreateComment.mockRejectedValueOnce(error);
 
@@ -95,8 +96,7 @@ describe('LinearClientService', () => {
 
     describe('updateIssueState', () => {
         it('should update state when enabled', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             // Mock issue with different current state
             mockIssue.mockResolvedValueOnce(createMockIssue({
@@ -110,16 +110,14 @@ describe('LinearClientService', () => {
         });
 
         it('should return false when not enabled', async () => {
-            mockLinearApiKey = undefined;
-            const service = new LinearClientService();
+            const service = createService();
 
             const result = await service.updateIssueState('issue-123', 'In Progress');
             expect(result).toBe(false);
         });
 
         it('should return false when team not found', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockIssue.mockResolvedValueOnce(createMockIssue({
                 team: null,
@@ -131,8 +129,7 @@ describe('LinearClientService', () => {
         });
 
         it('should fallback to "In Review" when plan-review not found', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockStates.mockResolvedValue(createMockStates([
                 { name: 'In Review', id: 's3' },
@@ -150,8 +147,7 @@ describe('LinearClientService', () => {
         });
 
         it('should return false when plan-review and fallback not found', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockStates.mockResolvedValue(createMockStates([{ name: 'In Progress', id: 's1' }]));
             mockIssue.mockResolvedValueOnce(createMockIssue({
@@ -164,8 +160,7 @@ describe('LinearClientService', () => {
         });
 
         it('should return false when state not found', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockStates.mockResolvedValue(createMockStates([{ name: 'In Progress', id: 's1' }]));
             mockIssue.mockResolvedValueOnce(createMockIssue({
@@ -178,8 +173,7 @@ describe('LinearClientService', () => {
         });
 
         it('should return true when already in target state', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             const result = await service.updateIssueState('issue-123', 'In Progress');
             expect(result).toBe(true);
@@ -187,8 +181,7 @@ describe('LinearClientService', () => {
         });
 
         it('should handle errors gracefully', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
             mockIssue.mockRejectedValueOnce(new Error('API error'));
 
             const result = await service.updateIssueState('issue-123', 'In Progress');
@@ -198,24 +191,21 @@ describe('LinearClientService', () => {
 
     describe('getIssueState', () => {
         it('should return null when not enabled', async () => {
-            mockLinearApiKey = undefined;
-            const service = new LinearClientService();
+            const service = createService();
 
             const result = await service.getIssueState('issue-123');
             expect(result).toBeNull();
         });
 
         it('should return state name when enabled', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             const result = await service.getIssueState('issue-123');
             expect(result).toBe('In Progress');
         });
 
         it('should return null when state not found', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockIssue.mockResolvedValueOnce(createMockIssue({
                 team: { states: mockStates },
@@ -227,8 +217,7 @@ describe('LinearClientService', () => {
         });
 
         it('should handle errors gracefully', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
             mockIssue.mockRejectedValueOnce(new Error('API error'));
 
             const result = await service.getIssueState('issue-123');
@@ -238,8 +227,7 @@ describe('LinearClientService', () => {
 
     describe('updateIssueWithComment', () => {
         it('should do nothing when not enabled', async () => {
-            mockLinearApiKey = undefined;
-            const service = new LinearClientService();
+            const service = createService();
 
             await expect(
                 service.updateIssueWithComment('issue-123', 'In Progress', 'Comment')
@@ -247,8 +235,7 @@ describe('LinearClientService', () => {
         });
 
         it('should update state and post comment', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockIssue.mockResolvedValue(createMockIssue({
                 team: { states: mockStates },
@@ -265,8 +252,7 @@ describe('LinearClientService', () => {
         });
 
         it('should update state without comment', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
 
             mockIssue.mockResolvedValue(createMockIssue({
                 team: { states: mockStates },
@@ -280,8 +266,7 @@ describe('LinearClientService', () => {
         });
 
         it('should handle errors gracefully', async () => {
-            mockLinearApiKey = 'test-key';
-            const service = new LinearClientService();
+            const service = createService('test-key');
             mockIssue.mockRejectedValue(new Error('API error'));
 
             await expect(
