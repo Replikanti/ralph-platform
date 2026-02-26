@@ -32,4 +32,4 @@ RUN npm ci && \
 
 USER node
 
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/index.js"]
