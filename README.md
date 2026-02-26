@@ -120,13 +120,15 @@ npm run build
 # Run tests
 npm test
 
-# Run specific test
-NODE_OPTIONS=--experimental-vm-modules npx jest tests/server.test.ts
+# Run specific test suite
+NODE_OPTIONS=--experimental-vm-modules npx jest tests/controllers/
+NODE_OPTIONS=--experimental-vm-modules npx jest tests/services/
 
-# Start services
-npm run start:api      # API on port 3000
-npm run start:worker   # Background worker
+# Start application (API + Worker in single process)
+npm start              # Starts on port 3000
 ```
+
+**Note**: With Ts.ED architecture, the Worker starts automatically via dependency injection when the API server boots. No need for separate processes.
 
 ## 🔐 Environment Variables
 
