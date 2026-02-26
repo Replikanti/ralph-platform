@@ -12,6 +12,8 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getPlan } from './plan-store';
 import { LinearClient as RalphLinearClient } from './linear-client';
+import { parseIssuePayload, parseCommentPayload } from './webhook-schemas';
+import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from './domain/webhook-routing';
 
 dotenv.config();
 const app = express();
@@ -155,17 +157,6 @@ function verifyLinearSignature(req: any): boolean {
     return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
 }
 
-function isApprovalComment(body: string): boolean {
-    const approvalPatterns = [/\blgtm\b/i, /\bapproved\b/i, /\bproceed\b/i, /\bship it\b/i];
-    return approvalPatterns.some(pattern => pattern.test(body));
-}
-
-function isStateInPlanReview(stateName: string): boolean {
-    const normalized = stateName.toLowerCase().trim();
-    const planReviewSynonyms = ['plan-review', 'plan review', 'pending review', 'awaiting approval'];
-    return planReviewSynonyms.includes(normalized);
-}
-
 interface JobConfig {
     jobId: string;
     jobData: any;
@@ -245,14 +236,11 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
     }, res);
 }
 
-async function handleIterationRequest(issueId: string, issue: any, commentBody: string, res: express.Response): Promise<express.Response> {
+async function handleIterationRequest(routing: { issueId: string; issueTitle: string; issueDescription?: string; teamKey?: string; identifier?: string; feedback: string }, res: express.Response): Promise<express.Response> {
     console.log(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
     console.log(`   Creating new plan for iterative fixes...`);
 
-    const issueTitle = issue?.title || 'Iterative fix';
-    const issueDescription = issue?.description || commentBody;
-    const teamKey = issue?.team?.key;
-    const identifier = issue?.identifier || issueId;
+    const { issueId, issueTitle, issueDescription, teamKey, identifier, feedback } = routing;
 
     const repoUrl = await getRepoForTeam(teamKey);
     if (!repoUrl) {
@@ -264,11 +252,11 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
     const jobData = {
         ticketId: issueId,
         title: issueTitle,
-        description: issueDescription,
+        description: issueDescription || feedback,
         repoUrl,
-        branchName: `ralph/feat-${identifier}`,
+        branchName: `ralph/feat-${identifier || issueId}`,
         mode: 'plan-only',
-        additionalFeedback: commentBody,
+        additionalFeedback: feedback,
         isIteration: true
     };
 
@@ -277,129 +265,107 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
         jobData,
         logContext: {
             type: 'iteration',
-            details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
+            details: [`Feedback: "${feedback.substring(0, 100)}..."`]
         }
     }, res);
 }
 
-async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`📋 [API] Processing plan review comment for issue ${issueId} (Current State: ${issueState})`); // NOSONAR - Input is internal or trusted webhook payload
-
-    const normalizedState = issueState.toLowerCase();
-    const isProcessing = normalizedState === 'in progress' || normalizedState === 'in review';
-
-    if (isApprovalComment(commentBody) && isProcessing) {
-        console.log(`ℹ️ [API] Ignoring approval comment for issue ${issueId} - already in active state: ${issueState}`); // NOSONAR - Input is internal or trusted webhook payload
-        return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
+async function handleCommentWebhook(data: unknown, res: express.Response): Promise<express.Response> {
+    const parsed = parseCommentPayload(data);
+    if (!parsed.ok) {
+        console.warn(`⚠️ [API] Invalid comment payload: ${parsed.error}`);
+        return res.status(400).send({ error: 'invalid_payload' });
     }
 
-    // Move ticket back to "In Progress" when user provides feedback/approval
-    const linearClient = new RalphLinearClient();
-    await linearClient.updateIssueState(issueId, "In Progress");
-    console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`); // NOSONAR - Input is internal or trusted webhook payload
+    const { comment } = parsed;
+    const issueId = comment.issue?.id;
 
-    if (isApprovalComment(commentBody)) {
-        return handlePlanApproval(issueId, storedPlan, res);
-    }
-    return handlePlanRevisionFeedback(issueId, storedPlan, commentBody, res);
-}
-
-async function handleCommentWebhook(data: any, res: express.Response): Promise<express.Response> {
-    const issue = data.issue;
-    const commentBody = data.body || '';
-    const issueState = issue?.state?.name || '';
-    const commentAuthor = data.user?.name || data.user?.displayName || '';
-
-    console.log(`💬 [API] Comment received:`);
-    console.log(`   Issue ID: ${issue?.id}`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Issue State: "${issueState}"`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Comment Author: "${commentAuthor}"`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`); // NOSONAR - Input is internal or trusted webhook payload
-
-    const issueId = issue?.id;
     if (!issueId) {
         console.warn(`⚠️ [API] Comment event missing issue ID`);
         return res.status(400).send({ error: 'missing_issue_id' });
     }
 
-    // CRITICAL: Ignore Ralph's own comments to prevent auto-execution
-    // Ralph's comments contain approval keywords in instructions (LGTM, approved, etc.)
-    const isRalphComment = commentAuthor.toLowerCase().includes('ralph') ||
-                          commentAuthor.toLowerCase().includes('bot') ||
-                          commentBody.includes('🤖 Ralph') ||
-                          commentBody.includes('Ralph\'s Implementation Plan');
-
-    if (isRalphComment) {
-        console.log(`🤖 [API] Ignoring Ralph's own comment (prevents auto-execution)`);
-        return res.status(200).send({ status: 'ignored', reason: 'ralph_comment' });
-    }
+    console.log(`💬 [API] Comment received:`);
+    console.log(`   Issue ID: ${issueId}`); // NOSONAR - Input is internal or trusted webhook payload
+    console.log(`   Issue State: "${comment.issue?.state?.name ?? ''}"`); // NOSONAR - Input is internal or trusted webhook payload
+    console.log(`   Comment Author: "${comment.author.name ?? comment.author.displayName ?? ''}"`); // NOSONAR - Input is internal or trusted webhook payload
+    console.log(`   Comment Body: "${comment.body.substring(0, 100)}..."`); // NOSONAR - Input is internal or trusted webhook payload
 
     const storedPlan = await getPlan(connection, issueId);
-    if (storedPlan) {
-        return handleStoredPlanComment(issueId, issueState, storedPlan, commentBody, res);
+    const routing = routeComment(comment, storedPlan);
+
+    if (routing.action === 'ignore') {
+        console.log(`ℹ️ [API] Ignoring comment (${routing.reason})`);
+        return res.status(200).send({ status: 'ignored', reason: routing.reason.replace(/-/g, '_') });
     }
 
-    const inReviewState = issueState.toLowerCase().includes('review') || issueState.toLowerCase() === 'in review';
-    if (inReviewState) {
-        return handleIterationRequest(issueId, issue, commentBody, res);
+    if (routing.action === 'approve' || routing.action === 'revise') {
+        // Move ticket back to "In Progress" when user provides feedback/approval
+        const linearClient = new RalphLinearClient();
+        await linearClient.updateIssueState(issueId, "In Progress");
+        console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`); // NOSONAR - Input is internal or trusted webhook payload
     }
 
-    console.log(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
-    return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
+    if (routing.action === 'approve') {
+        return handlePlanApproval(issueId, routing.storedPlan, res);
+    }
+
+    if (routing.action === 'revise') {
+        return handlePlanRevisionFeedback(issueId, routing.storedPlan, routing.feedback, res);
+    }
+
+    return handleIterationRequest(routing, res);
 }
 
-function shouldSkipIssueUpdate(action: string, statusName: string): boolean {
-    if (action !== 'update') {
-        return false;
+async function handleIssueWebhook(data: unknown, action: string, res: express.Response): Promise<express.Response> {
+    const parsed = parseIssuePayload(data);
+    if (!parsed.ok) {
+        console.warn(`⚠️ [API] Invalid issue payload: ${parsed.error}`);
+        return res.status(400).send({ error: 'invalid_payload' });
     }
-    const terminalStates = ['in progress', 'in review', 'completed', 'canceled', 'done'];
-    return terminalStates.includes(statusName);
-}
 
-async function handleIssueWebhook(data: any, action: string, res: express.Response): Promise<express.Response> {
+    const { issue } = parsed;
+
     // Tombstone Check: Prevent Reopen
-    const tombstone = await connection.get(`ralph:tombstone:${data.id}`);
+    const tombstone = await connection.get(`ralph:tombstone:${issue.id}`);
     if (tombstone) {
-        console.log(`🪦 [API] Ignoring ticket ${data.identifier} (ID: ${data.id}) - Tombstone found (already processed).`); // NOSONAR - Input is internal or trusted webhook payload
+        console.log(`🪦 [API] Ignoring ticket ${issue.identifier} (ID: ${issue.id}) - Tombstone found (already processed).`); // NOSONAR - Input is internal or trusted webhook payload
         return res.status(200).send({ status: 'ignored', reason: 'tombstone_present' });
     }
 
-    const labels = data.labels || [];
-    const labelNames = labels.map((l: { name: string }) => l.name);
-    const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
-
-    if (!hasRalphLabel) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`); // NOSONAR - Input is internal or trusted webhook payload
+    if (!hasRalphLabel(issue)) {
+        const labelNames = issue.labels.map(l => l.name);
+        console.log(`ℹ️ [API] Skipping ticket ${issue.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`); // NOSONAR - Input is internal or trusted webhook payload
         return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
     }
 
-    const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
-    console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`); // NOSONAR - Input is internal or trusted webhook payload
+    const stateName = issue.state?.name ?? '';
+    console.log(`📊 [API] Ticket ${issue.identifier} current state: "${stateName}"`); // NOSONAR - Input is internal or trusted webhook payload
 
-    if (shouldSkipIssueUpdate(action, statusName)) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`); // NOSONAR - Input is internal or trusted webhook payload
+    if (shouldSkipIssueWebhook(action, stateName)) {
+        console.log(`ℹ️ [API] Skipping ticket ${issue.identifier} - Already in active/terminal state: ${stateName}`); // NOSONAR - Input is internal or trusted webhook payload
         return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
     }
 
-    const teamKey = data.team?.key;
+    const teamKey = issue.team?.key;
     const repoUrl = await getRepoForTeam(teamKey);
 
     if (!repoUrl) {
-        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`); // NOSONAR - Input is internal or trusted webhook payload
+        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${issue.title}`); // NOSONAR - Input is internal or trusted webhook payload
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
-    console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`); // NOSONAR - Input is internal or trusted webhook payload
+    console.log(`📥 [API] Enqueueing Ticket: ${issue.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`); // NOSONAR - Input is internal or trusted webhook payload
 
     try {
         await ralphQueue.add('coding-task', {
-            ticketId: data.id,
-            title: data.title,
-            description: data.description,
+            ticketId: issue.id,
+            title: issue.title,
+            description: issue.description,
             repoUrl,
-            branchName: `ralph/feat-${data.identifier}`
+            branchName: `ralph/feat-${issue.identifier}`
         }, {
-            jobId: data.id,
+            jobId: issue.id,
             attempts: 3,
             backoff: {
                 type: 'exponential',
