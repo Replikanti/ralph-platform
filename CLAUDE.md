@@ -34,14 +34,15 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 6. Merge via GitHub UI
 
 **Key components:**
-- **API Server** (src/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
-- **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
-- **Agent** (src/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
-- **Workspace** (src/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
-- **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, staticcheck, go build, terraform, tflint, Trivy)
-- **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
-- **Linear Client** (src/linear-client.ts): Integration for posting plans and updating issue states
-- **Linear Utils** (src/linear-utils.ts): Shared utilities including state synonym mapping
+- **API Server** (src/Server.ts): Ts.ED platform bootstrap, receives Linear webhooks via WebhookController
+- **WebhookController** (src/controllers/WebhookController.ts): HTTP endpoint for Linear webhooks, validates signatures, enqueues tasks
+- **WorkerService** (src/services/WorkerService.ts): BullMQ worker lifecycle, dequeues tasks from Redis, orchestrates agent execution
+- **AgentOrchestratorService** (src/services/AgentOrchestratorService.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
+- **WorkspaceManager** (src/domain/WorkspaceManager.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
+- **AgentTools** (src/domain/AgentTools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, staticcheck, go build, terraform, tflint, Trivy)
+- **PlanStoreService** (src/services/PlanStoreService.ts): Redis-based persistence for human-in-the-loop plan reviews
+- **LinearClientService** (src/services/LinearClientService.ts): Integration for posting plans and updating issue states
+- **LinearUtils** (src/domain/LinearUtils.ts): Shared utilities including state synonym mapping
 
 ## Architecture Flow
 
@@ -148,7 +149,7 @@ To use human-in-the-loop planning, you must:
 
 Ralph uses the "Todo" state for awaiting plan approval. When you comment, the ticket automatically moves back to "In Progress".
 
-**State Synonym Mapping** (src/linear-utils.ts):
+**State Synonym Mapping** (src/domain/LinearUtils.ts):
 - "in progress": in progress, wip, doing
 - "in review": under review, peer review, review, pr
 - "todo": todo, triage, backlog, unstarted, ready
@@ -216,7 +217,7 @@ Copy `.env.example` to `.env` and configure:
 ## Critical Implementation Details
 
 ### Linear Webhook Security
-The webhook endpoint (src/server.ts:49) uses **HMAC SHA-256 signature verification** with timing-safe comparison. The raw request body is captured via express middleware (line 11-14) and verified against the `linear-signature` header using `LINEAR_WEBHOOK_SECRET`.
+The webhook endpoint (src/controllers/WebhookController.ts) uses **HMAC SHA-256 signature verification** with timing-safe comparison via SignatureVerificationMiddleware. The raw request body is captured in Server.ts bootstrap and verified against the `linear-signature` header using `LINEAR_WEBHOOK_SECRET`.
 
 **Never bypass signature verification** - it prevents unauthorized job injection.
 
@@ -237,12 +238,12 @@ Only Linear issues with the label "Ralph" (case-insensitive) trigger agent execu
 - Requires stored plan in Redis (7-day TTL)
 
 ### Workspace Isolation
-Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The workspace module (src/workspace.ts) clones the repo using OAuth token authentication, creates/checks out a feature branch (`ralph/feat-{identifier}`), and configures git identity as "Ralph Bot <ralph@duvo.ai>".
+Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The workspace module (src/domain/WorkspaceManager.ts) clones the repo using OAuth token authentication, creates/checks out a feature branch (`ralph/feat-{identifier}`), and configures git identity as "Ralph Bot <ralph@duvo.ai>".
 
 **Always call `cleanup()` after job completion** to prevent disk exhaustion.
 
 ### Agent Execution Modes
-The agent (src/agent.ts) supports three execution modes controlled by `task.mode`:
+The agent orchestrator (src/services/AgentOrchestratorService.ts) supports three execution modes controlled by `task.mode`:
 1. **plan-only**: Sonnet 4.5 generates implementation plan ($0.50 budget), posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
 2. **execute-only**: Sonnet 4.5 executes pre-approved plan from Redis ($2.00 budget) (triggered by approval comment)
 3. **full**: Legacy mode - Sonnet 4.5 plans then executes in one job (default when PLAN_REVIEW_ENABLED=false)
@@ -265,7 +266,7 @@ The agent uses the native Claude CLI (Claude Code) tools for code manipulation. 
 - `Glob`: Find files matching patterns
 - `LS`: List directory contents
 
-**Command Execution Security (src/tools.ts:34-89)**:
+**Command Execution Security (src/domain/AgentTools.ts:70-134)**:
 The `runCommand` tool implements defense-in-depth against command injection:
 
 1. **Allowlist Validation**: Only whitelisted command patterns are permitted:
@@ -293,7 +294,7 @@ The `runCommand` tool implements defense-in-depth against command injection:
 **Critical**: Never bypass these security controls. The agent operates on untrusted repositories and must not execute arbitrary commands or access files outside the workspace.
 
 ### Polyglot Validation
-The tools module (src/tools.ts) auto-detects project type and runs:
+The tools module (src/domain/AgentTools.ts) auto-detects project type and runs:
 - **TypeScript/JavaScript**: Biome (formatting/linting with auto-fix) + TSC (type checking)
 - **Python**: Ruff (linting + formatting with auto-fix) + Mypy (type checking with `--ignore-missing-imports`)
 - **Go**: goimports (formatting/imports with auto-fix) + staticcheck (linting - MIT licensed) + go build (compilation check)
@@ -303,7 +304,7 @@ The tools module (src/tools.ts) auto-detects project type and runs:
 Validation failures are captured in the output and provided as feedback to the agent for fixing in the next iteration.
 
 ### BullMQ Configuration
-Worker (src/worker.ts:26-30):
+Worker (src/services/WorkerService.ts):
 - Concurrency: 2 parallel jobs per worker pod
 - Rate limiter: 5 jobs per 60 seconds (Anthropic API protection)
 - Retry strategy: 3 attempts with exponential backoff (2s base delay)
@@ -323,8 +324,8 @@ To save context window space, prefer **TOON (Token Optimized Object Notation)** 
 - Example:
   ```text
   files:
-    src/agent.ts
-    src/server.ts
+    src/services/AgentOrchestratorService.ts
+    src/Server.ts
   status:active
   ```
 
@@ -335,19 +336,28 @@ To save context window space, prefer **TOON (Token Optimized Object Notation)** 
 Tests use supertest for API endpoints and mock all external dependencies (Redis, Anthropic SDK, Langfuse, simple-git, child_process). See `tests/` for patterns.
 
 ### Test Organization
-- `tests/fixtures/` - Shared test data (webhook payloads, mocks)
-- `tests/fixtures/mocks.ts` - Reusable mock factories for Redis, Anthropic, etc.
-- `tests/fixtures/webhook-payloads.ts` - Linear webhook payload samples
+Following Ts.ED architecture patterns with clear separation of concerns:
 
-Key test files:
-- `tests/server.test.ts`: Webhook signature verification, filtering logic, comment handling
-- `tests/worker.test.ts`: Job processing, retry behavior, error handling, mode switching
-- `tests/agent.test.ts`: Skill loading, LLM orchestration, tracing, plan-only/execute-only modes
-- `tests/workspace.test.ts`: Git operations, cleanup
-- `tests/tools.test.ts`: Polyglot validation detection
-- `tests/plan-store.test.ts`: Redis plan persistence, TTL, feedback accumulation
-- `tests/linear-client.test.ts`: Linear API integration, state updates
-- `tests/plan-formatter.test.ts`: Plan markdown formatting
+- `tests/controllers/` - HTTP endpoint tests using PlatformTest
+  - `WebhookController.test.ts` - Webhook signature verification, filtering logic, comment handling
+  - `SystemController.test.ts` - Health checks and admin endpoints
+- `tests/services/` - DI service tests with injected dependencies
+  - `AgentOrchestratorService.test.ts` - Skill loading, LLM orchestration, tracing, plan-only/execute-only modes
+  - `WorkerService.test.ts` - Job processing, retry behavior, error handling, mode switching
+  - `PlanStoreService.test.ts` - Redis plan persistence, TTL, feedback accumulation
+  - `LinearClientService.test.ts` - Linear API integration, state updates
+  - `QueueService.test.ts`, `ConfigService.test.ts`, `GitHubService.test.ts`, etc.
+- `tests/domain/` - Pure domain logic tests (no framework decorators)
+  - `AgentTools.test.ts` - Polyglot validation detection, command security
+  - `WorkspaceManager.test.ts` - Git operations, cleanup
+  - `PlanFormatter.test.ts` - Plan markdown formatting
+  - `LinearUtils.test.ts` - State synonym mapping
+  - `PiiRedactor.test.ts` - Secret/PII redaction
+- `tests/middlewares/` - Middleware tests
+  - `SignatureVerificationMiddleware.test.ts` - HMAC signature verification
+- `tests/integration/` - End-to-end integration tests
+- `tests/fixtures/` - Shared test data (webhook payloads, mocks)
+- `tests/test-utils/` - Helper functions for testing (common-mocks, setup utilities)
 
 ## Production Deployment
 
