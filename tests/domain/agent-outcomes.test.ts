@@ -11,15 +11,15 @@ describe('agent-outcomes', () => {
     });
 
     it('handles executed status', () => {
-      const result: AgentResult = { mode: 'full', status: 'executed', prUrl: 'http://pr', isIteration: false };
+      const result: AgentResult = { mode: 'full', status: 'executed', prUrl: 'https://github.com/org/repo/pull/1', isIteration: false };
       const action = resolvePlatformAction(result);
-      expect(action).toEqual({ type: 'mark-in-review', prUrl: 'http://pr', isIteration: false });
+      expect(action).toEqual({ type: 'mark-in-review', prUrl: 'https://github.com/org/repo/pull/1', isIteration: false });
     });
 
     it('handles executed status for iteration', () => {
-      const result: AgentResult = { mode: 'execute-only', status: 'executed', prUrl: 'http://pr', isIteration: true };
+      const result: AgentResult = { mode: 'execute-only', status: 'executed', prUrl: 'https://github.com/org/repo/pull/1', isIteration: true };
       const action = resolvePlatformAction(result);
-      expect(action).toEqual({ type: 'mark-in-review', prUrl: 'http://pr', isIteration: true });
+      expect(action).toEqual({ type: 'mark-in-review', prUrl: 'https://github.com/org/repo/pull/1', isIteration: true });
     });
 
     it('handles no-changes status', () => {
