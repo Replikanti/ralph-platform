@@ -756,7 +756,7 @@ async function handlePlanOnlyMode(
     const formattedPlan = formatPlanForLinear(plan, task.title);
     await linearClient.postComment(task.ticketId, formattedPlan);
 
-    // Move ticket to "Todo" state - signals plan is ready for human review
+    // Move ticket to "To-do" state - signals plan is ready for human review
     // This allows users to filter tickets that need their approval
     await linearClient.updateIssueState(task.ticketId, "Todo");
     console.log("✅ Plan posted to Linear, awaiting human approval");
