@@ -1,5 +1,11 @@
 import IORedis from 'ioredis';
-import { StoredPlan } from './agent';
+import type { StoredPlanContext } from './domain/types';
+
+export interface StoredPlan extends StoredPlanContext {
+    taskId: string;
+    createdAt: Date;
+    status: 'pending-review' | 'approved' | 'needs-revision';
+}
 
 const PLAN_TTL_DAYS = Number.parseInt(process.env.PLAN_TTL_DAYS || '7', 10);
 const PLAN_TTL_SECONDS = PLAN_TTL_DAYS * 24 * 60 * 60;

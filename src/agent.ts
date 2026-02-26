@@ -6,10 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import IORedis from 'ioredis';
-import { storePlan, deletePlan } from './plan-store';
-import { formatPlanForLinear } from './plan-formatter';
-import { LinearClient as RalphLinearClient } from './linear-client';
+import type { AgentResult } from './domain/types';
 
 const langfuse = new Langfuse();
 
@@ -30,21 +27,6 @@ export interface Task {
     isIteration?: boolean; // Flag indicating this is a PR iteration (fix request)
 }
 
-export interface StoredPlan {
-    taskId: string;
-    plan: string;
-    taskContext: {
-        ticketId: string;
-        title: string;
-        description?: string;
-        repoUrl: string;
-        branchName: string;
-        isIteration?: boolean; // Flag for PR iteration workflow
-    };
-    feedbackHistory: string[];
-    createdAt: Date;
-    status: 'pending-review' | 'approved' | 'needs-revision';
-}
 
 interface IterationContext {
     workDir: string;
@@ -56,24 +38,6 @@ interface IterationContext {
 }
 
 // --- HELPERS ---
-
-export async function updateLinearIssue(issueId: string, statusName: string, comment?: string) {
-    if (!process.env.LINEAR_API_KEY) return;
-
-    try {
-        const linearClient = new RalphLinearClient();
-
-        // Update state with fallback support
-        await linearClient.updateIssueState(issueId, statusName);
-
-        // Add comment if provided
-        if (comment) {
-            await linearClient.postComment(issueId, comment);
-        }
-    } catch (e: any) {
-        console.error("Linear update failed: " + e.message);
-    }
-}
 
 async function summarizeFailurePhase(task: Task, homeDir: string, errors: string): Promise<string> {
     const prompt = "You are the Post-Mortem Analyst. Ralph failed a task. " +
@@ -413,7 +377,7 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 
 
 
-async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string }> {
+async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string, agentResult?: AgentResult }> {
     console.log("🤖 Iteration " + iteration);
 
     const planSpan = ctx.trace.span({ name: "Planning-Opus-Iter-" + iteration, metadata: { iteration } });
@@ -425,7 +389,6 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     await executePhase(ctx.workDir, ctx.homeDir, plan);
     execSpan.end();
 
-    // Validation span with rich metadata for Langfuse
     const validationSpan = ctx.trace.span({
         name: "Validation",
         metadata: { iteration }
@@ -450,41 +413,22 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
         const status = await ctx.git.status();
         if (status.staged.length > 0) {
             await ctx.git.commit("feat: " + ctx.task.title);
-            await ctx.git.push('origin', ctx.task.branchName, ['--force']);
+            const pushArgs = ctx.task.isIteration ? [] : ['--force'];
+            await ctx.git.push('origin', ctx.task.branchName, pushArgs);
 
-            // Generate rich PR description with stats and validation results
-            const prBody = await generatePRDescription(ctx.workDir, ctx.git, ctx.task.description || '', check);
-
-            // Create PR first, then wait for Linear auto-switch
-            const prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, prBody);
-            console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Check if Linear auto-switched, only update if needed
-            const linearClient = new RalphLinearClient();
-            const currentState = await linearClient.getIssueState(ctx.task.ticketId);
-            if (currentState?.toLowerCase() === 'in review') {
-                console.log("✅ Linear auto-switched to In Review, just adding comment");
-                await linearClient.postComment(ctx.task.ticketId, "✅ Done. PR: " + prUrl);
-            } else {
-                console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
-                await updateLinearIssue(ctx.task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
+            let prUrl: string | null = null;
+            if (!ctx.task.isIteration) {
+                const prBody = await generatePRDescription(ctx.workDir, ctx.git, ctx.task.description || '', check);
+                prUrl = await createPullRequest(ctx.task.repoUrl, ctx.task.branchName, "feat: " + ctx.task.title, prBody);
             }
+            return { success: true, agentResult: { mode: 'full', status: 'executed', prUrl, isIteration: ctx.task.isIteration ?? false } };
         } else {
             console.warn("⚠️ No files changed.");
-            await updateLinearIssue(ctx.task.ticketId, "Todo", "⚠️ No changes necessary.");
+            return { success: true, agentResult: { mode: 'full', status: 'no-changes' } };
         }
-        return { success: true };
     }
     console.warn("⚠️ Validation failed (Iter " + iteration + "):\n" + check.output);
     return { success: false, output: check.output };
-}
-
-async function handleFailureFallback(workDir: string, homeDir: string, task: Task, git: any, previousErrors: string, MAX_RETRIES: number): Promise<void> {
-    console.warn("🛑 Task failed after " + MAX_RETRIES + " attempts.");
-    const explanation = await summarizeFailurePhase(task, homeDir, previousErrors);
-    const failComment = "❌ Failed after " + MAX_RETRIES + " attempts.\n\n" + explanation + "\n\n---\nDetails:\n```\n" + previousErrors.substring(0, 1000) + "...\n```";
-    await updateLinearIssue(task.ticketId, "Todo", failComment);
 }
 
 async function setupClaudeEnvironment(targetClaudeDir: string, workDir: string, homeDir: string): Promise<string> {
@@ -556,19 +500,18 @@ async function ensureClaudeCredentialsExist(targetClaudeDir: string): Promise<vo
     }
 }
 
-async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, trace: any, availableSkills: string, targetClaudeDir: string): Promise<void> {
-    await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph started working\n\n📋 **Job ID:** \`${task.jobId}\``);
-
+async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, trace: any, availableSkills: string, targetClaudeDir: string): Promise<AgentResult> {
     let previousErrors = "";
     for (let i = 0; i < 3; i++) {
         const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
         await persistClaudeCache(targetClaudeDir);
-        if (result.success) {
-            return;
+        if (result.success && result.agentResult) {
+            return result.agentResult;
         }
         previousErrors = result.output || "Unknown error";
     }
-    await handleFailureFallback(workDir, homeDir, task, git, previousErrors, 3);
+    const failureSummary = await summarizeFailurePhase(task, homeDir, previousErrors);
+    return { mode: 'full', status: 'validation-failed', validationOutput: previousErrors, failureSummary };
 }
 
 // Helper to detect task type for Langfuse tracking
@@ -581,7 +524,7 @@ function detectTaskType(title: string): string {
     return 'feature';
 }
 
-export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
+export const runAgent = async (task: Task): Promise<AgentResult> => {
     const mode = task.mode || 'full';
     const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
     const actualMode = (mode === 'full' && planReviewEnabled) ? 'plan-only' : mode;
@@ -600,7 +543,7 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
         languages: detectedLanguages,
         repository: task.repoUrl,
         taskType: detectTaskType(task.title)
-    }, async (trace: any) => {
+    }, async (trace: any): Promise<AgentResult> => {
         const homeDir = path.join(rootDir, 'home');
         const targetClaudeDir = path.join(homeDir, '.claude');
 
@@ -608,98 +551,22 @@ export const runAgent = async (task: Task, redis?: IORedis): Promise<void> => {
             const availableSkills = await setupClaudeEnvironment(targetClaudeDir, workDir, homeDir);
 
             if (actualMode === 'plan-only') {
-                await handlePlanOnlyMode(task, workDir, homeDir, trace, availableSkills, redis);
-                return;
+                return await handlePlanOnlyMode(task, workDir, homeDir, trace, availableSkills);
             }
 
             if (actualMode === 'execute-only') {
                 if (!task.existingPlan) {
                     throw new Error("execute-only mode requires existingPlan");
                 }
-                await handleExecuteOnlyMode(task, workDir, homeDir, git, trace, task.existingPlan, redis);
-                return;
+                return await handleExecuteOnlyMode(task, workDir, homeDir, git, trace, task.existingPlan);
             }
 
-            await runFullMode(task, workDir, homeDir, git, trace, availableSkills, targetClaudeDir);
+            return await runFullMode(task, workDir, homeDir, git, trace, availableSkills, targetClaudeDir);
         } finally {
             cleanup();
         }
     });
 };
-
-async function handleIterationCompletion(task: Task): Promise<void> {
-    await updateLinearIssue(task.ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
-}
-
-async function handlePRCreationAndStateUpdate(
-    task: Task,
-    workDir: string,
-    git: any,
-    validationResult: { success: boolean; output: string }
-): Promise<void> {
-    // Generate rich PR description with stats and validation results
-    const prBody = await generatePRDescription(workDir, git, task.description || '', validationResult);
-
-    // Create PR first, then wait for Linear auto-switch
-    const prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, prBody);
-    console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Check if Linear auto-switched, only update if needed
-    const linearClient = new RalphLinearClient();
-    const currentState = await linearClient.getIssueState(task.ticketId);
-    if (currentState?.toLowerCase() === 'in review') {
-        console.log("✅ Linear auto-switched to In Review, just adding comment");
-        await linearClient.postComment(task.ticketId, "✅ Done. PR: " + prUrl);
-    } else {
-        console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
-        await updateLinearIssue(task.ticketId, "In Review", "✅ Done. PR: " + prUrl);
-    }
-}
-
-async function handleValidationSuccess(
-    task: Task,
-    workDir: string,
-    git: any,
-    validationResult: { success: boolean; output: string },
-    redis?: IORedis
-): Promise<void> {
-    await git.add('.');
-    const status = await git.status();
-
-    if (status.staged.length > 0) {
-        await git.commit("feat: " + task.title);
-
-        // For iterations, don't force push (preserve PR history)
-        // For new work, force push to ensure clean history
-        const pushArgs = task.isIteration ? [] : ['--force'];
-        await git.push('origin', task.branchName, pushArgs);
-
-        // Only create PR if this is not an iteration (PR already exists)
-        if (task.isIteration) {
-            await handleIterationCompletion(task);
-        } else {
-            await handlePRCreationAndStateUpdate(task, workDir, git, validationResult);
-        }
-    } else {
-        console.warn("⚠️ No files changed.");
-        await updateLinearIssue(task.ticketId, "Todo", "⚠️ No changes necessary.");
-    }
-
-    // Clean up stored plan (but keep it for iterations to allow further fixes)
-    if (redis && !task.isIteration) {
-        await deletePlan(redis, task.ticketId);
-    }
-}
-
-async function handleValidationFailure(task: Task, validationOutput: string): Promise<void> {
-    console.warn("⚠️ Validation failed after execution:\n" + validationOutput);
-    await updateLinearIssue(
-        task.ticketId,
-        "Todo",
-        "❌ Execution completed but validation failed.\n\n```\n" + validationOutput.substring(0, 1000) + "\n```"
-    );
-}
 
 async function handlePlanOnlyMode(
     task: Task,
@@ -707,59 +574,14 @@ async function handlePlanOnlyMode(
     homeDir: string,
     trace: any,
     availableSkills: string,
-    redis?: IORedis
-): Promise<void> {
-    const linearClient = new RalphLinearClient();
-
-    if (task.isIteration) {
-        console.log("🔄 Running plan-only mode for PR iteration");
-
-        // For iterations, issue is already in "In Review" - move back to In Progress
-        await linearClient.updateIssueState(task.ticketId, "In Progress");
-        await linearClient.postComment(task.ticketId, `🔄 Ralph is creating iteration plan based on your feedback...\n\n📋 **Job ID:** \`${task.jobId}\``);
-    } else {
-        console.log("📝 Running plan-only mode");
-
-        // Move ticket to In Progress state when Ralph starts working
-        await linearClient.updateIssueState(task.ticketId, "In Progress");
-        await linearClient.postComment(task.ticketId, `🤖 Ralph is generating implementation plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
-    }
-
-    // Generate plan with Opus
-    const planSpan = trace.span({ name: "Planning-Opus-Plan-Review", metadata: { mode: 'plan-only' } });
+): Promise<AgentResult> {
+    const planSpan = trace.span({ name: "Planning-Sonnet-Plan-Review", metadata: { mode: 'plan-only' } });
     const previousErrors = task.additionalFeedback || "";
     const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
     planSpan.end({ output: plan });
 
-    // Store plan in Redis
-    if (redis) {
-        const storedPlan: StoredPlan = {
-            taskId: task.ticketId,
-            plan,
-            taskContext: {
-                ticketId: task.ticketId,
-                title: task.title,
-                description: task.description,
-                repoUrl: task.repoUrl,
-                branchName: task.branchName,
-                isIteration: task.isIteration
-            },
-            feedbackHistory: task.additionalFeedback ? [task.additionalFeedback] : [],
-            createdAt: new Date(),
-            status: 'pending-review'
-        };
-        await storePlan(redis, task.ticketId, storedPlan);
-    }
-
-    // Format and post plan to Linear
-    const formattedPlan = formatPlanForLinear(plan, task.title);
-    await linearClient.postComment(task.ticketId, formattedPlan);
-
-    // Move ticket to "To-do" state - signals plan is ready for human review
-    // This allows users to filter tickets that need their approval
-    await linearClient.updateIssueState(task.ticketId, "Todo");
-    console.log("✅ Plan posted to Linear, awaiting human approval");
+    return { mode: 'plan-only', status: 'plan-generated', plan };
 }
 
 async function handleExecuteOnlyMode(
@@ -769,24 +591,34 @@ async function handleExecuteOnlyMode(
     git: any,
     trace: any,
     plan: string,
-    redis?: IORedis
-): Promise<void> {
-    console.log("⚙️ Running execute-only mode with approved plan");
-
-    await updateLinearIssue(task.ticketId, "In Progress", `🤖 Ralph is executing approved plan...\n\n📋 **Job ID:** \`${task.jobId}\``);
-
-    // Execute the plan with Sonnet
+): Promise<AgentResult> {
     const execSpan = trace.span({ name: "Execution-Sonnet-Approved-Plan", metadata: { mode: 'execute-only' } });
     await executePhase(workDir, homeDir, plan);
     execSpan.end();
 
-    // Run validation
     const check = await runPolyglotValidation(workDir);
 
-    if (check.success) {
-        console.log("✅ Validation passed!");
-        await handleValidationSuccess(task, workDir, git, check, redis);
-    } else {
-        await handleValidationFailure(task, check.output);
+    if (!check.success) {
+        const failureSummary = await summarizeFailurePhase(task, homeDir, check.output);
+        return { mode: 'execute-only', status: 'validation-failed', validationOutput: check.output, failureSummary };
     }
+
+    await git.add('.');
+    const status = await git.status();
+
+    if (status.staged.length === 0) {
+        return { mode: 'execute-only', status: 'no-changes' };
+    }
+
+    await git.commit("feat: " + task.title);
+    const pushArgs = task.isIteration ? [] : ['--force'];
+    await git.push('origin', task.branchName, pushArgs);
+
+    let prUrl: string | null = null;
+    if (!task.isIteration) {
+        const prBody = await generatePRDescription(workDir, git, task.description || '', check);
+        prUrl = await createPullRequest(task.repoUrl, task.branchName, "feat: " + task.title, prBody);
+    }
+
+    return { mode: 'execute-only', status: 'executed', prUrl, isIteration: task.isIteration ?? false };
 }
