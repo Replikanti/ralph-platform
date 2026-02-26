@@ -1,4 +1,4 @@
-import { StoredPlan } from '../../src/agent';
+import { StoredPlan } from '../../src/plan-store';
 
 /**
  * Creates a mock stored plan for testing

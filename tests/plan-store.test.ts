@@ -1,6 +1,5 @@
 import IORedis from 'ioredis';
-import { storePlan, getPlan, updatePlanStatus, appendFeedback, deletePlan } from '../src/plan-store';
-import { StoredPlan } from '../src/agent';
+import { storePlan, getPlan, updatePlanStatus, appendFeedback, deletePlan, StoredPlan } from '../src/plan-store';
 
 jest.mock('ioredis');
 
