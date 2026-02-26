@@ -1,5 +1,8 @@
 import { LinearClient } from '../src/linear-client';
 
+jest.mock('../src/logger', () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() } }));
+const getLoggerWarn = () => (jest.requireMock('../src/logger').logger.warn as jest.Mock);
+
 const mockCreateComment = jest.fn().mockResolvedValue({});
 const mockIssue = jest.fn();
 const mockUpdateIssue = jest.fn().mockResolvedValue({});
@@ -68,13 +71,9 @@ describe('LinearClient', () => {
 
         it('should warn when not enabled', async () => {
             delete process.env.LINEAR_API_KEY;
-            const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
-            
             const client = new LinearClient();
             await client.postComment('issue-123', 'Test comment');
-
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
-            consoleSpy.mockRestore();
+            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 
@@ -82,33 +81,24 @@ describe('LinearClient', () => {
         it('should update state when enabled', async () => {
             process.env.LINEAR_API_KEY = 'test-key';
             const client = new LinearClient();
-
             await expect(client.updateIssueState('issue-123', 'In Progress')).resolves.not.toThrow();
         });
 
         it('should warn when not enabled', async () => {
             delete process.env.LINEAR_API_KEY;
-            const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
-            
             const client = new LinearClient();
             await client.updateIssueState('issue-123', 'In Progress');
-
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
-            consoleSpy.mockRestore();
+            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 
     describe('getIssueState', () => {
         it('should return null when not enabled', async () => {
             delete process.env.LINEAR_API_KEY;
-            const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
-            
             const client = new LinearClient();
             const result = await client.getIssueState('issue-123');
-
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
-            consoleSpy.mockRestore();
+            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 });

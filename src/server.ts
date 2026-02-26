@@ -12,6 +12,7 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getPlan } from './plan-store';
 import { LinearClient as RalphLinearClient } from './linear-client';
+import { logger } from './logger';
 
 dotenv.config();
 const app = express();
@@ -53,9 +54,9 @@ if (adminUser && adminPass) {
         users: { [adminUser]: adminPass },
         challenge: true,
     }), serverAdapter.getRouter());
-    console.log('🛡️ Admin dashboard enabled at /admin/queues');
+    logger.info('🛡️ Admin dashboard enabled at /admin/queues');
 } else {
-    console.warn('⚠️ ADMIN_USER or ADMIN_PASS not set. Dashboard is disabled.');
+    logger.warn('⚠️ ADMIN_USER or ADMIN_PASS not set. Dashboard is disabled.');
 }
 
 // Team → Repository mapping logic
@@ -89,9 +90,9 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
                     connection.set(REDIS_CONFIG_KEY, JSON.stringify(config)),
                     connection.set(REDIS_VERSION_KEY, currentVersion)
                 ]);
-                console.log("🔄 Configuration refreshed from ConfigMap");
+                logger.info("🔄 Configuration refreshed from ConfigMap");
             } catch (e) {
-                console.warn("⚠️ Failed to refresh config from file, using Redis fallback:", e);
+                logger.warn({ err: e }, "⚠️ Failed to refresh config from file, using Redis fallback");
                 // If file read fails (e.g. locally), fallback to Redis content if available
                 if (redisMap) config = JSON.parse(redisMap);
             }
@@ -104,7 +105,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
             return config[teamKey];
         }
     } catch (e) {
-        console.warn("⚠️ Error resolving repo config:", e);
+        logger.warn({ err: e }, "⚠️ Error resolving repo config");
     }
 
     // 3. Fallback to Env Var (Legacy)
@@ -114,7 +115,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
             return envMap[teamKey];
         }
     } catch (e) {
-        console.error('❌ Invalid LINEAR_TEAM_REPOS JSON', e);
+        logger.error({ err: e }, '❌ Invalid LINEAR_TEAM_REPOS JSON');
     }
 
     if (process.env.DEFAULT_REPO_URL) {
@@ -135,7 +136,7 @@ app.use(express.json({
 function verifyLinearSignature(req: any): boolean {
     const secret = process.env.LINEAR_WEBHOOK_SECRET;
     if (!secret) {
-        console.error("❌ LINEAR_WEBHOOK_SECRET is not set!");
+        logger.error("❌ LINEAR_WEBHOOK_SECRET is not set!");
         return false;
     }
 
@@ -176,9 +177,9 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
     const { jobId, jobData, logContext } = config;
 
     try {
-        console.log(`📥 [API] Adding ${logContext.type} job to queue:`); // NOSONAR - Input is internal or trusted webhook payload
-        console.log(`   Job ID: ${jobId}`); // NOSONAR - Input is internal or trusted webhook payload
-        logContext.details.forEach(detail => console.log(`   ${detail}`)); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`📥 [API] Adding ${logContext.type} job to queue:`);
+        logger.info(`   Job ID: ${jobId}`);
+        logContext.details.forEach(detail => logger.info(`   ${detail}`));
 
         await ralphQueue.add('coding-task', jobData, {
             jobId,
@@ -188,16 +189,16 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
             removeOnFail: true // Immediate cleanup to allow re-runs after failure
         });
 
-        console.log(`✅ [API] Successfully enqueued ${logContext.type} job ${jobId}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`✅ [API] Successfully enqueued ${logContext.type} job ${jobId}`);
         return res.status(200).send({ status: `${logContext.type}_queued`, jobId });
     } catch (e) {
-        console.error(`❌ [API] Failed to enqueue ${logContext.type} job:`, e); // NOSONAR - Input is internal or trusted webhook payload
+        logger.error({ err: e }, `❌ [API] Failed to enqueue ${logContext.type} job`);
         return res.status(500).send({ error: 'queue_failed' });
     }
 }
 
 async function handlePlanApproval(issueId: string, storedPlan: any, res: express.Response): Promise<express.Response> {
-    console.log(`✅ [API] Plan approved for issue ${issueId}`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`✅ [API] Plan approved for issue ${issueId}`);
 
     const jobId = `${issueId}-exec`; // Deduplication: Fixed ID prevents concurrent executions
     const jobData = {
@@ -222,7 +223,7 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
 }
 
 async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`💭 [API] Revision feedback received for issue ${issueId}`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`💭 [API] Revision feedback received for issue ${issueId}`);
 
     const jobId = `${issueId}-replan`; // Deduplication
     const jobData = {
@@ -246,8 +247,8 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
 }
 
 async function handleIterationRequest(issueId: string, issue: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
-    console.log(`   Creating new plan for iterative fixes...`);
+    logger.info(`🔄 [API] PR iteration detected - issue in review state without stored plan`);
+    logger.info(`   Creating new plan for iterative fixes...`);
 
     const issueTitle = issue?.title || 'Iterative fix';
     const issueDescription = issue?.description || commentBody;
@@ -256,7 +257,7 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 
     const repoUrl = await getRepoForTeam(teamKey);
     if (!repoUrl) {
-        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}"`);
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
@@ -283,20 +284,20 @@ async function handleIterationRequest(issueId: string, issue: any, commentBody: 
 }
 
 async function handleStoredPlanComment(issueId: string, issueState: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
-    console.log(`📋 [API] Processing plan review comment for issue ${issueId} (Current State: ${issueState})`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`📋 [API] Processing plan review comment for issue ${issueId} (Current State: ${issueState})`);
 
     const normalizedState = issueState.toLowerCase();
     const isProcessing = normalizedState === 'in progress' || normalizedState === 'in review';
 
     if (isApprovalComment(commentBody) && isProcessing) {
-        console.log(`ℹ️ [API] Ignoring approval comment for issue ${issueId} - already in active state: ${issueState}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`ℹ️ [API] Ignoring approval comment for issue ${issueId} - already in active state: ${issueState}`);
         return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
     }
 
     // Move ticket back to "In Progress" when user provides feedback/approval
     const linearClient = new RalphLinearClient();
     await linearClient.updateIssueState(issueId, "In Progress");
-    console.log(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`📊 [API] Moved issue ${issueId} back to In Progress (user responded)`);
 
     if (isApprovalComment(commentBody)) {
         return handlePlanApproval(issueId, storedPlan, res);
@@ -310,15 +311,15 @@ async function handleCommentWebhook(data: any, res: express.Response): Promise<e
     const issueState = issue?.state?.name || '';
     const commentAuthor = data.user?.name || data.user?.displayName || '';
 
-    console.log(`💬 [API] Comment received:`);
-    console.log(`   Issue ID: ${issue?.id}`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Issue State: "${issueState}"`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Comment Author: "${commentAuthor}"`); // NOSONAR - Input is internal or trusted webhook payload
-    console.log(`   Comment Body: "${commentBody.substring(0, 100)}..."`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`💬 [API] Comment received:`);
+    logger.info(`   Issue ID: ${issue?.id}`);
+    logger.info(`   Issue State: "${issueState}"`);
+    logger.info(`   Comment Author: "${commentAuthor}"`);
+    logger.info(`   Comment Body: "${commentBody.substring(0, 100)}..."`);
 
     const issueId = issue?.id;
     if (!issueId) {
-        console.warn(`⚠️ [API] Comment event missing issue ID`);
+        logger.warn(`⚠️ [API] Comment event missing issue ID`);
         return res.status(400).send({ error: 'missing_issue_id' });
     }
 
@@ -330,7 +331,7 @@ async function handleCommentWebhook(data: any, res: express.Response): Promise<e
                           commentBody.includes('Ralph\'s Implementation Plan');
 
     if (isRalphComment) {
-        console.log(`🤖 [API] Ignoring Ralph's own comment (prevents auto-execution)`);
+        logger.info(`🤖 [API] Ignoring Ralph's own comment (prevents auto-execution)`);
         return res.status(200).send({ status: 'ignored', reason: 'ralph_comment' });
     }
 
@@ -344,7 +345,7 @@ async function handleCommentWebhook(data: any, res: express.Response): Promise<e
         return handleIterationRequest(issueId, issue, commentBody, res);
     }
 
-    console.log(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
+    logger.info(`ℹ️ [API] Skipping comment - no stored plan and not in review state`);
     return res.status(200).send({ status: 'ignored', reason: 'no_stored_plan' });
 }
 
@@ -360,7 +361,7 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     // Tombstone Check: Prevent Reopen
     const tombstone = await connection.get(`ralph:tombstone:${data.id}`);
     if (tombstone) {
-        console.log(`🪦 [API] Ignoring ticket ${data.identifier} (ID: ${data.id}) - Tombstone found (already processed).`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`🪦 [API] Ignoring ticket ${data.identifier} (ID: ${data.id}) - Tombstone found (already processed).`);
         return res.status(200).send({ status: 'ignored', reason: 'tombstone_present' });
     }
 
@@ -369,15 +370,15 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     const hasRalphLabel = labelNames.some((name: string) => name.toLowerCase() === 'ralph');
 
     if (!hasRalphLabel) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`ℹ️ [API] Skipping ticket ${data.identifier} - Ralph label not present. Current labels: ${labelNames.join(', ')}`);
         return res.status(200).send({ status: 'ignored', reason: 'no_ralph_label' });
     }
 
     const statusName = (data.state?.name || data.state?.label || '').toLowerCase();
-    console.log(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`📊 [API] Ticket ${data.identifier} current state: "${statusName}" (ID: ${data.stateId})`);
 
     if (shouldSkipIssueUpdate(action, statusName)) {
-        console.log(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`ℹ️ [API] Skipping ticket ${data.identifier} - Already in active/terminal state: ${statusName}`);
         return res.status(200).send({ status: 'ignored', reason: 'already_processed' });
     }
 
@@ -385,11 +386,11 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
     const repoUrl = await getRepoForTeam(teamKey);
 
     if (!repoUrl) {
-        console.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${data.title}`);
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
-    console.log(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`📥 [API] Enqueueing Ticket: ${data.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
 
     try {
         await ralphQueue.add('coding-task', {
@@ -410,24 +411,24 @@ async function handleIssueWebhook(data: any, action: string, res: express.Respon
         });
         return res.status(200).send({ status: 'queued' });
     } catch (e) {
-        console.error("❌ [API] Failed to add job to queue:", e); // NOSONAR - Input is internal or trusted webhook payload
+        logger.error({ err: e }, "❌ [API] Failed to add job to queue");
         return res.status(500).send({ error: 'queue_failed' });
     }
 }
 
 app.post('/webhook', async (req: express.Request, res: express.Response) => {
     if (!verifyLinearSignature(req)) {
-        console.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.warn(`⚠️ [API] Invalid webhook signature from ${req.ip}`);
         return res.status(401).send('Invalid signature');
     }
 
     const { action, data, type } = req.body;
 
-    console.log(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`); // NOSONAR - Input is internal or trusted webhook payload
+    logger.info(`🔍 [API] Webhook received: Type=${type}, Action=${action}, ID=${data?.id}`);
     if (data?.labels) {
-        console.log(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`); // NOSONAR - Input is internal or trusted webhook payload
+        logger.info(`🏷️ [API] Labels: ${data.labels.map((l: { name: string }) => l.name).join(', ')}`);
     } else {
-        console.log(`🏷️ [API] No labels in payload.`);
+        logger.info(`🏷️ [API] No labels in payload.`);
     }
 
     if (type === 'Comment' && action === 'create') {
@@ -446,30 +447,30 @@ app.get('/health', (_req, res) => {
 });
 
 if (require.main === module) {
-    const server = app.listen(3000, () => console.log('🚀 API listening on 3000'));
+    const server = app.listen(3000, () => logger.info('🚀 API listening on 3000'));
 
     // Graceful Shutdown
     const shutdown = async (signal: string) => {
-        console.log(`🛑 ${signal} received. Closing HTTP server...`);
+        logger.info(`🛑 ${signal} received. Closing HTTP server...`);
         
         server.close(async () => {
-            console.log('HTTP server closed.');
+            logger.info('HTTP server closed.');
             
             try {
-                console.log('Closing Redis connections...');
+                logger.info('Closing Redis connections...');
                 await ralphQueue.close();
                 await connection.quit(); // IORedis close
-                console.log('✅ Graceful shutdown completed.');
+                logger.info('✅ Graceful shutdown completed.');
                 process.exit(0);
             } catch (err) {
-                console.error('❌ Error during shutdown:', err);
+                logger.error({ err }, '❌ Error during shutdown');
                 process.exit(1);
             }
         });
 
         // Force exit after 10s if connections hang
         setTimeout(() => {
-            console.error('🛑 Forced shutdown after timeout');
+            logger.error('🛑 Forced shutdown after timeout');
             process.exit(1);
         }, 10000);
     };

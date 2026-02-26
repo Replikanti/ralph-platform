@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { runAgent, Task } from './agent';
@@ -27,7 +28,7 @@ async function updateLinearIssue(issueId: string, statusName: string, comment?: 
         await linearClient.updateIssueState(issueId, statusName);
         if (comment) await linearClient.postComment(issueId, comment);
     } catch (e: any) {
-        console.error("Linear update failed: " + e.message);
+        logger.error("Linear update failed: " + e.message);
     }
 }
 
@@ -49,7 +50,7 @@ async function notifyLinearJobStarted(task: Task): Promise<void> {
             await updateLinearIssue(ticketId, "In Progress", `🤖 Ralph started working\n\n📋 **Job ID:** \`${jobId}\``);
         }
     } catch (e: any) {
-        console.error("Failed to notify Linear of job start: " + e.message);
+        logger.error("Failed to notify Linear of job start: " + e.message);
     }
 }
 
@@ -78,7 +79,7 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
         const formattedPlan = formatPlanForLinear(action.plan, task.title);
         await linearClient.postComment(ticketId, formattedPlan);
         await linearClient.updateIssueState(ticketId, "Todo");
-        console.log("✅ Plan posted to Linear, awaiting human approval");
+        logger.info("✅ Plan posted to Linear, awaiting human approval");
         return;
     }
 
@@ -86,14 +87,14 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
         if (action.isIteration) {
             await updateLinearIssue(ticketId, "In Review", "✅ Iteration complete. Changes pushed to existing PR.");
         } else {
-            console.log("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
+            logger.info("⏳ Waiting 3 seconds for Linear auto-switch to In Review...");
             await new Promise(resolve => setTimeout(resolve, 3000));
             const currentState = await linearClient.getIssueState(ticketId);
             if (currentState?.toLowerCase() === 'in review') {
-                console.log("✅ Linear auto-switched to In Review, just adding comment");
+                logger.info("✅ Linear auto-switched to In Review, just adding comment");
                 await linearClient.postComment(ticketId, "✅ Done. PR: " + action.prUrl);
             } else {
-                console.log(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
+                logger.info(`📊 Linear didn't auto-switch (current: ${currentState}), manually updating to In Review`);
                 await updateLinearIssue(ticketId, "In Review", "✅ Done. PR: " + action.prUrl);
             }
             await deletePlan(redis, ticketId);
@@ -113,7 +114,7 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
 // --- Job processor ---
 
 export const jobProcessor = async (job: Job) => {
-    console.log(`🔨 [Worker] Processing ${job.id} (mode: ${job.data.mode || 'full'})`);
+    logger.info(`🔨 [Worker] Processing ${job.id} (mode: ${job.data.mode || 'full'})`);
 
     const taskData: Task = {
         ...job.data,
@@ -132,7 +133,7 @@ export const jobProcessor = async (job: Job) => {
         result = await runAgent(taskData);
     } catch (e: any) {
         if (e.name === 'RateLimitError') {
-            console.warn(`⏳ [Worker] Rate Limit hit for job ${job.id}. Backing off for 60s...`);
+            logger.warn(`⏳ [Worker] Rate Limit hit for job ${job.id}. Backing off for 60s...`);
             await job.moveToDelayed(Date.now() + 60000, job.token);
             return;
         }
@@ -153,7 +154,7 @@ export const createWorker = () => {
         }
     });
 
-    console.log("👷 Ralph Worker Started");
+    logger.info("👷 Ralph Worker Started");
 
     const worker = new Worker('ralph-tasks', jobProcessor, {
         connection,
@@ -167,21 +168,21 @@ export const createWorker = () => {
     });
 
     worker.on('completed', async (job) => {
-        console.log(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
+        logger.info(`✅ [Worker] Job ${job.id} completed! Ticket: ${job.data.ticketId}`);
 
         if (job.data.mode === 'execute-only' || job.data.mode === 'full') {
             const tombstoneKey = `ralph:tombstone:${job.data.ticketId}`;
             await connection.set(tombstoneKey, 'true', 'EX', 31536000);
-            console.log(`🪦 [Worker] Tombstone set for ticket ${job.data.ticketId}`);
+            logger.info(`🪦 [Worker] Tombstone set for ticket ${job.data.ticketId}`);
         }
     });
 
     worker.on('failed', async (job, err) => {
         if (job) {
-            console.error(`❌ [Worker] Job ${job.id} failed (Attempt ${job.attemptsMade}/${job.opts.attempts}): ${err.message}`);
+            logger.error(`❌ [Worker] Job ${job.id} failed (Attempt ${job.attemptsMade}/${job.opts.attempts}): ${err.message}`);
 
             if (job.attemptsMade >= (job.opts.attempts || 1)) {
-                console.error(`💀 [Worker] Job ${job.id} FAILED PERMANENTLY. Reporting to Linear...`);
+                logger.error(`💀 [Worker] Job ${job.id} FAILED PERMANENTLY. Reporting to Linear...`);
                 try {
                     await updateLinearIssue(
                         job.data.ticketId,
@@ -189,21 +190,21 @@ export const createWorker = () => {
                         `💀 Critical System Failure\n\nThe task failed permanently after ${job.attemptsMade} attempts.\n\nError: ${err.message}`
                     );
                 } catch (e) {
-                    console.error("⚠️ Failed to report permanent failure to Linear:", e);
+                    logger.error({ err: e }, "⚠️ Failed to report permanent failure to Linear");
                 }
             }
         }
     });
 
     const shutdown = async (signal: string) => {
-        console.log(`🛑 ${signal} received. Shutting down worker...`);
+        logger.info(`🛑 ${signal} received. Shutting down worker...`);
         try {
             await worker.close();
             await connection.quit();
-            console.log('✅ Worker shut down gracefully.');
+            logger.info('✅ Worker shut down gracefully.');
             process.exit(0);
         } catch (err) {
-            console.error('❌ Error during worker shutdown:', err);
+            logger.error({ err }, '❌ Error during worker shutdown');
             process.exit(1);
         }
     };
