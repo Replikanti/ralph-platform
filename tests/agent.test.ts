@@ -169,8 +169,7 @@ describe('runAgent', () => {
 
         expect(mockSpawn).toHaveBeenCalled();
         expect(mockPullsCreate).toHaveBeenCalled();
-        expect(result.status).toBe('executed');
-        expect((result as any).prUrl).toContain('github.com');
+        expect(result).toMatchObject({ status: 'executed', prUrl: expect.stringContaining('github.com') });
     });
 
     it('retries on validation failure and returns executed result on eventual success', async () => {
@@ -237,8 +236,7 @@ describe('runAgent', () => {
         const task = { ticketId: 'plan-1', title: 'Plan Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b', mode: 'plan-only' as const };
         const result = await runAgent(task);
 
-        expect(result.status).toBe('plan-generated');
-        expect((result as any).plan).toContain('Step 1');
+        expect(result).toMatchObject({ status: 'plan-generated', plan: expect.stringContaining('Step 1') });
         process.env.PLAN_REVIEW_ENABLED = 'false';
     });
 });

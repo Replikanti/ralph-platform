@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent, RateLimitError, Task } from './agent';
+import { runAgent, Task } from './agent';
 import { storePlan, deletePlan, StoredPlan } from './plan-store';
 import { formatPlanForLinear } from './plan-formatter';
 import { LinearClient as RalphLinearClient } from './linear-client';
@@ -106,7 +106,6 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
         return;
     }
 
-    // mark-todo-failed
     const failComment = `❌ Execution completed but validation failed.\n\n${action.summary}\n\n\`\`\`\n${action.validationOutput.substring(0, 1000)}\n\`\`\``;
     await updateLinearIssue(ticketId, "Todo", failComment);
 }
