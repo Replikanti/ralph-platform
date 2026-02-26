@@ -1,5 +1,3 @@
-// src/domain/types.ts
-
 /** Příchozí issue z Linear webhooks */
 export interface WebhookIssue {
   id: string;
