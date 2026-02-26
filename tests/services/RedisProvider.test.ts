@@ -1,19 +1,13 @@
 // Mock Ts.ED decorators
+import { mockTsEdDecorators } from '../test-utils/common-mocks';
+
+const mocks = mockTsEdDecorators();
 jest.mock('@tsed/common', () => ({
-    Service: () => (target: any) => target,
-    Inject: () => (target: any, propertyKey: string) => {},
+    ...mocks['@tsed/common'],
     OnInit: jest.fn(),
     OnDestroy: jest.fn(),
 }));
-
-jest.mock('@tsed/logger', () => ({
-    Logger: jest.fn().mockImplementation(() => ({
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        debug: jest.fn(),
-    })),
-}));
+jest.mock('@tsed/logger', () => mocks['@tsed/logger']);
 
 // Mock ioredis
 const mockRedisOn = jest.fn();
@@ -36,6 +30,12 @@ jest.mock('../../src/config/env', () => ({
 
 import { RedisProvider } from '../../src/services/RedisProvider';
 
+function createProvider(init = false): RedisProvider {
+    const p = new RedisProvider();
+    if (init) p.$onInit();
+    return p;
+}
+
 describe('RedisProvider', () => {
     let provider: RedisProvider;
 
@@ -52,8 +52,7 @@ describe('RedisProvider', () => {
 
     describe('$onInit', () => {
         it('should create Redis connection with URL from env', () => {
-            provider = new RedisProvider();
-            provider.$onInit();
+            provider = createProvider(true);
 
             expect(mockRedis).toHaveBeenCalledWith('redis://localhost:6379', {
                 maxRetriesPerRequest: null,
@@ -66,9 +65,8 @@ describe('RedisProvider', () => {
         });
 
         it('should log when Redis is connected', async () => {
-            provider = new RedisProvider();
+            provider = createProvider();
             const loggerInfoSpy = jest.spyOn((provider as any).logger, 'info');
-
             provider.$onInit();
 
             // Wait for connect event to fire
@@ -78,7 +76,7 @@ describe('RedisProvider', () => {
         });
 
         it('should handle Redis errors', async () => {
-            provider = new RedisProvider();
+            provider = createProvider();
             const loggerErrorSpy = jest.spyOn((provider as any).logger, 'error');
 
             mockRedisOn.mockImplementation((event, callback) => {
@@ -98,8 +96,7 @@ describe('RedisProvider', () => {
 
     describe('retryStrategy', () => {
         it('should retry with exponential backoff up to 2 seconds', () => {
-            provider = new RedisProvider();
-            provider.$onInit();
+            provider = createProvider(true);
 
             const retryStrategy = (mockRedis as jest.Mock).mock.calls[0][1].retryStrategy;
 
@@ -111,8 +108,7 @@ describe('RedisProvider', () => {
 
     describe('$onDestroy', () => {
         it('should close Redis connection on destroy', async () => {
-            provider = new RedisProvider();
-            provider.$onInit();
+            provider = createProvider(true);
 
             await provider.$onDestroy();
 
@@ -120,7 +116,7 @@ describe('RedisProvider', () => {
         });
 
         it('should handle missing connection gracefully', async () => {
-            provider = new RedisProvider();
+            provider = createProvider();
             // Don't call $onInit, so connection is undefined
 
             await expect(provider.$onDestroy()).resolves.not.toThrow();
