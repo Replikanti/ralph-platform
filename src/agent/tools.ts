@@ -33,6 +33,12 @@ export async function detectProjectLanguages(workDir: string): Promise<string[]>
         languages.push('go');
     }
 
+    // Ruby / Ruby on Rails
+    if (fs.existsSync(path.join(workDir, 'Gemfile'))) {
+        const isRails = fs.existsSync(path.join(workDir, 'config/application.rb'));
+        languages.push(isRails ? 'rails' : 'ruby');
+    }
+
     // Terraform (async check for .tf files)
     try {
         const { stdout } = await execAsync('find . -maxdepth 3 -name "*.tf" -type f | head -1', { cwd: workDir });
@@ -89,6 +95,13 @@ const ALLOWED_COMMAND_PATTERNS = [
     /^staticcheck\s+/,
     /^terraform\s+(init|fmt|validate|plan)/,
     /^tflint\s+/,
+    /^bundle exec (rspec|rails test|rubocop|brakeman|rake)/,
+    /^bundle (install|update)/,
+    /^rails (db:migrate|db:rollback|db:schema:load|routes|generate)/,
+    /^rake (db:migrate|db:rollback|spec|test)/,
+    /^rubocop/,
+    /^brakeman/,
+    /^bundler-audit/,
 ];
 
 const DANGEROUS_PATTERNS = [
@@ -422,6 +435,67 @@ async function validateTerraform(workDir: string, changedFiles: string[]): Promi
     };
 }
 
+async function validateRuby(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
+    const hasGemfile = fs.existsSync(path.join(workDir, 'Gemfile'));
+    if (!hasGemfile) {
+        return { success: true, log: "" };
+    }
+
+    const relevantExtensions = ['.rb', '.rake', '.gemspec'];
+    const hasRelevantChanges = changedFiles.some((f: string) =>
+        relevantExtensions.some(ext => f.endsWith(ext)) || f.includes('Gemfile') || f.includes('Rakefile')
+    );
+
+    if (!hasRelevantChanges) {
+        return { success: true, log: "" };
+    }
+
+    let outputLog = "";
+    let success = true;
+
+    const isRailsProject = fs.existsSync(path.join(workDir, 'config/application.rb'));
+
+    // RuboCop: auto-fix first, then check
+    try {
+        await execAsync('bundle exec rubocop --autocorrect-all --format quiet', { cwd: workDir });
+    } catch { /* auto-fix errors are non-fatal */ }
+    const rubocopResult = await runValidationTool(
+        'bundle exec rubocop --format json',
+        'RuboCop',
+        workDir,
+        changedFiles
+    );
+    success = success && rubocopResult.success;
+    outputLog += rubocopResult.log;
+
+    // Brakeman: security scan, Rails only
+    if (isRailsProject) {
+        const brakemanResult = await runValidationTool(
+            'brakeman --no-pager --format json --quiet',
+            'Brakeman',
+            workDir,
+            changedFiles
+        );
+        success = success && brakemanResult.success;
+        outputLog += brakemanResult.log;
+    }
+
+    // bundler-audit: CVE scan for all Ruby projects
+    try {
+        await execAsync('bundler-audit update', { cwd: workDir });
+    } catch { /* advisory DB update failure is non-fatal */ }
+    const auditResult = await runValidationTool(
+        'bundler-audit check',
+        'bundler-audit',
+        workDir,
+        changedFiles
+    );
+    success = success && auditResult.success;
+    outputLog += auditResult.log;
+
+    return { success, log: outputLog };
+}
+
 async function validateSecurity(workDir: string, changedFiles: string[]): Promise<{ success: boolean, log: string }> {
     let outputLog = "";
     let success = true;
@@ -504,6 +578,10 @@ export async function runPolyglotValidation(workDir: string): Promise<Validation
     const terraformResult = await validateTerraform(workDir, changedFiles);
     allSuccess = allSuccess && terraformResult.success;
     outputLog += terraformResult.log;
+
+    const rubyResult = await validateRuby(workDir, changedFiles);
+    allSuccess = allSuccess && rubyResult.success;
+    outputLog += rubyResult.log;
 
     const securityResult = await validateSecurity(workDir, changedFiles);
     allSuccess = allSuccess && securityResult.success;

@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install Go, Terraform, Python, Node Tools, Trivy & Claude CLI
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip nodejs npm && \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip nodejs npm ruby ruby-dev && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
     go install golang.org/x/tools/cmd/goimports@latest && \
@@ -18,6 +18,7 @@ RUN apt-get update && \
     unzip /tmp/tflint.zip -d /usr/local/bin && \
     rm /tmp/tflint.zip && \
     pip3 install --no-cache-dir --break-system-packages ruff mypy uv && \
+    gem install rubocop brakeman bundler-audit --no-document && \
     npm install -g @biomejs/biome typescript tsx @modelcontextprotocol/sdk && \
     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin && \
     curl -fsSL https://claude.ai/install.sh | bash && \

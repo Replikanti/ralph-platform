@@ -106,6 +106,21 @@ describe('Agent Tools', () => {
         'terraform fmt',
         'terraform validate',
         'tflint --recursive',
+        'bundle exec rspec',
+        'bundle exec rails test',
+        'bundle exec rubocop',
+        'bundle exec brakeman',
+        'bundle install',
+        'bundle update',
+        'rails db:migrate',
+        'rails db:rollback',
+        'rails routes',
+        'rails generate scaffold Post title:string',
+        'rake db:migrate',
+        'rake spec',
+        'rubocop --format json',
+        'brakeman --no-pager',
+        'bundler-audit check',
     ])('should allow safe whitelisted command: %s', async (cmd) => {
         mockedExec.mockImplementation(createMockExecCallback('ok', ''));
         const result = await runCommand(workDir, cmd);
@@ -140,7 +155,13 @@ describe('runPolyglotValidation', () => {
     const setupProjectDetection = (configFile: string) => {
         mockedFsExistsSync.mockImplementation((p: string) => {
             const normalized = p.replaceAll('\\', '/');
-            return normalized.endsWith(configFile) || (configFile === 'package.json' && (normalized.endsWith('tsconfig.json') || normalized.endsWith('node_modules')));
+            if (configFile === 'package.json') {
+                return normalized.endsWith('package.json') || normalized.endsWith('tsconfig.json') || normalized.endsWith('node_modules');
+            }
+            if (configFile === 'Gemfile+rails') {
+                return normalized.endsWith('Gemfile') || normalized.endsWith('config/application.rb');
+            }
+            return normalized.endsWith(configFile);
         });
     };
 
@@ -183,6 +204,8 @@ describe('runPolyglotValidation', () => {
         ['TypeScript', 'package.json', 'src/agent.ts', ['✅ Biome: Passed', '✅ TSC: Passed']],
         ['Python', 'pyproject.toml', 'main.py', ['✅ Ruff: Passed', '✅ Mypy: Passed']],
         ['Go', 'go.mod', 'main.go', ['✅ goimports: Passed', '✅ staticcheck: Passed', '✅ go build: Passed']],
+        ['Ruby', 'Gemfile', 'app/models/user.rb', ['✅ RuboCop: Passed', '✅ bundler-audit: Passed']],
+        ['Rails', 'Gemfile+rails', 'app/controllers/posts_controller.rb', ['✅ RuboCop: Passed', '✅ Brakeman: Passed', '✅ bundler-audit: Passed']],
     ])('should run %s validation when %s exists', async (_, configFile, changedFile, expectedOutputs) => {
         setupProjectDetection(configFile);
         setupGitStatusMock(`M  ${changedFile}`);
