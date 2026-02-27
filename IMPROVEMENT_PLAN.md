@@ -1,6 +1,7 @@
 # Ralph Platform - Improvement Plan
 
 **Created**: 2026-02-05
+**⚠️ Path note**: File references like `src/tools.ts` and `src/agent.ts` in this document reflect the pre-reorganization layout. Current paths: `src/agent/tools.ts`, `src/agent/agent.ts`, `src/platform/server.ts`, `src/platform/worker.ts`, `src/infra/linear-client.ts`. See `docs/refactor-plan.md` for the full reorganization.
 **Author**: Claude Opus 4.5 (comprehensive review)
 **For**: Claude Sonnet 4.5 (implementation)
 **Status**: In Progress

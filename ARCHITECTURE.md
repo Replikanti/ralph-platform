@@ -68,7 +68,7 @@ graph TB
 
 ## Core Components
 
-### API Server (`src/server.ts`)
+### API Server (`src/platform/server.ts`)
 
 **Purpose**: Webhook ingestion and job enqueueing
 
@@ -108,7 +108,7 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 }
 ```
 
-### Worker (`src/worker.ts`)
+### Worker (`src/platform/worker.ts`)
 
 **Purpose**: Job processing and orchestration
 
@@ -124,7 +124,7 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 - `execute-only` - Execute approved plan
 - `full` - Plan + execute (legacy mode)
 
-### Agent (`src/agent.ts`)
+### Agent (`src/agent/agent.ts`)
 
 **Purpose**: AI workflow orchestration
 
@@ -147,7 +147,7 @@ const SECURITY_GUARDRAILS = `
 `;
 ```
 
-### Workspace (`src/workspace.ts`)
+### Workspace (`src/agent/workspace.ts`)
 
 **Purpose**: Git workspace isolation
 
@@ -166,7 +166,7 @@ const SECURITY_GUARDRAILS = `
       └── .claude/   # Claude projects cache
 ```
 
-### Tools (`src/tools.ts`)
+### Tools (`src/agent/tools.ts`)
 
 **Purpose**: Polyglot code validation
 
@@ -201,7 +201,7 @@ const SECURITY_GUARDRAILS = `
 
 Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain license compatibility.
 
-### Linear Client (`src/linear-client.ts`)
+### Linear Client (`src/infra/linear-client.ts`)
 
 **Purpose**: Linear API integration
 
@@ -225,7 +225,7 @@ Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain licen
 - **In Review**: PR created, awaiting merge
 - **Done**: Task completed (manual transition)
 
-### Plan Store (`src/plan-store.ts`)
+### Plan Store (`src/infra/plan-store.ts`)
 
 **Purpose**: Redis-based plan persistence
 
@@ -615,7 +615,7 @@ Ralph implements multiple strategies to minimize API costs while maintaining qua
 
 Ralph uses **TOON (Token-Optimized Object Notation)** to reduce context window usage by ~30-40% compared to JSON.
 
-**MCP Server** (`src/mcp-toonify.ts`):
+**MCP Server** (`src/infra/mcp-toonify.ts`):
 - Custom Model Context Protocol server
 - Converts JSON responses to compact TOON format
 - Used by agent for file listings, search results, and structured data
@@ -650,7 +650,7 @@ Ralph includes custom slash commands that output in TOON format:
 
 Hard limits prevent runaway costs:
 ```typescript
-// src/agent.ts
+// src/agent/agent.ts
 '--max-budget-usd', '0.50'  // Planning phase
 '--max-budget-usd', '2.00'  // Execution phase
 '--max-budget-usd', '0.10'  // Error summary

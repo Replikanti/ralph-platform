@@ -33,15 +33,30 @@ Ralph is an event-driven AI coding agent platform that receives tasks from Linea
 5. Wait for review and approval
 6. Merge via GitHub UI
 
+**Runtime**: Bun + TypeScript (Express HTTP, BullMQ queue, Zod validation, Pino logging)
+
+**Source layout**:
+```
+src/
+├── domain/        ← pure business logic, no framework deps (portable to Go)
+├── platform/      ← Express + BullMQ orchestration
+├── agent/         ← AI execution loop, git workspace, polyglot tools
+├── infra/         ← external service wrappers (Linear, Redis, Zod schemas, Pino)
+└── security/      ← PII/secret redaction
+```
+
 **Key components:**
-- **API Server** (src/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
-- **Worker** (src/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
-- **Agent** (src/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
-- **Workspace** (src/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
-- **Tools** (src/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, staticcheck, go build, terraform, tflint, Trivy)
-- **Plan Store** (src/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
-- **Linear Client** (src/linear-client.ts): Integration for posting plans and updating issue states
-- **Linear Utils** (src/linear-utils.ts): Shared utilities including state synonym mapping
+- **API Server** (src/platform/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
+- **Worker** (src/platform/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
+- **Agent** (src/agent/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
+- **Workspace** (src/agent/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
+- **Tools** (src/agent/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, staticcheck, go build, terraform, tflint, Trivy)
+- **Plan Store** (src/infra/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
+- **Linear Client** (src/infra/linear-client.ts): Integration for posting plans and updating issue states
+- **Linear Utils** (src/infra/linear-utils.ts): Shared utilities including state synonym mapping
+- **Webhook Schemas** (src/infra/webhook-schemas.ts): Zod schemas parsing raw Linear payloads into domain types
+- **Logger** (src/infra/logger.ts): Pino structured logging singleton (JSON in prod, pretty in dev)
+- **Domain** (src/domain/): Pure business logic — webhook routing decisions, agent outcome mapping, shared types
 
 ## Architecture Flow
 
@@ -148,7 +163,7 @@ To use human-in-the-loop planning, you must:
 
 Ralph uses the "Todo" state for awaiting plan approval. When you comment, the ticket automatically moves back to "In Progress".
 
-**State Synonym Mapping** (src/linear-utils.ts):
+**State Synonym Mapping** (src/infra/linear-utils.ts):
 - "in progress": in progress, wip, doing
 - "in review": under review, peer review, review, pr
 - "todo": todo, triage, backlog, unstarted, ready
@@ -171,35 +186,36 @@ These commands invoke helper scripts in `.claude/scripts/` that output TOON form
 
 ### Build
 ```bash
-npm run build
+bun run build
 ```
-Compiles TypeScript from `src/` to `dist/` using CommonJS target ES2022.
+Bundles `src/platform/server.ts`, `src/platform/worker.ts`, and `src/infra/mcp-toonify.ts` into `dist/` using Bun's native bundler targeting Node.
 
 ### Testing
 ```bash
-# Run all tests with coverage
+# Run all tests
 npm test
+# (internally: bun test with separate invocations per test group to avoid mock isolation issues)
 
-# Run specific test file
-NODE_OPTIONS=--experimental-vm-modules npx jest tests/server.test.ts
+# Run a specific test file
+bun test tests/server.test.ts
 
-# Run specific test pattern
-NODE_OPTIONS=--experimental-vm-modules npx jest -t "webhook signature"
+# Run tests matching a pattern
+bun test --test-name-pattern "webhook signature"
 
 # Watch mode
-NODE_OPTIONS=--experimental-vm-modules npx jest --watch
+bun test --watch
 ```
 
-**Note**: Tests use `NODE_OPTIONS=--experimental-vm-modules` because Jest with ESM requires experimental module support.
+**Note**: Some test files must run in separate `bun test` invocations because Bun runs all files in the same process — conflicting module mocks from different files can leak into each other.
 
 ### Local Development
 ```bash
 # Start entire stack (Redis + API + Worker)
 docker-compose up --build
 
-# Start individual services (after building)
-npm run start:api      # Runs on port 3000
-npm run start:worker   # Processes jobs from Redis
+# Start individual services
+bun run src/platform/server.ts    # API on port 3000
+bun run src/platform/worker.ts    # Background worker
 ```
 
 ### Environment Setup
@@ -211,12 +227,14 @@ Copy `.env.example` to `.env` and configure:
 - `LINEAR_API_KEY`: API key for posting comments and updating issue states (required for plan review)
 - `PLAN_REVIEW_ENABLED`: Enable human-in-the-loop planning (default: true)
 - `PLAN_TTL_DAYS`: Redis TTL for stored plans in days (default: 7)
+- `LOG_LEVEL`: Pino log level — `debug | info | warn | error` (default: info)
+- `WORKSPACE_ROOT`: Override workspace directory (default: /tmp/ralph-workspaces)
 - `LANGFUSE_*`: Optional tracing (cloud.langfuse.com)
 
 ## Critical Implementation Details
 
 ### Linear Webhook Security
-The webhook endpoint (src/server.ts:49) uses **HMAC SHA-256 signature verification** with timing-safe comparison. The raw request body is captured via express middleware (line 11-14) and verified against the `linear-signature` header using `LINEAR_WEBHOOK_SECRET`.
+The webhook endpoint (src/platform/server.ts) uses **HMAC SHA-256 signature verification** with timing-safe comparison. The raw request body is captured via express middleware and verified against the `linear-signature` header using `LINEAR_WEBHOOK_SECRET`.
 
 **Never bypass signature verification** - it prevents unauthorized job injection.
 
@@ -237,12 +255,12 @@ Only Linear issues with the label "Ralph" (case-insensitive) trigger agent execu
 - Requires stored plan in Redis (7-day TTL)
 
 ### Workspace Isolation
-Each job gets a UUID-based ephemeral workspace in `/tmp/ralph-workspaces`. The workspace module (src/workspace.ts) clones the repo using OAuth token authentication, creates/checks out a feature branch (`ralph/feat-{identifier}`), and configures git identity as "Ralph Bot <ralph@duvo.ai>".
+Each job gets a UUID-based ephemeral workspace under `WORKSPACE_ROOT` (default `/tmp/ralph-workspaces`). The workspace module (src/agent/workspace.ts) clones the repo using OAuth token authentication, creates/checks out a feature branch (`ralph/feat-{identifier}`), and configures git identity as "Ralph Bot <ralph@duvo.ai>".
 
 **Always call `cleanup()` after job completion** to prevent disk exhaustion.
 
 ### Agent Execution Modes
-The agent (src/agent.ts) supports three execution modes controlled by `task.mode`:
+The agent (src/agent/agent.ts) supports three execution modes controlled by `task.mode`:
 1. **plan-only**: Sonnet 4.5 generates implementation plan ($0.50 budget), posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
 2. **execute-only**: Sonnet 4.5 executes pre-approved plan from Redis ($2.00 budget) (triggered by approval comment)
 3. **full**: Legacy mode - Sonnet 4.5 plans then executes in one job (default when PLAN_REVIEW_ENABLED=false)
@@ -265,7 +283,7 @@ The agent uses the native Claude CLI (Claude Code) tools for code manipulation. 
 - `Glob`: Find files matching patterns
 - `LS`: List directory contents
 
-**Command Execution Security (src/tools.ts:34-89)**:
+**Command Execution Security (src/agent/tools.ts)**:
 The `runCommand` tool implements defense-in-depth against command injection:
 
 1. **Allowlist Validation**: Only whitelisted command patterns are permitted:
@@ -293,7 +311,7 @@ The `runCommand` tool implements defense-in-depth against command injection:
 **Critical**: Never bypass these security controls. The agent operates on untrusted repositories and must not execute arbitrary commands or access files outside the workspace.
 
 ### Polyglot Validation
-The tools module (src/tools.ts) auto-detects project type and runs:
+The tools module (src/agent/tools.ts) auto-detects project type and runs:
 - **TypeScript/JavaScript**: Biome (formatting/linting with auto-fix) + TSC (type checking)
 - **Python**: Ruff (linting + formatting with auto-fix) + Mypy (type checking with `--ignore-missing-imports`)
 - **Go**: goimports (formatting/imports with auto-fix) + staticcheck (linting - MIT licensed) + go build (compilation check)
@@ -303,7 +321,7 @@ The tools module (src/tools.ts) auto-detects project type and runs:
 Validation failures are captured in the output and provided as feedback to the agent for fixing in the next iteration.
 
 ### BullMQ Configuration
-Worker (src/worker.ts:26-30):
+Worker (src/platform/worker.ts):
 - Concurrency: 2 parallel jobs per worker pod
 - Rate limiter: 5 jobs per 60 seconds (Anthropic API protection)
 - Retry strategy: 3 attempts with exponential backoff (2s base delay)
@@ -328,7 +346,7 @@ To save context window space, prefer **TOON (Token Optimized Object Notation)** 
   status:active
   ```
 
-**MCP Toonify**: The `src/mcp-toonify.ts` module converts Model Context Protocol (MCP) tool schemas from JSON to TOON format, reducing token usage when passing tool definitions to Claude.
+**MCP Toonify**: The `src/infra/mcp-toonify.ts` module converts Model Context Protocol (MCP) tool schemas from JSON to TOON format, reducing token usage when passing tool definitions to Claude.
 
 ## Testing Strategy
 
