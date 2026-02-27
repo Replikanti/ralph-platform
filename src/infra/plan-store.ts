@@ -1,6 +1,6 @@
 import { logger } from './logger';
 import IORedis from 'ioredis';
-import type { StoredPlanContext } from './domain/types';
+import type { StoredPlanContext } from '../domain/types';
 
 export interface StoredPlan extends StoredPlanContext {
     taskId: string;

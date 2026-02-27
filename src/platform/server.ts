@@ -1,7 +1,6 @@
 import express from 'express';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
-import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import morgan from 'morgan';
@@ -10,13 +9,12 @@ import helmet from 'helmet';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { getPlan } from './plan-store';
-import { LinearClient as RalphLinearClient } from './linear-client';
-import { parseIssuePayload, parseCommentPayload } from './webhook-schemas';
-import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from './domain/webhook-routing';
-import { logger } from './logger';
+import { getPlan } from '../infra/plan-store';
+import { LinearClient as RalphLinearClient } from '../infra/linear-client';
+import { parseIssuePayload, parseCommentPayload } from '../infra/webhook-schemas';
+import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from '../domain/webhook-routing';
+import { logger } from '../infra/logger';
 
-dotenv.config();
 const app = express();
 
 // Security Headers
@@ -297,7 +295,7 @@ async function handleCommentWebhook(data: unknown, res: express.Response): Promi
 
     if (routing.action === 'ignore') {
         logger.info(`ℹ️ [API] Ignoring comment (${routing.reason})`);
-        return res.status(200).send({ status: 'ignored', reason: routing.reason.replace(/-/g, '_') });
+        return res.status(200).send({ status: 'ignored', reason: routing.reason.replaceAll('-', '_') });
     }
 
     if (routing.action === 'approve' || routing.action === 'revise') {

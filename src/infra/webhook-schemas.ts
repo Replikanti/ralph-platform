@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { WebhookIssue, WebhookComment } from './domain/types';
+import type { WebhookIssue, WebhookComment } from '../domain/types';
 
 const LabelSchema = z.object({ name: z.string() });
 const StateSchema = z.object({

@@ -1,4 +1,4 @@
-FROM node:22-bookworm
+FROM oven/bun:1-debian AS base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 ENV GOPATH="/root/go"
@@ -9,7 +9,7 @@ RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local
     go install golang.org/x/tools/cmd/goimports@latest && \
     go install honnef.co/go/tools/cmd/staticcheck@latest && \
     apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip && \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip nodejs npm && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/terraform.zip && \
     unzip /tmp/terraform.zip -d /usr/local/bin && \
@@ -24,12 +24,13 @@ RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local
     install -m 755 /root/.local/bin/claude /usr/local/bin/claude
 
 # Build App
-COPY package*.json ./
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
 COPY . .
-RUN npm ci && \
-    npm run build && \
-    chown -R node:node /app
+RUN bun run build && \
+    chown -R bun:bun /app
 
-USER node
+USER bun
 
-CMD ["node", "dist/server.js"]
+CMD ["bun", "run", "dist/server.js"]

@@ -1,4 +1,3 @@
-import { describe, it, expect } from '@jest/globals';
 import { isApprovalComment, routeComment, shouldSkipIssueWebhook, hasRalphLabel, isRalphOwnComment, isInReviewState, isAlreadyProcessing } from '../../src/domain/webhook-routing';
 import { WebhookComment, WebhookIssue, StoredPlanContext } from '../../src/domain/types';
 

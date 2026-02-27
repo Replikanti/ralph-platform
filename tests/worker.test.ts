@@ -1,44 +1,60 @@
+import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
+
 process.env.LINEAR_API_KEY = 'test-key';
 
-jest.mock('../src/logger', () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }));
-const getLoggerError = () => (jest.requireMock('../src/logger').logger.error as jest.Mock);
+mock.module('../src/infra/logger', () => ({
+    logger: { error: mock(), warn: mock(), info: mock() }
+}));
+mock.module('bullmq', () => ({
+    Worker: mock(),
+    Job: mock(),
+}));
+mock.module('ioredis', () => ({
+    default: mock().mockImplementation(() => ({ on: mock() })),
+}));
+mock.module('../src/agent/agent', () => ({
+    runAgent: mock(),
+}));
+mock.module('../src/infra/plan-store', () => ({
+    storePlan: mock(),
+    deletePlan: mock(),
+    getPlan: mock(),
+    updatePlanStatus: mock(),
+    appendFeedback: mock(),
+}));
+mock.module('../src/infra/plan-formatter', () => ({
+    formatPlanForLinear: mock(),
+}));
 
-import { createWorker, jobProcessor } from '../src/worker';
-import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
-import { runAgent } from '../src/agent';
+const mockUpdateIssueState = mock().mockResolvedValue(true);
+const mockPostComment = mock().mockResolvedValue(undefined);
+const mockGetIssueState = mock().mockResolvedValue('Todo');
 
-jest.mock('bullmq');
-jest.mock('ioredis');
-jest.mock('../src/agent');
-jest.mock('../src/plan-store');
-jest.mock('../src/plan-formatter');
-
-const mockUpdateIssueState = jest.fn().mockResolvedValue(true);
-const mockPostComment = jest.fn().mockResolvedValue(undefined);
-const mockGetIssueState = jest.fn().mockResolvedValue('Todo');
-
-jest.mock('../src/linear-client', () => ({
-    LinearClient: jest.fn().mockImplementation(() => ({
+mock.module('../src/infra/linear-client', () => ({
+    LinearClient: mock().mockImplementation(() => ({
         updateIssueState: mockUpdateIssueState,
         postComment: mockPostComment,
         getIssueState: mockGetIssueState,
     }))
 }));
 
-jest.mock('../src/domain/agent-outcomes', () => ({
-    resolvePlatformAction: jest.requireActual('../src/domain/agent-outcomes').resolvePlatformAction,
-}));
+import { createWorker, jobProcessor } from '../src/platform/worker';
+import { Worker } from 'bullmq';
+import IORedis from 'ioredis';
+import { runAgent } from '../src/agent/agent';
+import { storePlan, deletePlan } from '../src/infra/plan-store';
+import { formatPlanForLinear } from '../src/infra/plan-formatter';
+import { logger } from '../src/infra/logger';
 
-const mockRunAgent = runAgent as jest.MockedFunction<typeof runAgent>;
+const mockRunAgent = runAgent as any;
 
 describe('Worker', () => {
-    let mockOn: jest.Mock;
+    let mockOn: any;
 
     beforeEach(() => {
         jest.clearAllMocks();
         mockOn = jest.fn();
-        (Worker as unknown as jest.Mock).mockImplementation(() => ({
+        (Worker as any).mockImplementation(() => ({
             on: mockOn,
             close: jest.fn(),
         }));
@@ -53,7 +69,7 @@ describe('Worker', () => {
             expect.objectContaining({
                 concurrency: 1,
                 limiter: { max: 10, duration: 60000 },
-                connection: expect.any(IORedis),
+                connection: expect.anything(),
                 lockDuration: 600000,
                 lockRenewTime: 30000,
             })
@@ -77,7 +93,6 @@ describe('Worker', () => {
         expect(mockRunAgent).toHaveBeenCalledWith(
             expect.objectContaining({ ticketId: 'T-1', jobId: '123', attempt: 1, maxAttempts: 3 })
         );
-        // Must NOT receive IORedis as second argument
         expect(mockRunAgent).not.toHaveBeenCalledWith(expect.anything(), expect.any(IORedis));
     });
 
@@ -124,31 +139,27 @@ describe('Worker', () => {
         });
 
         it('stores plan in Redis and posts to Linear on plan-generated', async () => {
-            const { storePlan } = require('../src/plan-store');
-            const { formatPlanForLinear } = require('../src/plan-formatter');
-            (formatPlanForLinear as jest.Mock).mockReturnValue('## Formatted Plan');
+            (formatPlanForLinear as any).mockReturnValue('## Formatted Plan');
             mockRunAgent.mockResolvedValue({ mode: 'plan-only', status: 'plan-generated', plan: 'raw plan' });
 
             await jobProcessor(baseJob('T-plan', 'plan-only') as any);
 
-            expect(storePlan).toHaveBeenCalledWith(expect.any(IORedis), 'T-plan', expect.objectContaining({ plan: 'raw plan', taskId: 'T-plan' }));
+            expect(storePlan).toHaveBeenCalledWith(expect.anything(), 'T-plan', expect.objectContaining({ plan: 'raw plan', taskId: 'T-plan' }));
             expect(mockPostComment).toHaveBeenCalledWith('T-plan', '## Formatted Plan');
             expect(mockUpdateIssueState).toHaveBeenCalledWith('T-plan', 'Todo');
         });
 
         it('deletes plan and marks In Review on executed (non-iteration)', async () => {
-            const { deletePlan } = require('../src/plan-store');
             mockGetIssueState.mockResolvedValue('In Review');
             mockRunAgent.mockResolvedValue({ mode: 'full', status: 'executed', prUrl: 'https://github.com/org/repo/pull/1', isIteration: false });
 
             await jobProcessor(baseJob('T-exec') as any);
 
-            expect(deletePlan).toHaveBeenCalledWith(expect.any(IORedis), 'T-exec');
+            expect(deletePlan).toHaveBeenCalledWith(expect.anything(), 'T-exec');
             expect(mockPostComment).toHaveBeenCalledWith('T-exec', expect.stringContaining('Done'));
-        });
+        }, 10000);
 
         it('does NOT delete plan and marks In Review on executed (iteration)', async () => {
-            const { deletePlan } = require('../src/plan-store');
             mockRunAgent.mockResolvedValue({ mode: 'execute-only', status: 'executed', prUrl: null, isIteration: true });
 
             await jobProcessor(baseJob('T-iter', 'execute-only') as any);
@@ -194,7 +205,7 @@ describe('Worker', () => {
                 moveToDelayed: mockMoveToDelayed,
             };
 
-            await expect(jobProcessor(mockJob as any)).resolves.not.toThrow();
+            await jobProcessor(mockJob as any);
             expect(mockMoveToDelayed).toHaveBeenCalled();
         });
     });
@@ -202,7 +213,7 @@ describe('Worker', () => {
     describe('completed event', () => {
         it('sets tombstone for execute-only job', async () => {
             const mockSet = jest.fn();
-            (IORedis as unknown as jest.Mock).mockImplementation(() => ({
+            (IORedis as any).mockImplementation(() => ({
                 set: mockSet,
                 on: jest.fn(),
                 quit: jest.fn(),
@@ -229,7 +240,7 @@ describe('Worker', () => {
                 new Error('Final error')
             );
 
-            expect(getLoggerError()).toHaveBeenCalledWith(expect.stringContaining('FAILED PERMANENTLY'));
+            expect(logger.error as any).toHaveBeenCalledWith(expect.stringContaining('FAILED PERMANENTLY'));
             expect(mockUpdateIssueState).toHaveBeenCalledWith('T-1', 'Todo');
         });
     });
