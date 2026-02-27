@@ -74,8 +74,7 @@ jobs:
 
     # Install Helm
     - name: Install Helm
-      run: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
     # Deploy via Helm
     - name: Deploy
