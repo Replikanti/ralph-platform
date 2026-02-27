@@ -9,11 +9,11 @@ import helmet from 'helmet';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { getPlan } from './plan-store';
-import { LinearClient as RalphLinearClient } from './linear-client';
-import { parseIssuePayload, parseCommentPayload } from './webhook-schemas';
-import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from './domain/webhook-routing';
-import { logger } from './logger';
+import { getPlan } from '../infra/plan-store';
+import { LinearClient as RalphLinearClient } from '../infra/linear-client';
+import { parseIssuePayload, parseCommentPayload } from '../infra/webhook-schemas';
+import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from '../domain/webhook-routing';
+import { logger } from '../infra/logger';
 
 const app = express();
 

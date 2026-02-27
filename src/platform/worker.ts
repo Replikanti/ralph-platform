@@ -1,12 +1,12 @@
-import { logger } from './logger';
+import { logger } from '../infra/logger';
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent, Task } from './agent';
-import { storePlan, deletePlan, StoredPlan } from './plan-store';
-import { formatPlanForLinear } from './plan-formatter';
-import { LinearClient as RalphLinearClient } from './linear-client';
-import { resolvePlatformAction } from './domain/agent-outcomes';
-import type { AgentResult } from './domain/types';
+import { runAgent, Task } from '../agent/agent';
+import { storePlan, deletePlan, StoredPlan } from '../infra/plan-store';
+import { formatPlanForLinear } from '../infra/plan-formatter';
+import { LinearClient as RalphLinearClient } from '../infra/linear-client';
+import { resolvePlatformAction } from '../domain/agent-outcomes';
+import type { AgentResult } from '../domain/types';
 
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,

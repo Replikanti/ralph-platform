@@ -1,4 +1,4 @@
-import { logger } from '../logger';
+import { logger } from '../infra/logger';
 import { Redactor } from '@redactpii/node';
 
 // Custom secret patterns with specific replacements (applied before PII redactor)

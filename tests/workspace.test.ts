@@ -15,7 +15,7 @@ mock.module('uuid', () => ({
     v4: () => 'test-uuid',
 }));
 
-import { setupWorkspace } from '../src/workspace';
+import { setupWorkspace } from '../src/agent/workspace';
 import simpleGit from 'simple-git';
 import fs from 'node:fs';
 

@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { logger } from '../infra/logger';
 import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';

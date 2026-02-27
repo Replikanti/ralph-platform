@@ -74,7 +74,7 @@ mock.module('node:fs/promises', () => ({
     readFile: mockFsReadFile,
 }));
 
-mock.module('../src/plan-store', () => ({
+mock.module('../src/infra/plan-store', () => ({
     getPlan: mockGetPlan,
     storePlan: mockStorePlan,
     updatePlanStatus: mockUpdatePlanStatus,
@@ -82,15 +82,15 @@ mock.module('../src/plan-store', () => ({
     deletePlan: mockDeletePlan,
 }));
 
-mock.module('../src/linear-client', () => ({
+mock.module('../src/infra/linear-client', () => ({
     LinearClient: mockLinearClientConstructor,
 }));
 
 // ── Static imports (run after hoisted mocks) ──
 
 import request from 'supertest';
-import { app } from '../src/server';
-import { getPlan } from '../src/plan-store';
+import { app } from '../src/platform/server';
+import { getPlan } from '../src/infra/plan-store';
 import {
     createIssueWebhook,
     createCommentWebhook,

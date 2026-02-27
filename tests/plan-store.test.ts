@@ -1,6 +1,6 @@
 import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 import IORedis from 'ioredis';
-import { storePlan, getPlan, updatePlanStatus, appendFeedback, deletePlan, StoredPlan } from '../src/plan-store';
+import { storePlan, getPlan, updatePlanStatus, appendFeedback, deletePlan, StoredPlan } from '../src/infra/plan-store';
 
 mock.module('ioredis', () => ({
     default: mock().mockImplementation(() => ({}))

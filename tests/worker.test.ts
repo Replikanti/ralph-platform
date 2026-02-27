@@ -2,7 +2,7 @@ import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 
 process.env.LINEAR_API_KEY = 'test-key';
 
-mock.module('../src/logger', () => ({
+mock.module('../src/infra/logger', () => ({
     logger: { error: mock(), warn: mock(), info: mock() }
 }));
 mock.module('bullmq', () => ({
@@ -12,17 +12,17 @@ mock.module('bullmq', () => ({
 mock.module('ioredis', () => ({
     default: mock().mockImplementation(() => ({ on: mock() })),
 }));
-mock.module('../src/agent', () => ({
+mock.module('../src/agent/agent', () => ({
     runAgent: mock(),
 }));
-mock.module('../src/plan-store', () => ({
+mock.module('../src/infra/plan-store', () => ({
     storePlan: mock(),
     deletePlan: mock(),
     getPlan: mock(),
     updatePlanStatus: mock(),
     appendFeedback: mock(),
 }));
-mock.module('../src/plan-formatter', () => ({
+mock.module('../src/infra/plan-formatter', () => ({
     formatPlanForLinear: mock(),
 }));
 
@@ -30,7 +30,7 @@ const mockUpdateIssueState = mock().mockResolvedValue(true);
 const mockPostComment = mock().mockResolvedValue(undefined);
 const mockGetIssueState = mock().mockResolvedValue('Todo');
 
-mock.module('../src/linear-client', () => ({
+mock.module('../src/infra/linear-client', () => ({
     LinearClient: mock().mockImplementation(() => ({
         updateIssueState: mockUpdateIssueState,
         postComment: mockPostComment,
@@ -38,13 +38,13 @@ mock.module('../src/linear-client', () => ({
     }))
 }));
 
-import { createWorker, jobProcessor } from '../src/worker';
+import { createWorker, jobProcessor } from '../src/platform/worker';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { runAgent } from '../src/agent';
-import { storePlan, deletePlan } from '../src/plan-store';
-import { formatPlanForLinear } from '../src/plan-formatter';
-import { logger } from '../src/logger';
+import { runAgent } from '../src/agent/agent';
+import { storePlan, deletePlan } from '../src/infra/plan-store';
+import { formatPlanForLinear } from '../src/infra/plan-formatter';
+import { logger } from '../src/infra/logger';
 
 const mockRunAgent = runAgent as any;
 

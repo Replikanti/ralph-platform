@@ -31,7 +31,7 @@ mock.module('node:fs/promises', () => ({
     mkdir: mockFsMkdir,
 }));
 
-import { runPolyglotValidation, listFiles, readFile, writeFile, runCommand } from '../src/tools';
+import { runPolyglotValidation, listFiles, readFile, writeFile, runCommand } from '../src/agent/tools';
 import path from 'node:path';
 import { createMockExecCallback } from './fixtures';
 

@@ -10,7 +10,7 @@ const mockStates = mock().mockResolvedValue({
     ]
 });
 
-mock.module('../src/logger', () => ({
+mock.module('../src/infra/logger', () => ({
     logger: { warn: mock(), info: mock(), error: mock() }
 }));
 mock.module('@linear/sdk', () => ({
@@ -24,8 +24,8 @@ mock.module('@linear/sdk', () => ({
     }))
 }));
 
-import { LinearClient } from '../src/linear-client';
-import { logger } from '../src/logger';
+import { LinearClient } from '../src/infra/linear-client';
+import { logger } from '../src/infra/logger';
 
 describe('LinearClient', () => {
     const originalEnv = process.env;

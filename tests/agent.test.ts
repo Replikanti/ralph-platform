@@ -1,10 +1,10 @@
 import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 
-mock.module('../src/workspace', () => ({
+mock.module('../src/agent/workspace', () => ({
     setupWorkspace: mock(),
     parseRepoUrl: mock(),
 }));
-mock.module('../src/tools', () => ({
+mock.module('../src/agent/tools', () => ({
     runPolyglotValidation: mock(),
     detectProjectLanguages: mock(),
 }));
@@ -81,9 +81,9 @@ mock.module('langfuse', () => ({
 process.env.LINEAR_API_KEY = 'test-key';
 process.env.PLAN_REVIEW_ENABLED = 'false';
 
-import { runAgent } from '../src/agent';
-import { setupWorkspace, parseRepoUrl } from '../src/workspace';
-import { runPolyglotValidation, detectProjectLanguages } from '../src/tools';
+import { runAgent } from '../src/agent/agent';
+import { setupWorkspace, parseRepoUrl } from '../src/agent/workspace';
+import { runPolyglotValidation, detectProjectLanguages } from '../src/agent/tools';
 import * as fsPromises from 'node:fs/promises';
 
 describe('runAgent', () => {

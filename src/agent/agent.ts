@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { logger } from '../infra/logger';
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import type { AgentResult } from './domain/types';
+import type { AgentResult } from '../domain/types';
 
 const langfuse = new Langfuse();
 
