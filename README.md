@@ -43,10 +43,10 @@ cd ralph-platform
 cp .env.example .env
 # Edit .env with your API keys
 
-# Start the stack
+# Start the stack (requires Docker)
 docker-compose up --build
 
-# Run tests
+# Run tests (requires Bun)
 npm test
 ```
 
@@ -115,17 +115,17 @@ See **[USER_GUIDE.md](./USER_GUIDE.md)** for complete examples and best practice
 
 ```bash
 # Build
-npm run build
+bun run build
 
-# Run tests
+# Run all tests
 npm test
 
-# Run specific test
-NODE_OPTIONS=--experimental-vm-modules npx jest tests/server.test.ts
+# Run a specific test file
+bun test tests/server.test.ts
 
 # Start services
-npm run start:api      # API on port 3000
-npm run start:worker   # Background worker
+bun run src/platform/server.ts    # API on port 3000
+bun run src/platform/worker.ts    # Background worker
 ```
 
 ## 🔐 Environment Variables
@@ -143,6 +143,8 @@ LINEAR_API_KEY=lin_api_xxx              # Write access to Linear
 # Optional
 PLAN_REVIEW_ENABLED=true                # Enable human-in-the-loop (default: true)
 PLAN_TTL_DAYS=7                         # Redis plan TTL (default: 7)
+LOG_LEVEL=info                          # Pino log level: debug|info|warn|error
+WORKSPACE_ROOT=/tmp/ralph-workspaces    # Override workspace directory
 LANGFUSE_SECRET_KEY=sk-lf-xxx           # Observability
 LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_HOST=https://cloud.langfuse.com

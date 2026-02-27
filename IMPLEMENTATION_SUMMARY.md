@@ -1,5 +1,11 @@
 # Human-in-the-Loop Planning - Implementation Summary
 
+> **Note**: This document was written before the src/ reorganization (PR #171, 2026-02).
+> File paths referenced below have since moved: `src/server.ts` → `src/platform/server.ts`,
+> `src/agent.ts` → `src/agent/agent.ts`, `src/worker.ts` → `src/platform/worker.ts`,
+> `src/tools.ts` → `src/agent/tools.ts`, `src/plan-store.ts` → `src/infra/plan-store.ts`,
+> `src/linear-client.ts` → `src/infra/linear-client.ts`, `src/plan-formatter.ts` → `src/infra/plan-formatter.ts`.
+
 ## Overview
 Successfully implemented interactive planning with human steering for the Ralph Platform. This feature introduces a review stage between Planning and Execution phases, allowing developers to approve or iterate on Ralph's implementation plans before code modifications begin.
 
