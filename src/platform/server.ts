@@ -295,7 +295,7 @@ async function handleCommentWebhook(data: unknown, res: express.Response): Promi
 
     if (routing.action === 'ignore') {
         logger.info(`ℹ️ [API] Ignoring comment (${routing.reason})`);
-        return res.status(200).send({ status: 'ignored', reason: routing.reason.replace(/-/g, '_') });
+        return res.status(200).send({ status: 'ignored', reason: routing.reason.replaceAll('-', '_') });
     }
 
     if (routing.action === 'approve' || routing.action === 'revise') {

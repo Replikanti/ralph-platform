@@ -108,7 +108,7 @@ describe('Plan Store', () => {
             await updatePlanStatus(mockRedis, taskId, 'approved');
 
             expect((mockRedis as any).set).toHaveBeenCalled();
-            const setCall = ((mockRedis as any).set as any).mock.calls[0];
+            const setCall = (mockRedis as any).set.mock.calls[0];
             const savedPlan = JSON.parse(setCall[1]);
             expect(savedPlan.status).toBe('approved');
         });
@@ -137,7 +137,7 @@ describe('Plan Store', () => {
             await appendFeedback(mockRedis, taskId, 'Second feedback');
 
             expect((mockRedis as any).set).toHaveBeenCalled();
-            const setCall = ((mockRedis as any).set as any).mock.calls[0];
+            const setCall = (mockRedis as any).set.mock.calls[0];
             const savedPlan = JSON.parse(setCall[1]);
             expect(savedPlan.feedbackHistory).toEqual(['First feedback', 'Second feedback']);
             expect(savedPlan.status).toBe('needs-revision');

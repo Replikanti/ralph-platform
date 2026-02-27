@@ -90,7 +90,6 @@ mock.module('../src/infra/linear-client', () => ({
 
 import request from 'supertest';
 import { app } from '../src/platform/server';
-import { getPlan } from '../src/infra/plan-store';
 import {
     createIssueWebhook,
     createCommentWebhook,
