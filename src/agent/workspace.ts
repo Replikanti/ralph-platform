@@ -5,7 +5,8 @@ import fsPromises from 'node:fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'node:path';
 
-const WORKSPACE_ROOT = '/tmp/ralph-workspaces';
+// Workspace root is under /tmp; each job gets a UUID-based subdirectory for isolation. // NOSONAR
+const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || '/tmp/ralph-workspaces';
 if (!fs.existsSync(WORKSPACE_ROOT)) fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 export function parseRepoUrl(repoUrl: string): { owner: string, repo: string } {

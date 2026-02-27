@@ -24,7 +24,7 @@ RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local
     install -m 755 /root/.local/bin/claude /usr/local/bin/claude
 
 # Build App
-COPY package.json bun.lock* ./
+COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY . .
