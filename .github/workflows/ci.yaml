@@ -26,7 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+      - uses: oven-sh/setup-bun@0ff83bfc51e05dd2251088164ec6a5e8533b476b # v2
+        with:
+          bun-version: "1.2.x"
       - run: bun install --frozen-lockfile
-      - run: npm run build
-      - run: npm test
+      - run: bun run build
+      - run: bun run test
