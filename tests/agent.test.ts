@@ -1,65 +1,58 @@
-jest.mock('../src/workspace');
-jest.mock('../src/tools');
+import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 
-// Mock @redactpii/node to avoid ESM issues in Jest
-jest.mock('@redactpii/node', () => ({
-    AsyncRedactor: jest.fn().mockImplementation(() => ({
-        redact: jest.fn().mockImplementation((text) => Promise.resolve(text))
-    })),
-    CustomRedactor: jest.fn().mockImplementation(() => ({}))
+mock.module('../src/workspace', () => ({
+    setupWorkspace: mock(),
+    parseRepoUrl: mock(),
+}));
+mock.module('../src/tools', () => ({
+    runPolyglotValidation: mock(),
+    detectProjectLanguages: mock(),
+}));
+mock.module('../src/security/redactor', () => ({
+    redactText: mock().mockImplementation((text: string) => Promise.resolve(text)),
+}));
+mock.module('node:fs/promises', () => ({
+    default: {
+        access: mock().mockRejectedValue(new Error('No skills')),
+        readdir: mock(),
+        readFile: mock(),
+        mkdir: mock().mockResolvedValue(undefined),
+        writeFile: mock().mockResolvedValue(undefined),
+        stat: mock().mockResolvedValue({ mtimeMs: Date.now() }),
+        cp: mock().mockResolvedValue(undefined),
+    },
+    access: mock().mockRejectedValue(new Error('No skills')),
+    readdir: mock(),
+    readFile: mock(),
+    mkdir: mock().mockResolvedValue(undefined),
+    writeFile: mock().mockResolvedValue(undefined),
+    stat: mock().mockResolvedValue({ mtimeMs: Date.now() }),
+    cp: mock().mockResolvedValue(undefined),
 }));
 
-jest.mock('node:fs/promises', () => ({
-    access: jest.fn().mockRejectedValue(new Error('No skills')),
-    readdir: jest.fn(),
-    readFile: jest.fn(),
-    mkdir: jest.fn().mockResolvedValue(undefined),
-    writeFile: jest.fn().mockResolvedValue(undefined),
-    stat: jest.fn().mockResolvedValue({ mtimeMs: Date.now() }),
-    cp: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.setTimeout(30000);
-
-process.env.LINEAR_API_KEY = 'test-key';
-process.env.PLAN_REVIEW_ENABLED = 'false'; // Run in full mode for most tests
-
-const mockSpawnOn = jest.fn();
-const mockStdoutOn = jest.fn();
-const mockStderrOn = jest.fn();
-
-const mockSpawn = jest.fn().mockImplementation(() => ({
+const mockSpawnOn = mock();
+const mockStdoutOn = mock();
+const mockStderrOn = mock();
+const mockSpawn = mock().mockImplementation(() => ({
     stdout: { on: mockStdoutOn },
     stderr: { on: mockStderrOn },
-    stdin: { end: jest.fn() },
+    stdin: { end: mock() },
     on: mockSpawnOn,
     pid: 12345,
 }));
+const mockExec = mock();
 
-const mockExec = jest.fn();
-
-jest.mock('node:child_process', () => ({
+mock.module('node:child_process', () => ({
     spawn: mockSpawn,
     exec: mockExec,
+    execSync: mock(),
 }));
 
-jest.mock('node:util', () => {
-    const originalUtil = jest.requireActual('node:util');
-    return {
-        ...originalUtil,
-        promisify: (fn: any) => {
-            if (fn === mockExec) return mockExec;
-            return originalUtil.promisify(fn);
-        }
-    };
-});
+const mockPullsCreate = mock().mockResolvedValue({ data: { html_url: 'https://github.com/org/repo/pull/1' } });
+const mockPullsList = mock().mockResolvedValue({ data: [] });
 
-// Mock Octokit — PR creation still lives in agent
-const mockPullsCreate = jest.fn().mockResolvedValue({ data: { html_url: 'https://github.com/org/repo/pull/1' } });
-const mockPullsList = jest.fn().mockResolvedValue({ data: [] });
-
-jest.mock('@octokit/rest', () => ({
-    Octokit: jest.fn().mockImplementation(() => ({
+mock.module('@octokit/rest', () => ({
+    Octokit: mock().mockImplementation(() => ({
         rest: {
             pulls: {
                 create: mockPullsCreate,
@@ -69,18 +62,36 @@ jest.mock('@octokit/rest', () => ({
     }))
 }));
 
+const mockSpanEnd = mock();
+const mockTraceSpan = mock().mockReturnValue({ end: mockSpanEnd });
+const mockTraceUpdate = mock();
+const mockLangfuseFlush = mock();
+
+mock.module('langfuse', () => ({
+    Langfuse: mock().mockImplementation(() => ({
+        trace: mock().mockReturnValue({
+            span: mockTraceSpan,
+            update: mockTraceUpdate,
+            shutdownAsync: mock(),
+        }),
+        flushAsync: mockLangfuseFlush,
+    }))
+}));
+
+process.env.LINEAR_API_KEY = 'test-key';
+process.env.PLAN_REVIEW_ENABLED = 'false';
+
+import { runAgent } from '../src/agent';
+import { setupWorkspace, parseRepoUrl } from '../src/workspace';
+import { runPolyglotValidation, detectProjectLanguages } from '../src/tools';
+import * as fsPromises from 'node:fs/promises';
+
 describe('runAgent', () => {
     let mockGit: any;
     let mockCleanup: any;
-    let mockTraceSpan: any;
-    let mockSpanEnd: any;
-    let mockTraceUpdate: any;
-    let mockLangfuseFlush: any;
-    let runAgent: any;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        jest.resetModules();
 
         mockGit = {
             add: jest.fn(),
@@ -98,20 +109,18 @@ describe('runAgent', () => {
         };
         mockCleanup = jest.fn();
 
-        const workspaceModule = require('../src/workspace');
-        (workspaceModule.setupWorkspace as jest.Mock).mockResolvedValue({
+        (setupWorkspace as any).mockResolvedValue({
             workDir: '/mock/workspace/repo',
             rootDir: '/mock/workspace',
             git: mockGit,
             cleanup: mockCleanup,
         });
-        (workspaceModule.parseRepoUrl as jest.Mock).mockReturnValue({
+        (parseRepoUrl as any).mockReturnValue({
             owner: 'owner',
             repo: 'repo',
         });
 
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+        (runPolyglotValidation as any).mockResolvedValue({
             success: true,
             output: 'Validation Passed',
             languages: [],
@@ -119,50 +128,30 @@ describe('runAgent', () => {
             totalErrors: 0,
             relevantErrors: 0,
         });
-        (toolsModule.detectProjectLanguages as jest.Mock).mockResolvedValue(['typescript']);
+        (detectProjectLanguages as any).mockResolvedValue(['typescript']);
 
-        mockSpawnOn.mockImplementation((event, cb) => {
+        mockSpawnOn.mockImplementation((event: string, cb: any) => {
             if (event === 'close') cb(0);
         });
-        mockStdoutOn.mockImplementation((event, cb) => {
+        mockStdoutOn.mockImplementation((event: string, cb: any) => {
             if (event === 'data') cb(Buffer.from('Default Output'));
         });
 
-        mockExec.mockImplementation((cmd, opts, cb) => {
+        mockExec.mockImplementation((cmd: string, opts: any, cb: any) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (callback) callback(null, { stdout: '', stderr: '' });
             return Promise.resolve({ stdout: '', stderr: '' });
         });
-
-        mockSpanEnd = jest.fn();
-        mockTraceSpan = jest.fn().mockReturnValue({ end: mockSpanEnd });
-        mockTraceUpdate = jest.fn();
-        mockLangfuseFlush = jest.fn();
-
-        jest.doMock('langfuse', () => ({
-            Langfuse: jest.fn().mockImplementation(() => ({
-                trace: jest.fn().mockReturnValue({
-                    span: mockTraceSpan,
-                    update: mockTraceUpdate,
-                    shutdownAsync: jest.fn(),
-                }),
-                flushAsync: mockLangfuseFlush,
-            }))
-        }));
-
-        const agentModule = require('../src/agent');
-        runAgent = agentModule.runAgent;
     });
 
     it('spawns Claude CLI and returns executed result on success', async () => {
-        const fsModule = require('node:fs/promises');
-        fsModule.readdir.mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
-        fsModule.readFile.mockResolvedValue('CLAUDE.md content');
+        (fsPromises.readdir as any).mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
+        (fsPromises.readFile as any).mockResolvedValue('CLAUDE.md content');
         delete process.env.CLAUDE_BIN_PATH;
 
         mockStdoutOn
-            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
-            .mockImplementationOnce((event, cb) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
+            .mockImplementationOnce((event: string, cb: any) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
+            .mockImplementationOnce((event: string, cb: any) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         const result = await runAgent(task);
@@ -173,12 +162,11 @@ describe('runAgent', () => {
     });
 
     it('retries on validation failure and returns executed result on eventual success', async () => {
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock)
+        (runPolyglotValidation as any)
             .mockResolvedValueOnce({ success: false, output: 'Linter error', languages: [], toolResults: {}, totalErrors: 1, relevantErrors: 1 })
             .mockResolvedValueOnce({ success: true, output: 'Fixed', languages: [], toolResults: {}, totalErrors: 0, relevantErrors: 0 });
 
-        mockStdoutOn.mockImplementation((event, cb) => {
+        mockStdoutOn.mockImplementation((event: string, cb: any) => {
             if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
         });
 
@@ -189,8 +177,7 @@ describe('runAgent', () => {
     });
 
     it('returns validation-failed result after exhausting all retries', async () => {
-        const toolsModule = require('../src/tools');
-        (toolsModule.runPolyglotValidation as jest.Mock).mockResolvedValue({
+        (runPolyglotValidation as any).mockResolvedValue({
             success: false,
             output: 'Validation Failed',
             languages: [],
@@ -199,7 +186,7 @@ describe('runAgent', () => {
             relevantErrors: 5,
         });
 
-        mockStdoutOn.mockImplementation((event, cb) => {
+        mockStdoutOn.mockImplementation((event: string, cb: any) => {
             if (event === 'data') cb(Buffer.from('Ralph tried to fix X but TSC failed.'));
         });
 
@@ -214,7 +201,7 @@ describe('runAgent', () => {
     it('returns no-changes result when git has no staged files', async () => {
         mockGit.status.mockResolvedValue({ staged: [] });
 
-        mockStdoutOn.mockImplementation((event, cb) => {
+        mockStdoutOn.mockImplementation((event: string, cb: any) => {
             if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
         });
 
@@ -226,10 +213,8 @@ describe('runAgent', () => {
 
     it('returns plan-generated result in plan-only mode', async () => {
         process.env.PLAN_REVIEW_ENABLED = 'true';
-        const agentModule = require('../src/agent');
-        runAgent = agentModule.runAgent;
 
-        mockStdoutOn.mockImplementation((event, cb) => {
+        mockStdoutOn.mockImplementation((event: string, cb: any) => {
             if (event === 'data') cb(Buffer.from('<plan>Step 1: do X</plan>'));
         });
 

@@ -1,7 +1,6 @@
 import express from 'express';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
-import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import morgan from 'morgan';
@@ -16,7 +15,6 @@ import { parseIssuePayload, parseCommentPayload } from './webhook-schemas';
 import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from './domain/webhook-routing';
 import { logger } from './logger';
 
-dotenv.config();
 const app = express();
 
 // Security Headers

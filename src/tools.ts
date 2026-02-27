@@ -6,7 +6,9 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { redactText } from "./security/redactor";
 
-const execAsync = promisify(exec);
+// Lazy wrapper: evaluates promisify(exec) at call time so mocks are effective in tests
+const execAsync = (cmd: string, opts?: Parameters<typeof exec>[1]) =>
+    promisify(exec)(cmd, opts) as Promise<{ stdout: string; stderr: string }>;
 
 // --- AGENT TOOLS IMPLEMENTATION ---
 

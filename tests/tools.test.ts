@@ -1,29 +1,46 @@
+import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
+
+// Create mock instances as top-level vars so they're shared between factory and test code
+const mockRedactText = mock().mockImplementation((text: string) => Promise.resolve(text));
+const mockExec = mock();
+const mockExecSync = mock();
+const mockSpawn = mock();
+const mockFsExistsSync = mock();
+const mockFsReaddir = mock();
+const mockFsReadFile = mock();
+const mockFsWriteFile = mock();
+const mockFsMkdir = mock();
+
+mock.module('../src/security/redactor', () => ({
+    redactText: mockRedactText,
+}));
+mock.module('node:child_process', () => ({
+    exec: mockExec,
+    execSync: mockExecSync,
+    spawn: mockSpawn,
+}));
+mock.module('node:fs', () => ({
+    default: { existsSync: mockFsExistsSync },
+    existsSync: mockFsExistsSync,
+}));
+mock.module('node:fs/promises', () => ({
+    default: { readdir: mockFsReaddir, readFile: mockFsReadFile, writeFile: mockFsWriteFile, mkdir: mockFsMkdir },
+    readdir: mockFsReaddir,
+    readFile: mockFsReadFile,
+    writeFile: mockFsWriteFile,
+    mkdir: mockFsMkdir,
+}));
+
 import { runPolyglotValidation, listFiles, readFile, writeFile, runCommand } from '../src/tools';
-import * as child_process from 'node:child_process';
-import * as fs from 'node:fs';
-import * as fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { createMockExecCallback } from './fixtures';
 
-// Mock @redactpii/node
-jest.mock('@redactpii/node', () => ({
-    AsyncRedactor: jest.fn().mockImplementation(() => ({
-        redact: jest.fn().mockImplementation((text) => Promise.resolve(text))
-    })),
-    CustomRedactor: jest.fn().mockImplementation(() => ({}))
-}));
-
-// Mock child_process and fs
-jest.mock('node:child_process');
-jest.mock('node:fs');
-jest.mock('node:fs/promises');
-
-const mockedExec = child_process.exec as unknown as jest.Mock;
-const mockedFsExistsSync = fs.existsSync as unknown as jest.Mock;
-const mockedFsReaddir = fsPromises.readdir as unknown as jest.Mock;
-const mockedFsReadFile = fsPromises.readFile as unknown as jest.Mock;
-const mockedFsWriteFile = fsPromises.writeFile as unknown as jest.Mock;
-const mockedFsMkdir = fsPromises.mkdir as unknown as jest.Mock;
+const mockedExec = mockExec;
+const mockedFsExistsSync = mockFsExistsSync;
+const mockedFsReaddir = mockFsReaddir;
+const mockedFsReadFile = mockFsReadFile;
+const mockedFsWriteFile = mockFsWriteFile;
+const mockedFsMkdir = mockFsMkdir;
 
 describe('Agent Tools', () => {
     const workDir = '/mock/workspace';
@@ -106,9 +123,8 @@ describe('runPolyglotValidation', () => {
         jest.clearAllMocks();
     });
 
-    // Helper to setup standard git status mock
     const setupGitStatusMock = (modifiedFiles: string) => {
-        mockedExec.mockImplementation((cmd, opts, cb) => {
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
                 callback(null, { stdout: modifiedFiles, stderr: '' });
@@ -121,17 +137,15 @@ describe('runPolyglotValidation', () => {
         });
     };
 
-    // Helper to setup project detection
     const setupProjectDetection = (configFile: string) => {
-        mockedFsExistsSync.mockImplementation((p) => {
+        mockedFsExistsSync.mockImplementation((p: string) => {
             const normalized = p.replaceAll('\\', '/');
             return normalized.endsWith(configFile) || (configFile === 'package.json' && (normalized.endsWith('tsconfig.json') || normalized.endsWith('node_modules')));
         });
     };
 
-    // Helper to setup validation failure
     const setupToolFailure = (changedFile: string, failingTool: string, errorMessage: string) => {
-        mockedExec.mockImplementation((cmd, opts, cb) => {
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
                 callback(null, { stdout: `M  ${changedFile}`, stderr: '' });
@@ -146,10 +160,9 @@ describe('runPolyglotValidation', () => {
         });
     };
 
-    // Helper to setup file-based project detection (for Go, Terraform, etc.)
     const setupFileBasedDetection = (filePattern: string, changedFile: string, failingTool?: string, errorMessage?: string) => {
         mockedFsExistsSync.mockReturnValue(false);
-        mockedExec.mockImplementation((cmd, opts, cb) => {
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
                 callback(null, { stdout: `M  ${changedFile}`, stderr: '' });
@@ -214,8 +227,8 @@ describe('runPolyglotValidation', () => {
     });
 
     it('should ignore unrelated errors', async () => {
-        mockedFsExistsSync.mockImplementation((p) => p.endsWith('package.json'));
-        mockedExec.mockImplementation((cmd, opts, cb) => {
+        mockedFsExistsSync.mockImplementation((p: string) => p.endsWith('package.json'));
+        mockedExec.mockImplementation((cmd: string, opts: any, cb: any) => {
             const callback = typeof opts === 'function' ? opts : cb;
             if (cmd.includes('git status')) {
                 callback(null, { stdout: 'M  README.md', stderr: '' });

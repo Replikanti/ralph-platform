@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
-    "start:api": "node dist/server.js",
-    "start:worker": "node dist/worker.js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules npx jest"
+    "build": "bun build src/server.ts --outdir dist --target node && bun build src/worker.ts --outdir dist --target node",
+    "start:api": "bun run src/server.ts",
+    "start:worker": "bun run src/worker.ts",
+    "test": "bun test tests/domain/ tests/plan-formatter.test.ts tests/plan-store.test.ts tests/workspace.test.ts tests/linear-client.test.ts && bun test tests/tools.test.ts && bun test tests/server.test.ts && bun test tests/worker.test.ts && bun test tests/agent.test.ts"
   },
   "dependencies": {
     "@bull-board/api": "^6.16.4",
@@ -16,7 +16,6 @@
     "@octokit/rest": "^22.0.1",
     "@redactpii/node": "^1.0.16",
     "bullmq": "^5.4.0",
-    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-basic-auth": "^1.2.1",
     "helmet": "^8.1.0",
@@ -30,15 +29,12 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
-    "@types/jest": "^30.0.0",
     "@types/morgan": "^1.9.10",
     "@types/node": "^20.11.24",
     "@types/supertest": "^6.0.3",
     "@types/uuid": "^10.0.0",
-    "jest": "^30.2.0",
     "pino-pretty": "^13.1.3",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.6",
     "typescript": "^5.3.3"
   }
 }

@@ -1,32 +1,31 @@
-import { LinearClient } from '../src/linear-client';
+import { mock, jest, describe, it, expect, beforeEach, afterAll } from 'bun:test';
 
-jest.mock('../src/logger', () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() } }));
-const getLoggerWarn = () => (jest.requireMock('../src/logger').logger.warn as jest.Mock);
-
-const mockCreateComment = jest.fn().mockResolvedValue({});
-const mockIssue = jest.fn();
-const mockUpdateIssue = jest.fn().mockResolvedValue({});
-const mockStates = jest.fn().mockResolvedValue({
+const mockCreateComment = mock().mockResolvedValue({});
+const mockIssue = mock();
+const mockUpdateIssue = mock().mockResolvedValue({});
+const mockStates = mock().mockResolvedValue({
     nodes: [
         { name: 'In Progress', id: 's1' },
         { name: 'plan-review', id: 's2' }
     ]
 });
 
-jest.mock('@linear/sdk', () => {
-    return {
-        LinearClient: jest.fn().mockImplementation(() => ({
-            createComment: mockCreateComment,
-            issue: mockIssue.mockResolvedValue({
-                team: Promise.resolve({
-                    states: mockStates
-                }),
-                state: Promise.resolve({ id: 's1', name: 'In Progress' })
-            }),
-            updateIssue: mockUpdateIssue
-        }))
-    };
-});
+mock.module('../src/logger', () => ({
+    logger: { warn: mock(), info: mock(), error: mock() }
+}));
+mock.module('@linear/sdk', () => ({
+    LinearClient: mock().mockImplementation(() => ({
+        createComment: mockCreateComment,
+        issue: mockIssue.mockResolvedValue({
+            team: Promise.resolve({ states: mockStates }),
+            state: Promise.resolve({ id: 's1', name: 'In Progress' })
+        }),
+        updateIssue: mockUpdateIssue
+    }))
+}));
+
+import { LinearClient } from '../src/linear-client';
+import { logger } from '../src/logger';
 
 describe('LinearClient', () => {
     const originalEnv = process.env;
@@ -34,11 +33,8 @@ describe('LinearClient', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         process.env = { ...originalEnv };
-        // Reset the mock implementations
         mockIssue.mockResolvedValue({
-            team: Promise.resolve({
-                states: mockStates
-            }),
+            team: Promise.resolve({ states: mockStates }),
             state: Promise.resolve({ id: 's1', name: 'In Progress' })
         });
     });
@@ -65,15 +61,14 @@ describe('LinearClient', () => {
         it('should post comment when enabled', async () => {
             process.env.LINEAR_API_KEY = 'test-key';
             const client = new LinearClient();
-            
-            await expect(client.postComment('issue-123', 'Test comment')).resolves.not.toThrow();
+            await client.postComment('issue-123', 'Test comment');
         });
 
         it('should warn when not enabled', async () => {
             delete process.env.LINEAR_API_KEY;
             const client = new LinearClient();
             await client.postComment('issue-123', 'Test comment');
-            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
+            expect(logger.warn as any).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 
@@ -81,14 +76,14 @@ describe('LinearClient', () => {
         it('should update state when enabled', async () => {
             process.env.LINEAR_API_KEY = 'test-key';
             const client = new LinearClient();
-            await expect(client.updateIssueState('issue-123', 'In Progress')).resolves.not.toThrow();
+            await client.updateIssueState('issue-123', 'In Progress');
         });
 
         it('should warn when not enabled', async () => {
             delete process.env.LINEAR_API_KEY;
             const client = new LinearClient();
             await client.updateIssueState('issue-123', 'In Progress');
-            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
+            expect(logger.warn as any).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 
@@ -98,7 +93,7 @@ describe('LinearClient', () => {
             const client = new LinearClient();
             const result = await client.getIssueState('issue-123');
             expect(result).toBeNull();
-            expect(getLoggerWarn()).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
+            expect(logger.warn as any).toHaveBeenCalledWith(expect.stringContaining('LINEAR_API_KEY not set'));
         });
     });
 });
