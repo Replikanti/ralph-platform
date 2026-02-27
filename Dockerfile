@@ -5,12 +5,12 @@ ENV GOPATH="/root/go"
 WORKDIR /app
 
 # Install Go, Terraform, Python, Node Tools, Trivy & Claude CLI
-RUN curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
-    go install golang.org/x/tools/cmd/goimports@latest && \
-    go install honnef.co/go/tools/cmd/staticcheck@latest && \
-    apt-get update && \
+RUN apt-get update && \
     apt-get install -y --no-install-recommends python3 python3-pip python3-venv git curl wget unzip nodejs npm && \
     rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://go.dev/dl/go1.23.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
+    go install golang.org/x/tools/cmd/goimports@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
     curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/terraform.zip && \
     unzip /tmp/terraform.zip -d /usr/local/bin && \
     rm /tmp/terraform.zip && \
