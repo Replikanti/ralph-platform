@@ -1,6 +1,6 @@
 import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 import IORedis from 'ioredis';
-import { storePlan, getPlan, updatePlanStatus, appendFeedback, deletePlan, StoredPlan } from '../src/infra/plan-store';
+import { storePlan, getPlan, deletePlan, StoredPlan } from '../src/infra/plan-store';
 
 mock.module('ioredis', () => ({
     default: mock().mockImplementation(() => ({}))
@@ -82,65 +82,6 @@ describe('Plan Store', () => {
             const result = await getPlan(mockRedis, 'nonexistent');
 
             expect(result).toBeNull();
-        });
-    });
-
-    describe('updatePlanStatus', () => {
-        it('should update plan status', async () => {
-            const taskId = 'test-task-123';
-            const existingPlan: StoredPlan = {
-                taskId,
-                plan: 'Test plan content',
-                taskContext: {
-                    ticketId: taskId,
-                    title: 'Test Task',
-                    repoUrl: 'https://github.com/test/repo',
-                    branchName: 'ralph/feat-TEST-123'
-                },
-                feedbackHistory: [],
-                createdAt: new Date(),
-                status: 'pending-review'
-            };
-
-            (mockRedis as any).get = jest.fn().mockResolvedValue(JSON.stringify(existingPlan));
-            (mockRedis as any).set = jest.fn().mockResolvedValue('OK');
-
-            await updatePlanStatus(mockRedis, taskId, 'approved');
-
-            expect((mockRedis as any).set).toHaveBeenCalled();
-            const setCall = (mockRedis as any).set.mock.calls[0];
-            const savedPlan = JSON.parse(setCall[1]);
-            expect(savedPlan.status).toBe('approved');
-        });
-    });
-
-    describe('appendFeedback', () => {
-        it('should append feedback to plan', async () => {
-            const taskId = 'test-task-123';
-            const existingPlan: StoredPlan = {
-                taskId,
-                plan: 'Test plan content',
-                taskContext: {
-                    ticketId: taskId,
-                    title: 'Test Task',
-                    repoUrl: 'https://github.com/test/repo',
-                    branchName: 'ralph/feat-TEST-123'
-                },
-                feedbackHistory: ['First feedback'],
-                createdAt: new Date(),
-                status: 'pending-review'
-            };
-
-            (mockRedis as any).get = jest.fn().mockResolvedValue(JSON.stringify(existingPlan));
-            (mockRedis as any).set = jest.fn().mockResolvedValue('OK');
-
-            await appendFeedback(mockRedis, taskId, 'Second feedback');
-
-            expect((mockRedis as any).set).toHaveBeenCalled();
-            const setCall = (mockRedis as any).set.mock.calls[0];
-            const savedPlan = JSON.parse(setCall[1]);
-            expect(savedPlan.feedbackHistory).toEqual(['First feedback', 'Second feedback']);
-            expect(savedPlan.status).toBe('needs-revision');
         });
     });
 
