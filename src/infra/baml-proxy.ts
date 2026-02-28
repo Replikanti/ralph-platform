@@ -76,6 +76,7 @@ async function setupTempHome(): Promise<{ homeDir: string; cleanup: () => Promis
 
 export async function startBamlProxy(port = 3001): Promise<void> {
     const app = express();
+    app.disable('x-powered-by');
     app.use(express.json({ limit: '4mb' }));
 
     app.get('/v1/models', (_req, res) => {
