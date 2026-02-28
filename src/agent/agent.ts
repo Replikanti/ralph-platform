@@ -43,8 +43,9 @@ interface IterationContext {
 async function summarizeFailurePhase(task: Task, _homeDir: string, errors: string): Promise<string> {
     try {
         const { b } = await import('../infra/baml');
+        const { redactText } = await import('../security/redactor');
         const result = await b.SummarizeFailure({
-            validationOutput: errors.substring(0, 2000),
+            validationOutput: await redactText(errors.substring(0, 2000)),
             attempt: task.attempt,
             maxAttempts: task.maxAttempts,
         });
@@ -173,10 +174,10 @@ async function planPhase(_workDir: string, _homeDir: string, task: any, availabl
     const { b } = await import('../infra/baml');
     const { redactText } = await import('../security/redactor');
     const result = await b.PlanTask({
-        title: task.title,
+        title: await redactText(task.title),
         description: await redactText(task.description ?? ''),
         skills: availableSkills,
-        previousErrors: previousErrors ? [previousErrors] : [],
+        previousErrors: previousErrors ? [await redactText(previousErrors)] : [],
     });
     return result.plan;
 }
