@@ -65,7 +65,11 @@ async function setupTempHome(): Promise<{ homeDir: string; cleanup: () => Promis
     for (const f of ['.credentials.json', 'settings.json']) {
         const src = path.join(systemClaudeDir, f);
         if (fs.existsSync(src)) {
-            try { await fsPromises.copyFile(src, path.join(claudeDir, f)); } catch { /* ignore */ }
+            try {
+                await fsPromises.copyFile(src, path.join(claudeDir, f));
+            } catch (e) {
+                logger.warn({ err: e }, `⚠️ BAML proxy: failed to copy ${f} — Claude CLI may lack credentials`);
+            }
         }
     }
 
