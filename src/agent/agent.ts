@@ -145,7 +145,7 @@ async function listAvailableSkills(workDir: string): Promise<string> {
     } catch { return "No native commands available."; }
 }
 
-async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
+async function planPhase(_workDir: string, _homeDir: string, task: Task, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
     // User-provided fields (title, description) are clean from the queue boundary (server.ts).
     // Runtime-generated fields (previousErrors) are redacted by the BAML proxy before reaching Claude CLI.
