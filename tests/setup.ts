@@ -2,6 +2,7 @@
 // Set env vars and register critical mocks here so they are in place BEFORE any
 // module from node_modules is first imported (server.ts init time).
 import { mock } from 'bun:test';
+import { mockQueueAdd, mockQueueClose } from './fixtures/queue-mock';
 
 process.env.LINEAR_WEBHOOK_SECRET = 'test-linear-webhook-secret-12345678';
 process.env.ADMIN_USER = 'admin';
@@ -19,11 +20,13 @@ mock.module('ioredis', () => ({
     })),
 }));
 
-// ── BullMQ Queue — must be mocked so queue.add() resolves immediately ─────────
+// ── BullMQ Queue — shared mock so test files can inspect queue.add() calls ────
+// mockQueueAdd/mockQueueClose are imported from fixtures/queue-mock so that any
+// test file that also imports them gets the *same* function object (module cache).
 mock.module('bullmq', () => ({
     Queue: mock().mockImplementation(() => ({
-        add: mock().mockResolvedValue({ id: 'job-mock' }),
-        close: mock().mockResolvedValue(undefined),
+        add:   mockQueueAdd,
+        close: mockQueueClose,
     })),
     Worker: mock(),
     QueueEvents: mock(),

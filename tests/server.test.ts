@@ -12,12 +12,6 @@ const mockIoRedisConstructor = mock().mockImplementation(() => ({
     set: mockIoRedisSet,
 }));
 
-// bullmq Queue
-const mockQueueAdd = mock().mockResolvedValue({ id: 'job-mock' });
-const mockQueueConstructor = mock().mockImplementation(() => ({
-    add: mockQueueAdd,
-}));
-
 // @bull-board
 const mockGetRouter = mock().mockReturnValue((_req: any, _res: any, next: any) => next());
 const mockSetBasePath = mock();
@@ -52,9 +46,8 @@ mock.module('ioredis', () => ({
     default: mockIoRedisConstructor,
 }));
 
-mock.module('bullmq', () => ({
-    Queue: mockQueueConstructor,
-}));
+// bullmq is mocked by the preload (setup.ts) using the same mockQueueAdd from
+// fixtures/queue-mock — no separate mock.module needed here.
 
 mock.module('@bull-board/api', () => ({
     createBullBoard: mockCreateBullBoard,
@@ -97,6 +90,9 @@ import {
     sendWebhook,
     createMockStoredPlan
 } from './fixtures';
+// bullmq Queue — shared with the preload (setup.ts) so this file and the
+// preload's mock.module factory reference the *same* mockQueueAdd function.
+import { mockQueueAdd } from './fixtures/queue-mock';
 
 // Fixed secret — matches what tests/setup.ts sets in process.env
 const TEST_SECRET = 'test-linear-webhook-secret-12345678';
@@ -307,5 +303,86 @@ describe('POST /webhook', () => {
             expect(res.status).toBe(200);
             expect(res.body).toEqual({ status: 'ignored', reason: 'ralph_comment' });
         });
+    });
+});
+
+// ── Security: PII/secret redaction at the queue boundary ─────────────────────
+//
+// These tests send webhook payloads that contain real secret patterns and assert
+// that the data reaching the BullMQ queue is already redacted.  The real
+// redactText() pipeline runs here (security/redactor is NOT mocked in this file).
+//
+// We capture the call count before each test and read the NEXT call after it,
+// avoiding jest.clearAllMocks() which breaks mock call recording in Bun.
+
+describe('Security: PII and secrets are redacted before entering the queue', () => {
+    // A syntactically valid AWS access key matching the redactor pattern.
+    const AWS_KEY    = 'AKIAIOSFODNN7EXAMPLE';
+    const AWS_REDACT = '<AWS_ACCESS_KEY_REDACTED>';
+
+    // A syntactically valid GitHub PAT matching the redactor pattern.
+    const GH_TOKEN  = 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const GH_REDACT = '<GITHUB_TOKEN_REDACTED>';
+
+    // We capture the job data via a custom implementation rather than relying on
+    // mock.calls — jest.clearAllMocks() in the comment-webhook beforeEach breaks
+    // Bun's call-recording for all subsequent tests.
+    let capturedJobData: any;
+
+    beforeEach(() => {
+        capturedJobData = undefined;
+        mockQueueAdd.mockImplementation(async (_name: string, data: any) => {
+            capturedJobData = data;
+            return { id: 'job-mock' };
+        });
+        process.env.DEFAULT_REPO_URL = 'https://github.com/test/repo';
+    });
+
+    it('redacts a secret in issue title before enqueueing', async () => {
+        const body = createIssueWebhook({
+            id: 'sec-1',
+            title: `Deploy app with key ${AWS_KEY} configured`,
+            labels: [{ name: 'Ralph' }],
+        });
+        const res = await sendWebhookWithTestSecret(body);
+        expect(res.status).toBe(200);
+
+        expect(capturedJobData).toBeDefined();
+        expect(capturedJobData.title).not.toContain(AWS_KEY);
+        expect(capturedJobData.title).toContain(AWS_REDACT);
+    });
+
+    it('redacts a secret in issue description before enqueueing', async () => {
+        const body = createIssueWebhook({
+            id: 'sec-2',
+            title: 'Routine task',
+            description: `Use token ${GH_TOKEN} to push`,
+            labels: [{ name: 'Ralph' }],
+        });
+        const res = await sendWebhookWithTestSecret(body);
+        expect(res.status).toBe(200);
+
+        expect(capturedJobData).toBeDefined();
+        expect(capturedJobData.description).not.toContain(GH_TOKEN);
+        expect(capturedJobData.description).toContain(GH_REDACT);
+    });
+
+    it('redacts a secret in revision feedback before enqueueing', async () => {
+        const storedPlan = createMockStoredPlan();
+        mockGetPlan.mockResolvedValue(storedPlan);
+
+        const body = createCommentWebhook({
+            body: `Please use ${AWS_KEY} when configuring the deploy`,
+            issue: { id: 'sec-3', state: { name: 'plan-review' } },
+        });
+        const res = await request(app)
+            .post('/webhook')
+            .set('linear-signature', getSignatureWithTestSecret(body))
+            .send(body);
+        expect(res.status).toBe(200);
+
+        expect(capturedJobData).toBeDefined();
+        expect(capturedJobData.additionalFeedback).not.toContain(AWS_KEY);
+        expect(capturedJobData.additionalFeedback).toContain(AWS_REDACT);
     });
 });
