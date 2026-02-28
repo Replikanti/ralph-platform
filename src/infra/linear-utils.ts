@@ -2,17 +2,21 @@
  * Shared Linear utilities to avoid code duplication
  */
 
+interface TeamWithStates {
+    states(): Promise<{ nodes: Array<{ name: string; id: string }> }>;
+}
+
 /**
  * Finds a Linear workflow state by name or synonym
  * @param team Linear team object
  * @param statusName The status name to find (case-insensitive)
  * @returns The matching state or null if not found
  */
-export async function findTargetState(team: any, statusName: string) {
+export async function findTargetState(team: TeamWithStates, statusName: string) {
     const states = await team.states();
     const name = statusName.toLowerCase();
     
-    let state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === name);
+    let state = states.nodes.find(s => s.name.toLowerCase() === name);
     if (state) return state;
 
     const synonymMap: Record<string, string[]> = {
@@ -24,7 +28,7 @@ export async function findTargetState(team: any, statusName: string) {
     const synonyms = synonymMap[name];
     if (synonyms) {
         for (const syn of synonyms) {
-            state = states.nodes.find((s: { name: string, id: string }) => s.name.toLowerCase() === syn);
+            state = states.nodes.find(s => s.name.toLowerCase() === syn);
             if (state) return state;
         }
     }
