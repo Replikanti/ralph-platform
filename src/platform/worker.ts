@@ -214,7 +214,8 @@ export const createWorker = () => {
 };
 
 if (require.main === module) {
-    const proxyPort = parseInt(process.env.BAML_PROXY_PORT ?? '3001');
+    const proxyPort = Number.parseInt(process.env.BAML_PROXY_PORT ?? '3001');
     process.env.BAML_PROXY_URL = process.env.BAML_PROXY_URL ?? `http://localhost:${proxyPort}/v1`;
-    startBamlProxy(proxyPort).then(() => createWorker());
+    await startBamlProxy(proxyPort);
+    createWorker();
 }

@@ -2,7 +2,7 @@ import { logger } from '../infra/logger';
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
-import { runClaude, RateLimitError } from '../infra/claude-runner';
+import { runClaude } from '../infra/claude-runner';
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
