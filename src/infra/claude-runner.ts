@@ -8,6 +8,27 @@ export class RateLimitError extends Error {
     }
 }
 
+export interface ClaudeRunConfig {
+    prompt: string;
+    model?: string;
+    tools?: string;
+    maxBudgetUsd?: number;
+    timeoutMs?: number;
+    allowPermissionBypass?: boolean;
+}
+
+export function runClaudeExecution(config: ClaudeRunConfig, workDir: string, homeDir: string): Promise<{ stdout: string; stderr: string }> {
+    const args: string[] = ['-p', config.prompt];
+    if (config.model) args.push('--model', config.model);
+    if (config.tools) args.push('--tools', config.tools);
+    if (config.maxBudgetUsd !== undefined) args.push('--max-budget-usd', String(config.maxBudgetUsd));
+    if (config.allowPermissionBypass) {
+        args.push('--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions');
+    }
+    args.push('--no-session-persistence');
+    return runClaude(args, workDir, homeDir, config.timeoutMs ?? 300000);
+}
+
 export function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';

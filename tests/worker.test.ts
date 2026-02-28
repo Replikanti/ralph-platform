@@ -91,9 +91,9 @@ describe('Worker', () => {
         await jobProcessor(mockJob as any);
 
         expect(mockRunAgent).toHaveBeenCalledWith(
-            expect.objectContaining({ ticketId: 'T-1', jobId: '123', attempt: 1, maxAttempts: 3 })
+            expect.objectContaining({ ticketId: 'T-1', jobId: '123', attempt: 1, maxAttempts: 3 }),
+            expect.objectContaining({ span: expect.anything() })
         );
-        expect(mockRunAgent).not.toHaveBeenCalledWith(expect.anything(), expect.any(IORedis));
     });
 
     describe('pre-agent Linear notification', () => {

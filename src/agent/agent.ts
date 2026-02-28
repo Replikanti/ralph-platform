@@ -1,33 +1,18 @@
 import { logger } from '../infra/logger';
-import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
-import { runClaude } from '../infra/claude-runner';
+import { runClaudeExecution } from '../infra/claude-runner';
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import type { AgentResult } from '../domain/types';
-
-const langfuse = new Langfuse();
+import type { Task, AgentResult } from '../domain/types';
+import { noopTracer } from '../domain/tracer-contract';
+import type { ITracer } from '../domain/tracer-contract';
 
 // --- TYPES ---
 
-export interface Task {
-    ticketId: string;
-    title: string;
-    description?: string;
-    repoUrl: string;
-    branchName: string;
-    jobId: string;
-    attempt: number;
-    maxAttempts: number;
-    mode?: 'full' | 'plan-only' | 'execute-only';
-    existingPlan?: string;
-    additionalFeedback?: string;
-    isIteration?: boolean; // Flag indicating this is a PR iteration (fix request)
-}
-
+export type { Task };
 
 interface IterationContext {
     workDir: string;
@@ -35,7 +20,7 @@ interface IterationContext {
     task: Task;
     availableSkills: string;
     git: any;
-    trace: any;
+    tracer: ITracer;
 }
 
 // --- HELPERS ---
@@ -160,16 +145,6 @@ async function listAvailableSkills(workDir: string): Promise<string> {
     } catch { return "No native commands available."; }
 }
 
-async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (span: any) => Promise<T>) {
-    const trace = langfuse.trace({ name, metadata });
-    try { return await fn(trace); } 
-    catch (e: any) { 
-        trace.update({ metadata: { error: e.message } });
-        throw e; 
-    } 
-    finally { await langfuse.flushAsync(); }
-}
-
 async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
     // User-provided fields (title, description) are clean from the queue boundary (server.ts).
@@ -186,15 +161,14 @@ async function planPhase(_workDir: string, _homeDir: string, task: any, availabl
 async function executePhase(workDir: string, homeDir: string, plan: string) {
     const prompt = "You are the Executor. Implement this plan strictly: " + plan + "\n" +
         "RULES: No secrets, stay in sandbox, only necessary files, do not commit.";
-    return await runClaude([
-        '-p', prompt, 
-        '--model', 'sonnet', 
-        '--tools', 'Bash,Read,Edit,FileSearch,Glob',
-        '--dangerously-skip-permissions', 
-        '--permission-mode', 'bypassPermissions',
-        '--max-budget-usd', '2.00', // Hard limit for one execution attempt
-        '--no-session-persistence'
-    ], workDir, homeDir, 900000);
+    return runClaudeExecution({
+        prompt,
+        model: 'sonnet',
+        tools: 'Bash,Read,Edit,FileSearch,Glob',
+        maxBudgetUsd: 2.00,
+        timeoutMs: 900_000,
+        allowPermissionBypass: true,
+    }, workDir, homeDir);
 }
 
 const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
@@ -281,31 +255,17 @@ async function prepareClaudeSkills(workDir: string, homeDir: string) {
 async function runIteration(iteration: number, ctx: IterationContext, previousErrors: string): Promise<{ success: boolean, output?: string, agentResult?: AgentResult }> {
     logger.info("🤖 Iteration " + iteration);
 
-    const planSpan = ctx.trace.span({ name: "Planning-Opus-Iter-" + iteration, metadata: { iteration } });
-    const rawPlan = await planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
+    const rawPlan = await ctx.tracer.span("Planning-Opus-Iter-" + iteration, { iteration }, async () => {
+        return planPhase(ctx.workDir, ctx.homeDir, ctx.task, ctx.availableSkills, previousErrors);
+    });
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
-    planSpan.end({ output: plan });
 
-    const execSpan = ctx.trace.span({ name: "Execution-Sonnet-Iter-" + iteration, metadata: { iteration } });
-    await executePhase(ctx.workDir, ctx.homeDir, plan);
-    execSpan.end();
-
-    const validationSpan = ctx.trace.span({
-        name: "Validation",
-        metadata: { iteration }
+    await ctx.tracer.span("Execution-Sonnet-Iter-" + iteration, { iteration }, async () => {
+        await executePhase(ctx.workDir, ctx.homeDir, plan);
     });
 
-    const check = await runPolyglotValidation(ctx.workDir);
-
-    validationSpan.end({
-        output: check.output,
-        metadata: {
-            success: check.success,
-            languages: check.languages,
-            toolResults: check.toolResults,
-            totalErrors: check.totalErrors,
-            relevantErrors: check.relevantErrors
-        }
+    const check = await ctx.tracer.span("Validation", { iteration }, async () => {
+        return runPolyglotValidation(ctx.workDir);
     });
 
     if (check.success) {
@@ -401,10 +361,10 @@ async function ensureClaudeCredentialsExist(targetClaudeDir: string): Promise<vo
     }
 }
 
-async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, trace: any, availableSkills: string, targetClaudeDir: string): Promise<AgentResult> {
+async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, tracer: ITracer, availableSkills: string, targetClaudeDir: string): Promise<AgentResult> {
     let previousErrors = "";
     for (let i = 0; i < 3; i++) {
-        const result = await runIteration(i + 1, { trace, workDir, homeDir, task, availableSkills, git }, previousErrors);
+        const result = await runIteration(i + 1, { tracer, workDir, homeDir, task, availableSkills, git }, previousErrors);
         await persistClaudeCache(targetClaudeDir);
         if (result.success && result.agentResult) {
             return result.agentResult;
@@ -425,7 +385,7 @@ function detectTaskType(title: string): string {
     return 'feature';
 }
 
-export const runAgent = async (task: Task): Promise<AgentResult> => {
+export const runAgent = async (task: Task, tracer: ITracer = noopTracer): Promise<AgentResult> => {
     const mode = task.mode || 'full';
     const planReviewEnabled = process.env.PLAN_REVIEW_ENABLED !== 'false';
     const actualMode = (mode === 'full' && planReviewEnabled) ? 'plan-only' : mode;
@@ -435,16 +395,16 @@ export const runAgent = async (task: Task): Promise<AgentResult> => {
     // Setup workspace first to detect languages
     const { workDir, rootDir, git, cleanup } = await setupWorkspace(task.repoUrl, task.branchName);
 
-    // Detect project languages for Langfuse tracking
+    // Detect project languages for tracing
     const detectedLanguages = await detectProjectLanguages(workDir);
 
-    return withTrace("Ralph-Task", {
+    return tracer.span("Ralph-Task", {
         ticketId: task.ticketId,
         mode: actualMode,
-        languages: detectedLanguages,
+        languages: detectedLanguages as unknown[],
         repository: task.repoUrl,
         taskType: detectTaskType(task.title)
-    }, async (trace: any): Promise<AgentResult> => {
+    }, async (): Promise<AgentResult> => {
         const homeDir = path.join(rootDir, 'home');
         const targetClaudeDir = path.join(homeDir, '.claude');
 
@@ -452,17 +412,17 @@ export const runAgent = async (task: Task): Promise<AgentResult> => {
             const availableSkills = await setupClaudeEnvironment(targetClaudeDir, workDir, homeDir);
 
             if (actualMode === 'plan-only') {
-                return await handlePlanOnlyMode(task, workDir, homeDir, trace, availableSkills);
+                return await handlePlanOnlyMode(task, workDir, homeDir, tracer, availableSkills);
             }
 
             if (actualMode === 'execute-only') {
                 if (!task.existingPlan) {
                     throw new Error("execute-only mode requires existingPlan");
                 }
-                return await handleExecuteOnlyMode(task, workDir, homeDir, git, trace, task.existingPlan);
+                return await handleExecuteOnlyMode(task, workDir, homeDir, git, tracer, task.existingPlan);
             }
 
-            return await runFullMode(task, workDir, homeDir, git, trace, availableSkills, targetClaudeDir);
+            return await runFullMode(task, workDir, homeDir, git, tracer, availableSkills, targetClaudeDir);
         } finally {
             cleanup();
         }
@@ -473,15 +433,15 @@ async function handlePlanOnlyMode(
     task: Task,
     workDir: string,
     homeDir: string,
-    trace: any,
+    tracer: ITracer,
     availableSkills: string,
 ): Promise<AgentResult> {
-    const planSpan = trace.span({ name: "Planning-Sonnet-Plan-Review", metadata: { mode: 'plan-only' } });
     // additionalFeedback is already redacted at the queue boundary (server.ts).
     const previousErrors = task.additionalFeedback || "";
-    const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
+    const rawPlan = await tracer.span("Planning-Sonnet-Plan-Review", { mode: 'plan-only' }, async () => {
+        return planPhase(workDir, homeDir, task, availableSkills, previousErrors);
+    });
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
-    planSpan.end({ output: plan });
 
     return { mode: 'plan-only', status: 'plan-generated', plan };
 }
@@ -491,12 +451,12 @@ async function handleExecuteOnlyMode(
     workDir: string,
     homeDir: string,
     git: any,
-    trace: any,
+    tracer: ITracer,
     plan: string,
 ): Promise<AgentResult> {
-    const execSpan = trace.span({ name: "Execution-Sonnet-Approved-Plan", metadata: { mode: 'execute-only' } });
-    await executePhase(workDir, homeDir, plan);
-    execSpan.end();
+    await tracer.span("Execution-Sonnet-Approved-Plan", { mode: 'execute-only' }, async () => {
+        await executePhase(workDir, homeDir, plan);
+    });
 
     const check = await runPolyglotValidation(workDir);
 

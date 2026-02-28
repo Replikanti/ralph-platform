@@ -1,13 +1,15 @@
 import { logger } from '../infra/logger';
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
+import { Langfuse } from 'langfuse';
 import { startBamlProxy } from '../infra/baml-proxy';
-import { runAgent, Task } from '../agent/agent';
+import { runAgent } from '../agent/agent';
 import { storePlan, deletePlan, StoredPlan } from '../infra/plan-store';
 import { formatPlanForLinear } from '../infra/plan-formatter';
 import { LinearClient as RalphLinearClient } from '../infra/linear-client';
 import { resolvePlatformAction } from '../domain/agent-outcomes';
-import type { AgentResult } from '../domain/types';
+import type { Task, AgentResult } from '../domain/types';
+import type { ITracer } from '../domain/tracer-contract';
 import { redactText } from '../security/redactor';
 
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -17,6 +19,25 @@ const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:
         return delay;
     }
 });
+
+// --- Langfuse tracer factory (platform concern, not agent concern) ---
+
+function createLangfuseTracer(): ITracer {
+    const lf = new Langfuse();
+    return {
+        span: async <T>(name: string, metadata: Record<string, unknown>, fn: () => Promise<T>): Promise<T> => {
+            const trace = lf.trace({ name, metadata });
+            try {
+                return await fn();
+            } catch (e: any) {
+                trace.update({ metadata: { error: e.message } });
+                throw e;
+            } finally {
+                await lf.flushAsync();
+            }
+        }
+    };
+}
 
 // --- Platform helpers (Linear + Redis orchestration) ---
 
@@ -129,8 +150,9 @@ export const jobProcessor = async (job: Job) => {
     await notifyLinearJobStarted(taskData);
 
     let result: AgentResult;
+    const tracer = createLangfuseTracer();
     try {
-        result = await runAgent(taskData);
+        result = await runAgent(taskData, tracer);
     } catch (e: any) {
         if (e.name === 'RateLimitError') {
             logger.warn(`⏳ [Worker] Rate Limit hit for job ${job.id}. Backing off for 60s...`);
