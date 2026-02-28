@@ -8,7 +8,8 @@ export interface StoredPlan extends StoredPlanContext {
     status: 'pending-review' | 'approved' | 'needs-revision';
 }
 
-const PLAN_TTL_DAYS = Number.parseInt(process.env.PLAN_TTL_DAYS || '7', 10);
+const _ttlDays = Number.parseInt(process.env.PLAN_TTL_DAYS || '7', 10);
+const PLAN_TTL_DAYS = Number.isFinite(_ttlDays) && _ttlDays > 0 ? _ttlDays : 7;
 const PLAN_TTL_SECONDS = PLAN_TTL_DAYS * 24 * 60 * 60;
 
 function getPlanKey(taskId: string): string {
