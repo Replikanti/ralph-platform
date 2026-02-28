@@ -29,8 +29,6 @@ const mockFsReadFile = mock().mockResolvedValue('{}');
 // plan-store
 const mockGetPlan = mock();
 const mockStorePlan = mock();
-const mockUpdatePlanStatus = mock();
-const mockAppendFeedback = mock();
 const mockDeletePlan = mock();
 
 // linear-client
@@ -70,8 +68,6 @@ mock.module('node:fs/promises', () => ({
 mock.module('../src/infra/plan-store', () => ({
     getPlan: mockGetPlan,
     storePlan: mockStorePlan,
-    updatePlanStatus: mockUpdatePlanStatus,
-    appendFeedback: mockAppendFeedback,
     deletePlan: mockDeletePlan,
 }));
 

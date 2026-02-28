@@ -19,8 +19,6 @@ mock.module('../src/infra/plan-store', () => ({
     storePlan: mock(),
     deletePlan: mock(),
     getPlan: mock(),
-    updatePlanStatus: mock(),
-    appendFeedback: mock(),
 }));
 mock.module('../src/infra/plan-formatter', () => ({
     formatPlanForLinear: mock(),

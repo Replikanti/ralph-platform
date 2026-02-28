@@ -33,31 +33,6 @@ export async function getPlan(redis: IORedis, taskId: string): Promise<StoredPla
     return parsed as StoredPlan;
 }
 
-export async function updatePlanStatus(redis: IORedis, taskId: string, status: StoredPlan['status']): Promise<void> {
-    const plan = await getPlan(redis, taskId);
-    if (!plan) {
-        logger.warn(`⚠️ Cannot update status: plan ${taskId} not found`);
-        return;
-    }
-    
-    plan.status = status;
-    await storePlan(redis, taskId, plan);
-    logger.info(`📊 Updated plan ${taskId} status to: ${status}`);
-}
-
-export async function appendFeedback(redis: IORedis, taskId: string, feedback: string): Promise<void> {
-    const plan = await getPlan(redis, taskId);
-    if (!plan) {
-        logger.warn(`⚠️ Cannot append feedback: plan ${taskId} not found`);
-        return;
-    }
-    
-    plan.feedbackHistory.push(feedback);
-    plan.status = 'needs-revision';
-    await storePlan(redis, taskId, plan);
-    logger.info(`💬 Appended feedback to plan ${taskId}`);
-}
-
 export async function deletePlan(redis: IORedis, taskId: string): Promise<void> {
     const key = getPlanKey(taskId);
     await redis.del(key);
