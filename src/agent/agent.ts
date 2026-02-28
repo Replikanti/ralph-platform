@@ -6,6 +6,7 @@ import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import type { SimpleGit } from 'simple-git';
 import type { Task, AgentResult } from '../domain/types';
 import { noopTracer } from '../domain/tracer-contract';
 import type { ITracer } from '../domain/tracer-contract';
@@ -19,7 +20,7 @@ interface IterationContext {
     homeDir: string;
     task: Task;
     availableSkills: string;
-    git: any;
+    git: SimpleGit;
     tracer: ITracer;
 }
 
@@ -62,7 +63,7 @@ function getValidationSummary(output: string): string[] {
 
 async function generatePRDescription(
     workDir: string,
-    git: any,
+    git: SimpleGit,
     taskDescription: string,
     validationResult: { success: boolean; output: string; languages?: string[] }
 ): Promise<string> {
@@ -72,7 +73,7 @@ async function generatePRDescription(
         const insertions = diffStats.insertions || 0;
         const deletions = diffStats.deletions || 0;
 
-        const testFiles = diffStats.files?.filter((f: any) =>
+        const testFiles = diffStats.files?.filter(f =>
             f.file?.match(/\.(test|spec)\.|tests\/|__tests__\//)
         ).length || 0;
 
@@ -361,7 +362,7 @@ async function ensureClaudeCredentialsExist(targetClaudeDir: string): Promise<vo
     }
 }
 
-async function runFullMode(task: Task, workDir: string, homeDir: string, git: any, tracer: ITracer, availableSkills: string, targetClaudeDir: string): Promise<AgentResult> {
+async function runFullMode(task: Task, workDir: string, homeDir: string, git: SimpleGit, tracer: ITracer, availableSkills: string, targetClaudeDir: string): Promise<AgentResult> {
     let previousErrors = "";
     for (let i = 0; i < 3; i++) {
         const result = await runIteration(i + 1, { tracer, workDir, homeDir, task, availableSkills, git }, previousErrors);
@@ -450,7 +451,7 @@ async function handleExecuteOnlyMode(
     task: Task,
     workDir: string,
     homeDir: string,
-    git: any,
+    git: SimpleGit,
     tracer: ITracer,
     plan: string,
 ): Promise<AgentResult> {
