@@ -2,11 +2,11 @@ import { logger } from '../infra/logger';
 import { Langfuse } from "langfuse";
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
+import { runClaude, RateLimitError } from '../infra/claude-runner';
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
 import type { AgentResult } from '../domain/types';
 
 const langfuse = new Langfuse();
@@ -40,19 +40,15 @@ interface IterationContext {
 
 // --- HELPERS ---
 
-async function summarizeFailurePhase(task: Task, homeDir: string, errors: string): Promise<string> {
-    const prompt = "You are the Post-Mortem Analyst. Ralph failed a task. " +
-        "TASK: " + task.title + " ERRORS: " + errors.substring(0, 2000) + 
-        " Explain why it failed in 2 sentences.";
+async function summarizeFailurePhase(task: Task, _homeDir: string, errors: string): Promise<string> {
     try {
-        // Use Haiku 4.5 for summary to save money
-        const { stdout } = await runClaude([
-            '-p', prompt, 
-            '--model', 'claude-haiku-4-5-20251001', 
-            '--tools', '',
-            '--max-budget-usd', '0.10'
-        ], process.cwd(), homeDir);
-        return stdout.trim();
+        const { b } = await import('../infra/baml');
+        const result = await b.SummarizeFailure({
+            validationOutput: errors.substring(0, 2000),
+            attempt: task.attempt,
+            maxAttempts: task.maxAttempts,
+        });
+        return result.summary;
     } catch {
         return "Task failed due to persistent validation errors.";
     }
@@ -149,89 +145,7 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
     }
 }
 
-export class RateLimitError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'RateLimitError';
-    }
-}
-
-function runClaude(args: string[], cwd: string, homeDir: string, timeoutMs: number = 300000): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-        const CLAUDE_PATH = process.env.CLAUDE_BIN_PATH || '/usr/local/bin/claude';
-        
-        logger.info("🚀 Spawning: " + CLAUDE_PATH + " in " + cwd);
-
-        const child = spawn(CLAUDE_PATH, args, { 
-            cwd,
-            env: { 
-                ...process.env, 
-                HOME: homeDir,
-                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-                CI: 'true',
-                DEBUG: 'true',
-                TERM: 'dumb',
-                CLAUDE_CODE_ANALYTICS: 'false'
-            }
-        });
-
-        if (child.stdin) child.stdin.end();
-
-        if (!child.pid) {
-            reject(new Error("Failed to spawn Claude CLI"));
-            return;
-        }
-        
-        let stdout = '';
-        let stderr = '';
-
-        if (child.stdout) {
-            child.stdout.on('data', (data: Buffer) => {
-                const str = data.toString();
-                stdout += str;
-                process.stdout.write(str); 
-            });
-        }
-
-        if (child.stderr) {
-            child.stderr.on('data', (data: Buffer) => {
-                const str = data.toString();
-                stderr += str;
-                process.stderr.write(str);
-            });
-        }
-
-        const timeout = setTimeout(() => {
-            logger.error("🛑 Timeout after " + timeoutMs + "ms. Killing PID " + child.pid);
-            child.kill('SIGKILL');
-            reject(new Error("Claude CLI timed out after " + timeoutMs + "ms. Output: " + stdout.substring(stdout.length - 200)));
-        }, timeoutMs);
-
-        child.on('close', (code: number) => {
-            clearTimeout(timeout);
-            
-            // Detect Rate Limits in stderr
-            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
-                reject(new RateLimitError("Anthropic Rate Limit Exceeded"));
-                return;
-            }
-
-            if (code === 0) {
-                resolve({ stdout, stderr });
-            } else {
-                const combined = (stderr + " " + stdout).trim();
-                reject(new Error("Claude CLI exited with code " + code + ". Output: " + combined.substring(0, 500)));
-            }
-        });
-
-        child.on('error', (err: Error) => {
-            clearTimeout(timeout);
-            reject(err);
-        });
-    });
-}
-
-const SECURITY_GUARDRAILS = "SECURITY RULES: 1. NO SECRETS. 2. SANDBOX: Only modify files inside the workspace.";
+export { RateLimitError } from '../infra/claude-runner';
 
 async function listAvailableSkills(workDir: string): Promise<string> {
     // List native commands from .claude/commands so the Planner knows what's available
@@ -255,37 +169,15 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
     finally { await langfuse.flushAsync(); }
 }
 
-async function planPhase(workDir: string, homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
-    let guide = "";
-    try { guide = await fsPromises.readFile(path.join(workDir, 'CLAUDE.md'), 'utf-8'); } catch { guide = "None."; }
-
-    const iterationContext = task.isIteration ?
-        "\n\n⚠️ ITERATION MODE: This is a fix/improvement for an existing PR." +
-        "\n- A PR already exists on branch: " + task.branchName +
-        "\n- You will be working on the existing code/branch" +
-        "\n- Focus on addressing the specific feedback provided" +
-        "\n- Review recent changes with git log/diff before planning" : "";
-
-    const prompt = "You are the Architect. Create a step-by-step implementation plan for the task.\n\n" +
-        "PROJECT GUIDE:\n" + guide + "\n\n" +
-        "TASK: " + task.title + "\n" +
-        "DESCRIPTION: " + task.description + "\n" +
-        "AVAILABLE SLASH COMMANDS: " + availableSkills + "\n" +
-        (previousErrors ? "\nPREVIOUS ATTEMPT ERRORS:\n" + previousErrors : "") +
-        iterationContext + "\n\n" +
-        "GOALS:\n1. Detailed plan.\n2. Mention slash commands to use.\n3. Address only the task.\n\n" +
-        "Output your plan inside <plan> tags.";
-
-    // Switch to Sonnet 4.5 and add budget limit
-    const { stdout } = await runClaude([
-        '-p', prompt, 
-        '--model', 'claude-sonnet-4-5-20250929', 
-        '--tools', '', 
-        '--max-budget-usd', '0.50',
-        '--no-session-persistence'
-    ], workDir, homeDir);
-    const match = /<plan>([\s\S]*?)<\/plan>/.exec(stdout);
-    return match ? match[1].trim() : "No plan tags found.";
+async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
+    const { b } = await import('../infra/baml');
+    const result = await b.PlanTask({
+        title: task.title,
+        description: task.description ?? '',
+        skills: availableSkills,
+        previousErrors: previousErrors ? [previousErrors] : [],
+    });
+    return result.plan;
 }
 
 async function executePhase(workDir: string, homeDir: string, plan: string) {

@@ -30,6 +30,15 @@ mock.module('node:fs/promises', () => ({
     cp: mock().mockResolvedValue(undefined),
 }));
 
+// BAML mock — replaces plan and summarize phases (no Claude CLI spawn needed)
+const mockPlanTask = mock();
+const mockSummarizeFailure = mock();
+
+mock.module('../src/infra/baml', () => ({
+    b: { PlanTask: mockPlanTask, SummarizeFailure: mockSummarizeFailure },
+}));
+
+// spawn mock remains for execute phase (runClaude called directly)
 const mockSpawnOn = mock();
 const mockStdoutOn = mock();
 const mockStderrOn = mock();
@@ -130,11 +139,16 @@ describe('runAgent', () => {
         });
         (detectProjectLanguages as any).mockResolvedValue(['typescript']);
 
+        // BAML defaults: plan returns structured plan, summarize returns summary
+        mockPlanTask.mockResolvedValue({ plan: 'Do X' });
+        mockSummarizeFailure.mockResolvedValue({ summary: 'Task failed due to type errors.' });
+
+        // spawn mock for execute phase (runClaude)
         mockSpawnOn.mockImplementation((event: string, cb: any) => {
             if (event === 'close') cb(0);
         });
         mockStdoutOn.mockImplementation((event: string, cb: any) => {
-            if (event === 'data') cb(Buffer.from('Default Output'));
+            if (event === 'data') cb(Buffer.from('Implementation done'));
         });
 
         mockExec.mockImplementation((cmd: string, opts: any, cb: any) => {
@@ -144,18 +158,16 @@ describe('runAgent', () => {
         });
     });
 
-    it('spawns Claude CLI and returns executed result on success', async () => {
+    it('uses BAML for planning and spawns Claude CLI for execution', async () => {
         (fsPromises.readdir as any).mockResolvedValue([{ name: 'security-audit', isDirectory: () => true }]);
-        (fsPromises.readFile as any).mockResolvedValue('CLAUDE.md content');
         delete process.env.CLAUDE_BIN_PATH;
 
-        mockStdoutOn
-            .mockImplementationOnce((event: string, cb: any) => { if (event === 'data') cb(Buffer.from('<plan>Do X</plan>')); })
-            .mockImplementationOnce((event: string, cb: any) => { if (event === 'data') cb(Buffer.from('Implementation done')); });
+        mockPlanTask.mockResolvedValue({ plan: 'Do X' });
 
         const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         const result = await runAgent(task);
 
+        expect(mockPlanTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Test', description: 'Desc' }));
         expect(mockSpawn).toHaveBeenCalled();
         expect(mockPullsCreate).toHaveBeenCalled();
         expect(result).toMatchObject({ status: 'executed', prUrl: expect.stringContaining('github.com') });
@@ -166,13 +178,11 @@ describe('runAgent', () => {
             .mockResolvedValueOnce({ success: false, output: 'Linter error', languages: [], toolResults: {}, totalErrors: 1, relevantErrors: 1 })
             .mockResolvedValueOnce({ success: true, output: 'Fixed', languages: [], toolResults: {}, totalErrors: 0, relevantErrors: 0 });
 
-        mockStdoutOn.mockImplementation((event: string, cb: any) => {
-            if (event === 'data') cb(Buffer.from('<plan>Try</plan>'));
-        });
-
         const result = await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
-        expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(4);
+        // plan called twice (iter 1 + iter 2), execute called twice via spawn
+        expect(mockPlanTask.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(mockSpawn.mock.calls.length).toBeGreaterThanOrEqual(2);
         expect(result.status).toBe('executed');
     });
 
@@ -186,24 +196,19 @@ describe('runAgent', () => {
             relevantErrors: 5,
         });
 
-        mockStdoutOn.mockImplementation((event: string, cb: any) => {
-            if (event === 'data') cb(Buffer.from('Ralph tried to fix X but TSC failed.'));
-        });
+        mockSummarizeFailure.mockResolvedValue({ summary: 'TSC errors prevented compilation.' });
 
         const task = { ticketId: '1', title: 'Validation Fail', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         const result = await runAgent(task);
 
         expect(result.status).toBe('validation-failed');
+        expect(mockSummarizeFailure).toHaveBeenCalled();
         expect(mockGit.commit).not.toHaveBeenCalledWith(expect.stringContaining('wip:'));
         expect(mockPullsCreate).not.toHaveBeenCalled();
     });
 
     it('returns no-changes result when git has no staged files', async () => {
         mockGit.status.mockResolvedValue({ staged: [] });
-
-        mockStdoutOn.mockImplementation((event: string, cb: any) => {
-            if (event === 'data') cb(Buffer.from('<plan>Do X</plan>'));
-        });
 
         const result = await runAgent({ ticketId: 'no-change', title: 'No Change', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
@@ -214,14 +219,13 @@ describe('runAgent', () => {
     it('returns plan-generated result in plan-only mode', async () => {
         process.env.PLAN_REVIEW_ENABLED = 'true';
 
-        mockStdoutOn.mockImplementation((event: string, cb: any) => {
-            if (event === 'data') cb(Buffer.from('<plan>Step 1: do X</plan>'));
-        });
+        mockPlanTask.mockResolvedValue({ plan: 'Step 1: do X\nStep 2: write tests' });
 
         const task = { ticketId: 'plan-1', title: 'Plan Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b', mode: 'plan-only' as const };
         const result = await runAgent(task);
 
         expect(result).toMatchObject({ status: 'plan-generated', plan: expect.stringContaining('Step 1') });
+        expect(mockPlanTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Plan Task' }));
         process.env.PLAN_REVIEW_ENABLED = 'false';
     });
 });

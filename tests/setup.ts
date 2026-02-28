@@ -29,6 +29,19 @@ mock.module('bullmq', () => ({
     QueueEvents: mock(),
 }));
 
+// ── Langfuse — must be mocked before agent.ts creates its module-level instance ─
+// The real Langfuse SDK opens timers/connections that prevent tests from completing.
+mock.module('langfuse', () => ({
+    Langfuse: mock().mockImplementation(() => ({
+        trace: mock().mockReturnValue({
+            span: mock().mockReturnValue({ end: mock() }),
+            update: mock(),
+            shutdownAsync: mock(),
+        }),
+        flushAsync: mock().mockResolvedValue(undefined),
+    })),
+}));
+
 // ── Bull Board — UI adapter wiring used at server init ────────────────────────
 mock.module('@bull-board/api', () => ({
     createBullBoard: mock(),

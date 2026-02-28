@@ -12,6 +12,7 @@ coverage/
 !.claude/config.json
 !.claude/memory/
 IMPLEMENTATION_PLAN.md
+src/infra/baml/baml_client/
 
 # Terraform
 infra/*.tfvars
