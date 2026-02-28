@@ -172,11 +172,6 @@ async function executePhase(workDir: string, homeDir: string, plan: string) {
 }
 
 const CLAUDE_CACHE_ROOT = process.env.CLAUDE_CACHE_PATH || '/app/claude-cache';
-if (!fs.existsSync(CLAUDE_CACHE_ROOT)) {
-    try { fs.mkdirSync(CLAUDE_CACHE_ROOT, { recursive: true }); } catch (e: any) {
-        logger.warn("Could not create cache root: " + e.message);
-    }
-}
 
 async function syncDirectoryContents(sourceDir: string, targetDir: string, operation: string): Promise<void> {
     if (!fs.existsSync(sourceDir)) return;
