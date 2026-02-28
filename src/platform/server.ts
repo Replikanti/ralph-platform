@@ -10,7 +10,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getPlan } from '../infra/plan-store';
-import type { StoredPlanContext } from '../domain/types';
+import type { StoredPlanContext, Task } from '../domain/types';
 import { LinearClient as RalphLinearClient } from '../infra/linear-client';
 import { parseIssuePayload, parseCommentPayload } from '../infra/webhook-schemas';
 import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from '../domain/webhook-routing';
@@ -159,7 +159,7 @@ function verifyLinearSignature(req: any): boolean {
 
 interface JobConfig {
     jobId: string;
-    jobData: any;
+    jobData: Omit<Task, 'jobId' | 'attempt' | 'maxAttempts'>;
     logContext: { type: string; details: string[] };
 }
 

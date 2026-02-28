@@ -394,27 +394,15 @@ async function validateSecurity(workDir: string, changedFiles: string[]): Promis
     return { success, log: outputLog };
 }
 
-// Structured validation result for Langfuse tracking
-export interface ToolResult {
-    success: boolean;
-    errorCount: number;
-    relevantErrorCount: number;
-    duration?: number;
-}
-
 export interface ValidationResult {
     success: boolean;
     output: string;
     languages: string[];
-    toolResults: Record<string, ToolResult>;
-    totalErrors: number;
-    relevantErrors: number;
 }
 
 export async function runPolyglotValidation(workDir: string): Promise<ValidationResult> {
     let outputLog = "";
     let allSuccess = true;
-    const toolResults: Record<string, ToolResult> = {};
 
     const changedFiles = await getChangedFiles(workDir);
     if (changedFiles.length > 0) {
@@ -426,9 +414,6 @@ export async function runPolyglotValidation(workDir: string): Promise<Validation
             success: true,
             output: "⏩ Validation skipped: No files changed.\n",
             languages,
-            toolResults: {},
-            totalErrors: 0,
-            relevantErrors: 0
         };
     }
 
@@ -459,8 +444,5 @@ export async function runPolyglotValidation(workDir: string): Promise<Validation
         success: allSuccess,
         output: outputLog,
         languages,
-        toolResults,
-        totalErrors: 0,
-        relevantErrors: 0
     };
 }

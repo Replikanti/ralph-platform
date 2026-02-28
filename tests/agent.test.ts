@@ -117,9 +117,6 @@ describe('runAgent', () => {
             success: true,
             output: 'Validation Passed',
             languages: [],
-            toolResults: {},
-            totalErrors: 0,
-            relevantErrors: 0,
         });
         (detectProjectLanguages as any).mockResolvedValue(['typescript']);
 
@@ -159,8 +156,8 @@ describe('runAgent', () => {
 
     it('retries on validation failure and returns executed result on eventual success', async () => {
         (runPolyglotValidation as any)
-            .mockResolvedValueOnce({ success: false, output: 'Linter error', languages: [], toolResults: {}, totalErrors: 1, relevantErrors: 1 })
-            .mockResolvedValueOnce({ success: true, output: 'Fixed', languages: [], toolResults: {}, totalErrors: 0, relevantErrors: 0 });
+            .mockResolvedValueOnce({ success: false, output: 'Linter error', languages: [] })
+            .mockResolvedValueOnce({ success: true, output: 'Fixed', languages: [] });
 
         const result = await runAgent({ ticketId: 'retry', title: 'Retry Task', repoUrl: 'https://github.com/owner/repo', branchName: 'b' });
 
@@ -175,9 +172,6 @@ describe('runAgent', () => {
             success: false,
             output: 'Validation Failed',
             languages: [],
-            toolResults: {},
-            totalErrors: 5,
-            relevantErrors: 5,
         });
 
         mockSummarizeFailure.mockResolvedValue({ summary: 'TSC errors prevented compilation.' });
