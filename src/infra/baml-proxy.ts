@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import { logger } from './logger';
 import { runClaude, RateLimitError } from './claude-runner';
+import { redactText } from '../security/redactor';
 
 interface OpenAIMessage {
     role: 'system' | 'user' | 'assistant';
@@ -92,7 +93,7 @@ export async function startBamlProxy(port = 3001): Promise<void> {
     app.post('/v1/chat/completions', async (req, res) => {
         const body = req.body as ChatCompletionRequest;
         const model = body.model ?? 'claude-sonnet-4-5-20250929';
-        const prompt = buildPromptFromMessages(body.messages ?? []);
+        const prompt = await redactText(buildPromptFromMessages(body.messages ?? []));
 
         const { homeDir, cleanup } = await setupTempHome();
         try {

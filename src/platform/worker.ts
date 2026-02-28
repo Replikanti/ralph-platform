@@ -105,7 +105,9 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
         return;
     }
 
-    const failComment = `❌ Execution completed but validation failed.\n\n${action.summary}\n\n\`\`\`\n${action.validationOutput.substring(0, 1000)}\n\`\`\``;
+    const { redactText } = await import('../security/redactor');
+    const safeOutput = await redactText(action.validationOutput.substring(0, 1000));
+    const failComment = `❌ Execution completed but validation failed.\n\n${action.summary}\n\n\`\`\`\n${safeOutput}\n\`\`\``;
     await updateLinearIssue(ticketId, "Todo", failComment);
 }
 

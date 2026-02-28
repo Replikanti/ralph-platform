@@ -64,7 +64,7 @@ export async function redactText(text: string): Promise<string> {
         const secretsRedacted = redactSecrets(text);
         return piiRedactor.redact(secretsRedacted);
     } catch (e) {
-        logger.warn({ err: e }, '⚠️ Redaction failed, returning original text (fail-open for stability, but logged)');
-        return text;
+        logger.error({ err: e }, '❌ Redaction failed — refusing to continue to prevent PII/secret leakage');
+        throw new Error('Redaction pipeline failed; aborting to prevent data leakage');
     }
 }

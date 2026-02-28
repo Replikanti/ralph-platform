@@ -14,6 +14,7 @@ import { LinearClient as RalphLinearClient } from '../infra/linear-client';
 import { parseIssuePayload, parseCommentPayload } from '../infra/webhook-schemas';
 import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from '../domain/webhook-routing';
 import { logger } from '../infra/logger';
+import { redactText } from '../security/redactor';
 
 const app = express();
 
@@ -214,6 +215,7 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
 async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
     logger.info(`💭 [API] Revision feedback received for issue ${issueId}`);
 
+    const safeCommentBody = await redactText(commentBody);
     const jobId = `${issueId}-replan`; // Deduplication
     const jobData = {
         ticketId: issueId,
@@ -222,7 +224,7 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
         repoUrl: storedPlan.taskContext.repoUrl,
         branchName: storedPlan.taskContext.branchName,
         mode: 'plan-only',
-        additionalFeedback: commentBody
+        additionalFeedback: safeCommentBody
     };
 
     return enqueueJob({
@@ -230,7 +232,7 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
         jobData,
         logContext: {
             type: 'replanning',
-            details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
+            details: [`Feedback: "${safeCommentBody.substring(0, 100)}..."`]
         }
     }, res);
 }
@@ -247,15 +249,21 @@ async function handleIterationRequest(routing: { issueId: string; issueTitle: st
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
+    const [safeTitle, safeDescription, safeFeedback] = await Promise.all([
+        redactText(issueTitle),
+        redactText(issueDescription || feedback),
+        redactText(feedback),
+    ]);
+
     const jobId = `${issueId}-iterate`; // Deduplication
     const jobData = {
         ticketId: issueId,
-        title: issueTitle,
-        description: issueDescription || feedback,
+        title: safeTitle,
+        description: safeDescription,
         repoUrl,
         branchName: `ralph/feat-${identifier || issueId}`,
         mode: 'plan-only',
-        additionalFeedback: feedback,
+        additionalFeedback: safeFeedback,
         isIteration: true
     };
 
@@ -264,7 +272,7 @@ async function handleIterationRequest(routing: { issueId: string; issueTitle: st
         jobData,
         logContext: {
             type: 'iteration',
-            details: [`Feedback: "${feedback.substring(0, 100)}..."`]
+            details: [`Feedback: "${safeFeedback.substring(0, 100)}..."`]
         }
     }, res);
 }
@@ -288,7 +296,7 @@ async function handleCommentWebhook(data: unknown, res: express.Response): Promi
     logger.info(`   Issue ID: ${issueId}`);
     logger.info(`   Issue State: "${comment.issue?.state?.name ?? ''}"`);
     logger.info(`   Comment Author: "${comment.author.name ?? comment.author.displayName ?? ''}"`);
-    logger.info(`   Comment Body: "${comment.body.substring(0, 100)}..."`);
+    logger.info(`   Comment Body: "${await redactText(comment.body.substring(0, 100))}..."`);
 
     const storedPlan = await getPlan(connection, issueId);
     const routing = routeComment(comment, storedPlan);
@@ -349,18 +357,20 @@ async function handleIssueWebhook(data: unknown, action: string, res: express.Re
     const teamKey = issue.team?.key;
     const repoUrl = await getRepoForTeam(teamKey);
 
+    const safeTitle = await redactText(issue.title);
+
     if (!repoUrl) {
-        logger.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${issue.title}`);
+        logger.warn(`⚠️ [API] No repository configured for team "${teamKey || 'unknown'}". Skipping issue: ${safeTitle}`);
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
-    logger.info(`📥 [API] Enqueueing Ticket: ${issue.title} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
+    logger.info(`📥 [API] Enqueueing Ticket: ${safeTitle} (team: ${teamKey || 'default'}, repo: ${repoUrl})`);
 
     try {
         await ralphQueue.add('coding-task', {
             ticketId: issue.id,
-            title: issue.title,
-            description: issue.description,
+            title: safeTitle,
+            description: await redactText(issue.description ?? ''),
             repoUrl,
             branchName: `ralph/feat-${issue.identifier}`
         }, {

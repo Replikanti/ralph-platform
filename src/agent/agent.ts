@@ -43,6 +43,7 @@ interface IterationContext {
 async function summarizeFailurePhase(task: Task, _homeDir: string, errors: string): Promise<string> {
     try {
         const { b } = await import('../infra/baml');
+        // Redaction is handled by the BAML proxy before the prompt reaches Claude CLI.
         const result = await b.SummarizeFailure({
             validationOutput: errors.substring(0, 2000),
             attempt: task.attempt,
@@ -171,10 +172,11 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
 
 async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
-    const { redactText } = await import('../security/redactor');
+    // User-provided fields (title, description) are clean from the queue boundary (server.ts).
+    // Runtime-generated fields (previousErrors) are redacted by the BAML proxy before reaching Claude CLI.
     const result = await b.PlanTask({
         title: task.title,
-        description: await redactText(task.description ?? ''),
+        description: task.description ?? '',
         skills: availableSkills,
         previousErrors: previousErrors ? [previousErrors] : [],
     });
@@ -470,8 +472,8 @@ async function handlePlanOnlyMode(
     availableSkills: string,
 ): Promise<AgentResult> {
     const planSpan = trace.span({ name: "Planning-Sonnet-Plan-Review", metadata: { mode: 'plan-only' } });
-    const { redactText } = await import('../security/redactor');
-    const previousErrors = await redactText(task.additionalFeedback || "");
+    // additionalFeedback is already redacted at the queue boundary (server.ts).
+    const previousErrors = task.additionalFeedback || "";
     const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
     planSpan.end({ output: plan });
