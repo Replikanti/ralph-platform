@@ -71,22 +71,6 @@ mock.module('@octokit/rest', () => ({
     }))
 }));
 
-const mockSpanEnd = mock();
-const mockTraceSpan = mock().mockReturnValue({ end: mockSpanEnd });
-const mockTraceUpdate = mock();
-const mockLangfuseFlush = mock();
-
-mock.module('langfuse', () => ({
-    Langfuse: mock().mockImplementation(() => ({
-        trace: mock().mockReturnValue({
-            span: mockTraceSpan,
-            update: mockTraceUpdate,
-            shutdownAsync: mock(),
-        }),
-        flushAsync: mockLangfuseFlush,
-    }))
-}));
-
 process.env.LINEAR_API_KEY = 'test-key';
 process.env.PLAN_REVIEW_ENABLED = 'false';
 

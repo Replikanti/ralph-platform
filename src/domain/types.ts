@@ -1,3 +1,19 @@
+/** Úloha agenta vytvořená z Linear ticketu */
+export interface Task {
+  ticketId: string;
+  title: string;
+  description?: string;
+  repoUrl: string;
+  branchName: string;
+  jobId: string;
+  attempt: number;
+  maxAttempts: number;
+  mode?: 'full' | 'plan-only' | 'execute-only';
+  existingPlan?: string;
+  additionalFeedback?: string;
+  isIteration?: boolean;
+}
+
 /** Příchozí issue z Linear webhooks */
 export interface WebhookIssue {
   id: string;

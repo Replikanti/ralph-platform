@@ -147,14 +147,13 @@ function verifyLinearSignature(req: any): boolean {
     const hmac = crypto.createHmac('sha256', secret);
     const digest = hmac.update(req.rawBody || '').digest('hex');
     
-    const signatureBuffer = Buffer.from(signature);
-    const digestBuffer = Buffer.from(digest);
-
-    if (signatureBuffer.length !== digestBuffer.length) {
+    try {
+        const signatureBuffer = Buffer.from(signature, 'hex');
+        const digestBuffer = Buffer.from(digest, 'hex');
+        return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
+    } catch {
         return false;
     }
-    
-    return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
 }
 
 interface JobConfig {
