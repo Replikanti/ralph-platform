@@ -128,7 +128,7 @@ async function getRepoForTeam(teamKey: string | undefined): Promise<string | nul
 
 // Middleware to capture raw body for signature verification
 app.use(express.json({
-    limit: '10mb',
+    limit: '1mb',
     verify: (req: any, _res: express.Response, buf: Buffer) => {
         req.rawBody = buf;
     }
