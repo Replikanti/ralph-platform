@@ -43,9 +43,9 @@ interface IterationContext {
 async function summarizeFailurePhase(task: Task, _homeDir: string, errors: string): Promise<string> {
     try {
         const { b } = await import('../infra/baml');
-        const { redactText } = await import('../security/redactor');
+        // Redaction is handled by the BAML proxy before the prompt reaches Claude CLI.
         const result = await b.SummarizeFailure({
-            validationOutput: await redactText(errors.substring(0, 2000)),
+            validationOutput: errors.substring(0, 2000),
             attempt: task.attempt,
             maxAttempts: task.maxAttempts,
         });
@@ -172,8 +172,8 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
 
 async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
-    // title, description, and previousErrors are already redacted at the queue boundary (server.ts).
-    // previousErrors is runtime-generated validation output, redacted by the caller before passing here.
+    // User-provided fields (title, description) are clean from the queue boundary (server.ts).
+    // Runtime-generated fields (previousErrors) are redacted by the BAML proxy before reaching Claude CLI.
     const result = await b.PlanTask({
         title: task.title,
         description: task.description ?? '',
