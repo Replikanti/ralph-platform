@@ -39,17 +39,13 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
 
         if (child.stdout) {
             child.stdout.on('data', (data: Buffer) => {
-                const str = data.toString();
-                stdout += str;
-                process.stdout.write(str);
+                stdout += data.toString();
             });
         }
 
         if (child.stderr) {
             child.stderr.on('data', (data: Buffer) => {
-                const str = data.toString();
-                stderr += str;
-                process.stderr.write(str);
+                stderr += data.toString();
             });
         }
 

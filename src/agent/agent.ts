@@ -208,9 +208,14 @@ async function syncDirectoryContents(sourceDir: string, targetDir: string, opera
     if (!fs.existsSync(sourceDir)) return;
 
     await fsPromises.mkdir(targetDir, { recursive: true });
-    const { execSync } = await import('node:child_process');
     try {
-        execSync("cp -r " + sourceDir + "/* " + targetDir + "/");
+        for (const entry of fs.readdirSync(sourceDir)) {
+            fs.cpSync(
+                path.join(sourceDir, entry),
+                path.join(targetDir, entry),
+                { recursive: true }
+            );
+        }
         logger.info(operation + " Claude projects cache");
     } catch (e: any) {
         logger.warn(operation + " failed: " + e.message);
