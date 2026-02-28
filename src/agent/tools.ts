@@ -108,6 +108,12 @@ export async function runCommand(workDir: string, command: string): Promise<stri
         return `ERROR: Command not allowed for security reasons. Only whitelisted commands (npm, git, test tools) are permitted.`;
     }
 
+    const sanitize = async (str: string, maxLen = 5000): Promise<string> => {
+        if (!str) return '';
+        const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
+        return await redactText(truncated);
+    };
+
     try {
         const { stdout, stderr } = await execAsync(command, {
             cwd: workDir,
@@ -115,81 +121,18 @@ export async function runCommand(workDir: string, command: string): Promise<stri
             maxBuffer: 1024 * 1024 // 1MB max output
         });
 
-        // Sanitize output: limit length, redact secrets
-        const sanitize = async (str: string): Promise<string> => {
-            const maxLen = 5000;
-            const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
-            return await redactText(truncated);
-        };
-
         const safeStdout = await sanitize(stdout);
         const safeStderr = await sanitize(stderr);
 
         return `STDOUT:\n${safeStdout}\n\nSTDERR:\n${safeStderr}`;
     } catch (e: unknown) {
         const error = e as { stdout?: string, stderr?: string };
-        const sanitize = async (str: string): Promise<string> => {
-            if (!str) return '';
-            const maxLen = 2000;
-            const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
-            return await redactText(truncated);
-        };
-
-        const safeStdout = await sanitize(error.stdout || '');
-        const safeStderr = await sanitize(error.stderr || '');
+        const safeStdout = await sanitize(error.stdout || '', 2000);
+        const safeStderr = await sanitize(error.stderr || '', 2000);
 
         return `ERROR: Command failed\n${safeStdout}\n${safeStderr}`;
     }
 }
-
-// --- ANTHROPIC TOOL DEFINITIONS ---
-
-export const agentTools = [
-    {
-        name: "list_files",
-        description: "List files and directories in the workspace.",
-        input_schema: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Relative path to list (default: .)" }
-            }
-        }
-    },
-    {
-        name: "read_file",
-        description: "Read the content of a file.",
-        input_schema: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Relative path to the file" }
-            },
-            required: ["path"]
-        }
-    },
-    {
-        name: "write_file",
-        description: "Write content to a file (overwrites if exists).",
-        input_schema: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "Relative path to the file" },
-                content: { type: "string", description: "The content to write" }
-            },
-            required: ["path", "content"]
-        }
-    },
-    {
-        name: "run_command",
-        description: "Run a shell command in the workspace (e.g., npm test, ls -la).",
-        input_schema: {
-            type: "object",
-            properties: {
-                command: { type: "string", description: "The shell command to execute" }
-            },
-            required: ["command"]
-        }
-    }
-];
 
 // --- EXISTING VALIDATION LOGIC ---
 
