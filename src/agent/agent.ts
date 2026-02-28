@@ -12,7 +12,7 @@ import type { ITracer } from '../domain/tracer-contract';
 
 // --- TYPES ---
 
-export type { Task };
+export type { Task } from '../domain/types';
 
 interface IterationContext {
     workDir: string;
@@ -165,7 +165,7 @@ async function executePhase(workDir: string, homeDir: string, plan: string) {
         prompt,
         model: 'sonnet',
         tools: 'Bash,Read,Edit,FileSearch,Glob',
-        maxBudgetUsd: 2.00,
+        maxBudgetUsd: 2,
         timeoutMs: 900_000,
         allowPermissionBypass: true,
     }, workDir, homeDir);
