@@ -171,9 +171,10 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
 
 async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
+    const { redactText } = await import('../security/redactor');
     const result = await b.PlanTask({
         title: task.title,
-        description: task.description ?? '',
+        description: await redactText(task.description ?? ''),
         skills: availableSkills,
         previousErrors: previousErrors ? [previousErrors] : [],
     });
@@ -469,7 +470,8 @@ async function handlePlanOnlyMode(
     availableSkills: string,
 ): Promise<AgentResult> {
     const planSpan = trace.span({ name: "Planning-Sonnet-Plan-Review", metadata: { mode: 'plan-only' } });
-    const previousErrors = task.additionalFeedback || "";
+    const { redactText } = await import('../security/redactor');
+    const previousErrors = await redactText(task.additionalFeedback || "");
     const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
     planSpan.end({ output: plan });
