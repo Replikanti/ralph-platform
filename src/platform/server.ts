@@ -10,6 +10,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
 import { getPlan } from '../infra/plan-store';
+import type { StoredPlanContext } from '../domain/types';
 import { LinearClient as RalphLinearClient } from '../infra/linear-client';
 import { parseIssuePayload, parseCommentPayload } from '../infra/webhook-schemas';
 import { hasRalphLabel, shouldSkipIssueWebhook, routeComment } from '../domain/webhook-routing';
@@ -186,7 +187,7 @@ async function enqueueJob(config: JobConfig, res: express.Response): Promise<exp
     }
 }
 
-async function handlePlanApproval(issueId: string, storedPlan: any, res: express.Response): Promise<express.Response> {
+async function handlePlanApproval(issueId: string, storedPlan: StoredPlanContext, res: express.Response): Promise<express.Response> {
     logger.info(`✅ [API] Plan approved for issue ${issueId}`);
 
     const jobId = `${issueId}-exec`; // Deduplication: Fixed ID prevents concurrent executions
@@ -211,7 +212,7 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
     }, res);
 }
 
-async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
+async function handlePlanRevisionFeedback(issueId: string, storedPlan: StoredPlanContext, commentBody: string, res: express.Response): Promise<express.Response> {
     logger.info(`💭 [API] Revision feedback received for issue ${issueId}`);
 
     const safeCommentBody = await redactText(commentBody);
