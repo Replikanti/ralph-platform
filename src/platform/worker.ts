@@ -1,6 +1,7 @@
 import { logger } from '../infra/logger';
 import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
+import { startBamlProxy } from '../infra/baml-proxy';
 import { runAgent, Task } from '../agent/agent';
 import { storePlan, deletePlan, StoredPlan } from '../infra/plan-store';
 import { formatPlanForLinear } from '../infra/plan-formatter';
@@ -213,5 +214,8 @@ export const createWorker = () => {
 };
 
 if (require.main === module) {
+    const proxyPort = Number.parseInt(process.env.BAML_PROXY_PORT ?? '3001');
+    process.env.BAML_PROXY_URL = process.env.BAML_PROXY_URL ?? `http://localhost:${proxyPort}/v1`;
+    await startBamlProxy(proxyPort);
     createWorker();
 }

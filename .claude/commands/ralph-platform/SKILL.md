@@ -17,6 +17,35 @@ This skill provides guidelines and common commands for developing, testing, and 
 - **Logging**: Use `logger` from `src/infra/logger.ts` (Pino). No `console.log` in `src/`.
 - **Tools**: Use the built-in polyglot validation tools via `npm test` and the custom validation logic in `src/agent/tools.ts`.
 
+## BAML Integration
+
+Planning and summarization use [BAML](https://docs.boundaryml.com/) (typed LLM functions) instead of direct `runClaude()` + regex:
+
+```
+b.PlanTask() / b.SummarizeFailure()
+  → BAML openai-generic client (BAML_PROXY_URL)
+  → src/infra/baml-proxy.ts  (Express, port 3001)
+  → src/infra/claude-runner.ts → Claude CLI subprocess
+```
+
+**Key files:**
+- `src/infra/baml/baml_src/` — BAML source files (git-tracked)
+- `src/infra/baml/baml_client/` — generated TypeScript client (gitignored, regenerate with `bun run build`)
+- `src/infra/baml/index.ts` — re-exports `b` from generated client
+- `src/infra/baml-proxy.ts` — OpenAI-compatible HTTP proxy to Claude CLI
+- `src/infra/claude-runner.ts` — `runClaude()` + `RateLimitError`
+
+**Regenerate BAML client after editing `.baml` files:**
+```bash
+node_modules/.bin/baml-cli generate --from src/infra/baml/baml_src
+```
+
+**Environment variables for BAML:**
+- `BAML_PROXY_PORT` — port for the proxy server (default: 3001)
+- `BAML_PROXY_URL` — base URL for BAML clients (default: `http://localhost:3001/v1`)
+
+**Execute phase** still uses `runClaude()` directly (needs Claude Code tools).
+
 ## Examples
 
 ### Running Tests

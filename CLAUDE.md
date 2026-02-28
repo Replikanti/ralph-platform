@@ -47,8 +47,11 @@ src/
 
 **Key components:**
 - **API Server** (src/platform/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
-- **Worker** (src/platform/worker.ts): Dequeues tasks from Redis, orchestrates agent execution
-- **Agent** (src/agent/agent.ts): Core AI workflow - planning (Sonnet 4.5, $0.50), coding (Sonnet 4.5, $2.00), error summarization (Haiku 4.5, $0.10), validation (polyglot tools)
+- **Worker** (src/platform/worker.ts): Dequeues tasks from Redis, starts BAML proxy, orchestrates agent execution
+- **Agent** (src/agent/agent.ts): Core AI workflow - planning (BAML→Claude CLI, $0.50), coding (Claude CLI direct, $2.00), error summarization (BAML→Claude CLI, $0.10), validation (polyglot tools)
+- **BAML** (src/infra/baml/): Typed LLM functions — `PlanTask` and `SummarizeFailure` defined in `.baml` source files, `baml_client/` is generated (gitignored)
+- **BAML Proxy** (src/infra/baml-proxy.ts): OpenAI-compatible HTTP proxy (port 3001) that translates BAML requests into `runClaude()` calls — preserves flat-rate Claude Max subscription
+- **Claude Runner** (src/infra/claude-runner.ts): `runClaude()` function + `RateLimitError` — spawns Claude CLI subprocess
 - **Workspace** (src/agent/workspace.ts): Manages ephemeral Git workspaces in `/tmp/ralph-workspaces`
 - **Tools** (src/agent/tools.ts): Polyglot validation (Biome, TSC, Ruff, Mypy, goimports, staticcheck, go build, terraform, tflint, Trivy)
 - **Plan Store** (src/infra/plan-store.ts): Redis-based persistence for human-in-the-loop plan reviews
@@ -230,8 +233,36 @@ Copy `.env.example` to `.env` and configure:
 - `LOG_LEVEL`: Pino log level — `debug | info | warn | error` (default: info)
 - `WORKSPACE_ROOT`: Override workspace directory (default: /tmp/ralph-workspaces)
 - `LANGFUSE_*`: Optional tracing (cloud.langfuse.com)
+- `BAML_PROXY_PORT`: Port for the BAML proxy server (default: 3001)
+- `BAML_PROXY_URL`: URL that BAML clients use to reach the proxy (default: `http://localhost:3001/v1`, set automatically by worker.ts)
 
 ## Critical Implementation Details
+
+### BAML Integration
+
+Ralph uses BAML (Boundary AI Markup Language) for structured LLM interactions in plan and summarize phases. The flow:
+
+```
+agent.ts calls b.PlanTask() or b.SummarizeFailure()
+  → BAML client sends OpenAI-compatible request to BAML_PROXY_URL
+  → baml-proxy.ts receives request, extracts prompt, calls runClaude()
+  → Claude CLI executes and returns text
+  → baml-proxy.ts wraps response in OpenAI format
+  → BAML parses response into typed TypeScript struct
+```
+
+**BAML source files** (`.baml`) are in `src/infra/baml/baml_src/` and are git-tracked.
+**Generated client** (`baml_client/`) is gitignored. Regenerate with:
+```bash
+node_modules/.bin/baml-cli generate --from src/infra/baml/baml_src
+```
+The build script runs this automatically before bundling.
+
+**Important**: The BAML proxy does NOT apply PII redaction — it's a simple pass-through to Claude CLI. The execute phase (`runClaude()` direct) also has no PII redaction. PII redaction is only applied at the Linear webhook ingestion layer if configured.
+
+**`b` is lazily imported** in `agent.ts` functions to avoid loading the native BAML runtime at module load time (causes Bun test runner issues — see testing section).
+
+
 
 ### Linear Webhook Security
 The webhook endpoint (src/platform/server.ts) uses **HMAC SHA-256 signature verification** with timing-safe comparison. The raw request body is captured via express middleware and verified against the `linear-signature` header using `LINEAR_WEBHOOK_SECRET`.
@@ -350,7 +381,28 @@ To save context window space, prefer **TOON (Token Optimized Object Notation)** 
 
 ## Testing Strategy
 
-Tests use supertest for API endpoints and mock all external dependencies (Redis, Anthropic SDK, Langfuse, simple-git, child_process). See `tests/` for patterns.
+Tests use supertest for API endpoints and mock all external dependencies (Redis, Langfuse, simple-git, child_process, BAML). See `tests/` for patterns.
+
+### Bun Test Patterns (CRITICAL)
+
+- `bun test` runs files in the **same process** — module mocks leak between files. Run conflicting files as separate `bun test` invocations (see `package.json` test script).
+- `mock.module()` is hoisted before static imports within a file.
+- **Preload file** (`tests/setup.ts`): mocks that must be in place before ANY module loads go here (ioredis, bullmq, bull-board, **langfuse**). The Langfuse SDK opens timers/connections at module load time that prevent tests from completing.
+- **BAML in tests**: `b` is lazily imported in `agent.ts` (dynamic import inside functions). Mock `'../src/infra/baml'` in the test file:
+  ```typescript
+  const mockPlanTask = mock();
+  const mockSummarizeFailure = mock();
+  mock.module('../src/infra/baml', () => ({
+      b: { PlanTask: mockPlanTask, SummarizeFailure: mockSummarizeFailure },
+  }));
+  // In beforeEach:
+  mockPlanTask.mockResolvedValue({ plan: 'Do X' });
+  mockSummarizeFailure.mockResolvedValue({ summary: 'Failed.' });
+  ```
+  **Do NOT** use a static `import { b } from '../src/infra/baml'` in agent.ts — this loads the native baml_client at module import time (Bun loads baml_client code even when the directory module is mocked).
+- `jest.fn()` INSIDE mock factory closures fails (jest not available at hoist time). Declare mock instances as top-level `const` BEFORE the factory.
+- `expect.any(MockConstructor)` fails — use `expect.anything()` instead.
+- `.resolves.not.toThrow()` doesn't work in Bun — use plain `await promise`.
 
 ### Test Organization
 - `tests/fixtures/` - Shared test data (webhook payloads, mocks)
