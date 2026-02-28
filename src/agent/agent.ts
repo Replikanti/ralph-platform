@@ -172,12 +172,13 @@ async function withTrace<T>(name: string, metadata: Record<string, any>, fn: (sp
 
 async function planPhase(_workDir: string, _homeDir: string, task: any, availableSkills: string, previousErrors?: string) {
     const { b } = await import('../infra/baml');
-    const { redactText } = await import('../security/redactor');
+    // title, description, and previousErrors are already redacted at the queue boundary (server.ts).
+    // previousErrors is runtime-generated validation output, redacted by the caller before passing here.
     const result = await b.PlanTask({
-        title: await redactText(task.title),
-        description: await redactText(task.description ?? ''),
+        title: task.title,
+        description: task.description ?? '',
         skills: availableSkills,
-        previousErrors: previousErrors ? [await redactText(previousErrors)] : [],
+        previousErrors: previousErrors ? [previousErrors] : [],
     });
     return result.plan;
 }
@@ -471,8 +472,8 @@ async function handlePlanOnlyMode(
     availableSkills: string,
 ): Promise<AgentResult> {
     const planSpan = trace.span({ name: "Planning-Sonnet-Plan-Review", metadata: { mode: 'plan-only' } });
-    const { redactText } = await import('../security/redactor');
-    const previousErrors = await redactText(task.additionalFeedback || "");
+    // additionalFeedback is already redacted at the queue boundary (server.ts).
+    const previousErrors = task.additionalFeedback || "";
     const rawPlan = await planPhase(workDir, homeDir, task, availableSkills, previousErrors);
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
     planSpan.end({ output: plan });

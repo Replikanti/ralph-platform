@@ -215,6 +215,7 @@ async function handlePlanApproval(issueId: string, storedPlan: any, res: express
 async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, commentBody: string, res: express.Response): Promise<express.Response> {
     logger.info(`💭 [API] Revision feedback received for issue ${issueId}`);
 
+    const safeCommentBody = await redactText(commentBody);
     const jobId = `${issueId}-replan`; // Deduplication
     const jobData = {
         ticketId: issueId,
@@ -223,7 +224,7 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
         repoUrl: storedPlan.taskContext.repoUrl,
         branchName: storedPlan.taskContext.branchName,
         mode: 'plan-only',
-        additionalFeedback: commentBody
+        additionalFeedback: safeCommentBody
     };
 
     return enqueueJob({
@@ -231,7 +232,7 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: any, comm
         jobData,
         logContext: {
             type: 'replanning',
-            details: [`Feedback: "${commentBody.substring(0, 100)}..."`]
+            details: [`Feedback: "${safeCommentBody.substring(0, 100)}..."`]
         }
     }, res);
 }
@@ -248,15 +249,21 @@ async function handleIterationRequest(routing: { issueId: string; issueTitle: st
         return res.status(200).send({ status: 'ignored', reason: 'no_repo_configured' });
     }
 
+    const [safeTitle, safeDescription, safeFeedback] = await Promise.all([
+        redactText(issueTitle),
+        redactText(issueDescription || feedback),
+        redactText(feedback),
+    ]);
+
     const jobId = `${issueId}-iterate`; // Deduplication
     const jobData = {
         ticketId: issueId,
-        title: issueTitle,
-        description: issueDescription || feedback,
+        title: safeTitle,
+        description: safeDescription,
         repoUrl,
         branchName: `ralph/feat-${identifier || issueId}`,
         mode: 'plan-only',
-        additionalFeedback: feedback,
+        additionalFeedback: safeFeedback,
         isIteration: true
     };
 
@@ -265,7 +272,7 @@ async function handleIterationRequest(routing: { issueId: string; issueTitle: st
         jobData,
         logContext: {
             type: 'iteration',
-            details: [`Feedback: "${feedback.substring(0, 100)}..."`]
+            details: [`Feedback: "${safeFeedback.substring(0, 100)}..."`]
         }
     }, res);
 }
@@ -362,8 +369,8 @@ async function handleIssueWebhook(data: unknown, action: string, res: express.Re
     try {
         await ralphQueue.add('coding-task', {
             ticketId: issue.id,
-            title: issue.title,
-            description: issue.description,
+            title: safeTitle,
+            description: await redactText(issue.description ?? ''),
             repoUrl,
             branchName: `ralph/feat-${issue.identifier}`
         }, {
