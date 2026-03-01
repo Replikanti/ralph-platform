@@ -36,7 +36,9 @@ async function summarizeFailurePhase(task: Task, _homeDir: string, errors: strin
             maxAttempts: task.maxAttempts,
         });
         return result.summary;
-    } catch {
+    } catch (e) {
+        if (e instanceof Error && e.name === 'RateLimitError') throw e;
+        logger.warn({ err: e }, "⚠️ summarizeFailurePhase failed, using fallback message");
         return "Task failed due to persistent validation errors.";
     }
 }
