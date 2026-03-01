@@ -13,12 +13,14 @@ Ralph is an event-driven AI coding agent platform that automates software develo
 
 1.  **Trigger:** A Linear issue with the label `Ralph` triggers a webhook.
 2.  **API Service (`src/platform/server.ts`):** Receives the webhook, validates the HMAC signature, parses payload with Zod, and enqueues the task into Redis (BullMQ).
-3.  **Worker Service (`src/platform/worker.ts`):** Dequeues the task and initializes the Agent.
-4.  **Agent (`src/agent/agent.ts`):**
+3.  **Worker Service (`src/platform/worker.ts`):** Starts the BAML proxy server (port 3001), then dequeues the task and initializes the Agent.
+4.  **BAML Proxy (`src/infra/baml-proxy.ts`):** OpenAI-compatible HTTP proxy. Translates BAML typed LLM calls into `runClaude()` subprocess calls, enabling structured plan/summarize outputs while preserving Claude Max flat-rate subscription.
+5.  **Agent (`src/agent/agent.ts`):**
     *   **Workspace:** Clones the target repository into an ephemeral directory (default: `/tmp/ralph-workspaces`).
-    *   **Planning:** Uses Claude Sonnet 4.5 to create an implementation plan ($0.50 budget limit).
-    *   **Coding:** Uses Claude Sonnet to generate code based on the plan.
-    *   **Validation:** Runs language-specific tools (Biome, TSC, Ruff, Mypy, goimports, Trivy) via `src/agent/tools.ts`.
+    *   **Planning:** Uses BAML `b.PlanTask()` → proxy → Claude Sonnet 4.5 ($0.50 budget limit).
+    *   **Coding:** Uses `runClaudeExecution()` → Claude CLI directly (needs Claude Code tools, $2.00 budget limit).
+    *   **Error summarization:** Uses BAML `b.SummarizeFailure()` → proxy → Claude Haiku 4.5 ($0.10 budget limit).
+    *   **Validation:** Runs language-specific tools (Biome, TSC, Ruff, Mypy, goimports, staticcheck, Trivy) via `src/agent/tools.ts`.
 5.  **Output:** Commits changes and pushes a new branch/PR to GitHub.
 6.  **Observability:** Execution traces are sent to Langfuse.
 
@@ -81,6 +83,9 @@ bun test --watch
         *   `tools.ts`: Polyglot validation tools (Biome, TSC, Ruff, Mypy, goimports, Trivy).
         *   `workspace.ts`: Git operations (clone, branch, push) and directory management.
     *   `infra/`
+        *   `baml-proxy.ts`: OpenAI-compatible HTTP proxy → routes BAML requests to Claude CLI.
+        *   `claude-runner.ts`: `runClaude()`, `runClaudeExecution()`, `RateLimitError`.
+        *   `baml/`: BAML typed LLM functions (`PlanTask`, `SummarizeFailure`) + generated client.
         *   `linear-client.ts`: Linear SDK wrapper.
         *   `plan-store.ts`: Redis-based plan persistence.
         *   `webhook-schemas.ts`: Zod schemas for parsing Linear payloads.
@@ -94,7 +99,7 @@ bun test --watch
 ## Critical Conventions & Guidelines
 
 ### Security (STRICT)
-*   **Command Execution:** `src/agent/tools.ts` implements a strict **allowlist** for shell commands. NEVER bypass this. Allowed: `npm`, `git`, `ls`, `cat`, `pytest`, `ruff`, etc. Blocked: `rm`, `curl |`, `> /dev/`.
+*   **Command Execution:** The agent uses Claude Code (Claude CLI) natively for tool operations. Validation tools in `src/agent/tools.ts` run a hardcoded set of known-safe commands (e.g., `biome check`, `tsc --noEmit`, `go build ./...`). Never add user-controlled commands.
 *   **File Access:** All file operations must be sandboxed within the ephemeral workspace. Path traversal checks are mandatory.
 *   **Webhooks:** Always verify the Linear HMAC signature (`linear-signature` header) in the API.
 
