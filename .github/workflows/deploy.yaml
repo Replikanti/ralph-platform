@@ -72,6 +72,24 @@ jobs:
         cluster_name: ${{ env.GKE_CLUSTER }}
         location: ${{ env.GKE_ZONE }}
 
+    # Push Claude Max credentials to GCP Secret Manager.
+    # Add CLAUDE_CREDENTIALS_N in GitHub Actions secrets to activate account N.
+    # Slots 0-3 are pre-created in Terraform. Values are only pushed when non-empty.
+    - name: Push Claude credentials to GCP Secret Manager
+      env:
+        CLAUDE_CREDENTIALS_0: ${{ secrets.CLAUDE_CREDENTIALS_0 }}
+        CLAUDE_CREDENTIALS_1: ${{ secrets.CLAUDE_CREDENTIALS_1 }}
+        CLAUDE_CREDENTIALS_2: ${{ secrets.CLAUDE_CREDENTIALS_2 }}
+        CLAUDE_CREDENTIALS_3: ${{ secrets.CLAUDE_CREDENTIALS_3 }}
+      run: |-
+        for i in 0 1 2 3; do
+          eval "CREDS=\$CLAUDE_CREDENTIALS_${i}"
+          if [ -n "$CREDS" ]; then
+            echo "Pushing account-${i} credentials to GCP Secret Manager..."
+            printf '%s' "$CREDS" | gcloud secrets versions add "ralph-claude-credentials-${i}" --data-file=-
+          fi
+        done
+
     # Install Helm
     - name: Install Helm
       uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1

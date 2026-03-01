@@ -52,12 +52,8 @@ variable "github_token" {
 }
 
 # Application Secrets
-variable "anthropic_api_key" {
-  description = "Anthropic API key for Claude AI (optional, defaults to placeholder)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
+# NOTE: anthropic_api_key removed — Ralph now uses Claude Max flat-rate auth
+# via account pool (CLAUDE_ACCOUNTS_DIR). See helm/ralph/values.yaml claudeAccounts.
 
 variable "langfuse_public_key" {
   description = "Langfuse public key (optional, defaults to placeholder)"
