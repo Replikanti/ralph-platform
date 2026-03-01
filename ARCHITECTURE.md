@@ -42,8 +42,9 @@ graph TB
 
         subgraph "Worker Execution Context"
             Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
-            ClaudeCLI[Claude CLI<br/>Sonnet 4.5 / Haiku 4.5]
+            ClaudeCLI[Claude CLI<br/>Opus 4.6 / Haiku 4.5]
             Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, staticcheck, terraform, tflint]
+            Accounts[/claude-accounts/<br/>Account Pool]
         end
     end
 
@@ -58,12 +59,14 @@ graph TB
     Worker1 <-->|Seed/Persist| Cache
     Worker1 -->|Push PR| GitHub
     Worker1 -->|Trace| Langfuse
+    Accounts -->|Seed credentials| Worker1
     Worker2 --> Workspace
     Worker2 --> ClaudeCLI
     Worker2 --> Tools
     Worker2 <-->|Seed/Persist| Cache
     Worker2 -->|Push PR| GitHub
     Worker2 -->|Trace| Langfuse
+    Accounts -->|Seed credentials| Worker2
 ```
 
 ## Core Components
@@ -113,11 +116,12 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 **Purpose**: Job processing and orchestration
 
 **Responsibilities**:
+- Initialize account pool (`src/infra/account-pool.ts`) at startup
 - Start BAML proxy server (port 3001) before processing jobs
 - Dequeue tasks from Redis
 - Initialize ephemeral workspaces
 - Orchestrate agent execution
-- Handle retry logic and rate-limit backpressure
+- Handle rate-limit rotation: mark account blocked → retry with next account → delay if all blocked
 - Report failures to Linear
 
 **Job Types**:
@@ -158,8 +162,8 @@ b.PlanTask() / b.SummarizeFailure()   ← typed BAML functions in agent.ts
 
 **Responsibilities**:
 - Manage three execution modes (plan-only, execute-only, full)
-- Execute Claude Sonnet 4.5 for planning ($0.50 limit) and coding ($2.00 limit)
-- Use Claude Haiku 4.5 for error summarization ($0.10 limit)
+- Execute Claude Opus 4.6 for planning and coding
+- Use Claude Haiku 4.5 for error summarization
 - Load repository skills from `.ralph/skills/`
 - Run polyglot validation
 - Create GitHub PRs
@@ -263,7 +267,7 @@ Note: Semgrep (GnuGPLv2) was intentionally replaced with Trivy to maintain licen
 ```typescript
 {
   taskId: string,
-  plan: string,                    // Sonnet 4.5-generated plan
+  plan: string,                    // Opus 4.6-generated plan
   taskContext: {
     ticketId: string,
     title: string,
@@ -291,7 +295,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Sonnet as Claude Sonnet 4.5
+    participant Opus as Claude Opus 4.6
     participant Store as Plan Store
 
     User->>Linear: Create issue with "Ralph" label
@@ -305,8 +309,8 @@ sequenceDiagram
     Worker->>Worker: Clone repo to workspace
     Worker->>Linear: Update state: → In Progress
     Worker->>Linear: Comment: "Generating plan..."
-    Worker->>Sonnet: Generate plan ($0.50 budget)
-    Sonnet-->>Worker: Return plan
+    Worker->>Opus: Generate plan
+    Opus-->>Worker: Return plan
     Worker->>Store: Store plan (TTL: 7 days)
     Worker->>Linear: Post formatted plan as comment
     Worker->>Linear: Update state: In Progress → Todo
@@ -351,8 +355,8 @@ sequenceDiagram
         API-->>Linear: 200 OK
 
         Redis->>Worker: Dequeue re-plan job
-        Worker->>Sonnet: Generate revised plan (with feedback, $0.50)
-        Sonnet-->>Worker: Return revised plan
+        Worker->>Opus: Generate revised plan (with feedback)
+        Opus-->>Worker: Return revised plan
         Worker->>Store: Update stored plan
         Worker->>Linear: Post revised plan
         Worker->>Linear: Update state: In Progress → Todo
@@ -369,7 +373,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Sonnet as Claude Sonnet 4.5
+    participant Opus as Claude Opus 4.6
     participant GitHub
     participant CI as CI/SonarQube
 
@@ -392,9 +396,9 @@ sequenceDiagram
     Worker->>Worker: Clone existing branch
     Worker->>Linear: Update state: In Review → In Progress
     Worker->>Linear: Comment: "Creating iteration plan..."
-    Worker->>Sonnet: Generate fix plan ($0.50 budget)
-    Note over Sonnet: Context includes:<br/>- Existing PR branch<br/>- User feedback<br/>- "Review git log/diff"
-    Sonnet-->>Worker: Return iteration plan
+    Worker->>Opus: Generate fix plan
+    Note over Opus: Context includes:<br/>- Existing PR branch<br/>- User feedback<br/>- "Review git log/diff"
+    Opus-->>Worker: Return iteration plan
     Worker->>Worker: Store plan (with isIteration flag)
     Worker->>Linear: Post iteration plan
     Worker->>Linear: Update state: In Progress → Todo
@@ -410,8 +414,8 @@ sequenceDiagram
     Redis->>Worker: Dequeue execute job
     Worker->>Worker: Checkout existing branch
     Worker->>Linear: Update state: Todo → In Progress
-    Worker->>Sonnet: Execute iteration plan ($2.00 budget)
-    Sonnet-->>Worker: Code changes
+    Worker->>Opus: Execute iteration plan
+    Opus-->>Worker: Code changes
     Worker->>Worker: Validate code
     Worker->>Worker: Commit changes
     Worker->>GitHub: Push (NO --force, preserve history)
@@ -436,7 +440,7 @@ sequenceDiagram
     participant API
     participant Redis
     participant Worker
-    participant Sonnet as Claude Sonnet 4.5
+    participant Opus as Claude Opus 4.6
     participant GitHub
 
     Note over API: PLAN_REVIEW_ENABLED=false
@@ -453,11 +457,11 @@ sequenceDiagram
     Worker->>Linear: Update state: Backlog → In Progress
     Worker->>Linear: Comment: "Ralph started working"
 
-    Worker->>Sonnet: Generate plan ($0.50 budget)
-    Sonnet-->>Worker: Return plan
+    Worker->>Opus: Generate plan
+    Opus-->>Worker: Return plan
 
-    Worker->>Sonnet: Execute plan ($2.00 budget)
-    Sonnet-->>Worker: Code changes
+    Worker->>Opus: Execute plan
+    Opus-->>Worker: Code changes
 
     Worker->>Worker: Validate code
     Worker->>Worker: Commit & push
@@ -498,17 +502,18 @@ Ralph distinguishes between two types of failures, each with a different recover
     - Instead of retrying the entire job, Ralph captures the error output (e.g., TSC or Biome errors) and feeds it back to the LLM as context for the next iteration.
     - **Self-Correction**: The agent "reasons" about the failure and attempts to fix its own code within the same execution session.
 
-3.  **Rate Limit Backpressure (API 429)**:
-    - Managed by **Smart Delay** logic in the worker.
-    - If Claude API returns `429 Too Many Requests`, the job is not failed/retried immediately.
-    - Instead, it is moved to the **Delayed Queue** in Redis for 60 seconds.
-    - This creates a natural backpressure mechanism that throttles execution without burning retry attempts or losing tasks.
+3.  **Rate Limit Backpressure (Claude Max 429)**:
+    - Managed by **Account Pool Rotation** + **Smart Delay** logic in the worker.
+    - On `429`, the current account is marked blocked in Redis (`ralph:account:ratelimited:{id}`) for the duration specified in the `retry-after` header (or `CLAUDE_RATE_LIMIT_TTL_MINUTES` fallback).
+    - If another account is available, the job is **retried immediately** with the next account.
+    - If all accounts are rate-limited, the job is moved to the **Delayed Queue** in Redis for `retryAfterMs` (or 60s).
+    - This creates a natural backpressure mechanism without burning retry attempts or losing tasks.
 
 #### Graceful Degradation (Human Handoff)
 
 If the agent remains stuck in a logic loop after 3 iterations:
 - It accepts defeat to prevent wasted compute and token burn.
-- A post-mortem summary is generated by Claude Haiku ($0.10 budget).
+- A post-mortem summary is generated by Claude Haiku 4.5.
 - The full error trace is posted to the Linear issue.
 - The ticket is moved back to the `Todo` or `Triage` state for human intervention.
 
@@ -604,14 +609,38 @@ if (!resolvedPath.startsWith(workDir)) {
 4. Audit logging (Langfuse traces)
 5. Manual review (require PR approval)
 
-## Cost Optimizations
+## Token Optimizations
 
-Ralph implements multiple strategies to minimize API costs while maintaining quality:
+Ralph runs on Claude Max flat-rate subscriptions — there are no per-token costs. Optimizations focus on **context window efficiency** rather than billing.
 
 ### Model Selection by Task
-- **Planning**: Sonnet 4.5 with **$0.50 budget limit** - Balances quality and cost for implementation plans
-- **Execution**: Sonnet 4.5 with **$2.00 budget limit** - Higher limit for complex code generation
-- **Error Summarization**: Haiku 4.5 with **$0.10 budget limit** - Cost-efficient for post-mortem analysis
+
+| Phase | Model | Rationale |
+|-------|-------|-----------|
+| Planning | **Claude Opus 4.6** | Best reasoning for complex implementation plans |
+| Execution | **Claude Opus 4.6** | Best code generation and tool use |
+| Error Summarization | **Claude Haiku 4.5** | Fast, lightweight — only needs to condense existing output |
+
+### Claude Max Account Pool
+
+```mermaid
+flowchart LR
+    Worker -->|getCredentialsDir| Pool[Account Pool]
+    Pool -->|available?| Redis[(Redis\nrate-limit keys)]
+    Redis -->|not blocked| Creds[/account-0\n.credentials.json/]
+    Redis -->|blocked| Creds2[/account-1\n.credentials.json/]
+    Creds -->|seed into| TempHome[/tmp/baml-proxy-xxx/\n.claude/]
+    Creds2 -->|seed into| TempHome
+    TempHome -->|HOME=| ClaudeCLI[Claude CLI]
+
+    ClaudeCLI -->|429 rate limit| Pool
+    Pool -->|markRateLimited| Redis
+    Pool -->|hasAvailableAccount?| Decision{next\naccount?}
+    Decision -->|yes| Retry[immediate retry]
+    Decision -->|no| Delay[delayed queue\nretryAfterMs]
+```
+
+**Key**: each worker pod reads credentials from a read-only volume mount (`/claude-accounts`). Redis tracks blocked accounts across all replicas.
 
 ### Token Reduction: TOON Format
 
@@ -624,17 +653,13 @@ Ralph uses **TOON (Token-Optimized Object Notation)** to reduce context window u
 
 **Example Comparison**:
 ```
-JSON (verbose):
-{
-  "files": ["src/agent.ts", "src/server.ts"],
+JSON (verbose):                          TOON (compact):
+{                                        files: src/agent.ts, src/server.ts
+  "files": ["src/agent.ts",             status: active
+            "src/server.ts"],           count: 2
   "status": "active",
   "count": 2
 }
-
-TOON (compact):
-files: src/agent.ts, src/server.ts
-status: active
-count: 2
 ```
 
 ### Token-Optimized Skills
@@ -647,18 +672,6 @@ Ralph includes custom slash commands that output in TOON format:
 - `/test-filter` - Test file discovery
 
 **Implementation**: Skills invoke external helper scripts (`~/.claude/scripts/`) that output pre-formatted TOON data, avoiding verbose tool outputs.
-
-### Budget Enforcement
-
-Hard limits prevent runaway costs:
-```typescript
-// src/agent/agent.ts
-'--max-budget-usd', '0.50'  // Planning phase
-'--max-budget-usd', '2.00'  // Execution phase
-'--max-budget-usd', '0.10'  // Error summary
-```
-
-If a budget is exceeded, Claude CLI automatically terminates and returns partial results.
 
 ## Data Flow
 
@@ -695,9 +708,9 @@ flowchart TD
     Worker --> Clone[Clone Repo]
     Clone --> Mode{Job Mode?}
 
-    Mode -->|plan-only| Planning[Sonnet 4.5: Generate Plan $0.50]
-    Mode -->|execute-only| Execution[Sonnet 4.5: Execute Plan $2.00]
-    Mode -->|full| Both[Sonnet 4.5: Plan → Execute]
+    Mode -->|plan-only| Planning[Opus 4.6: Generate Plan]
+    Mode -->|execute-only| Execution[Opus 4.6: Execute Plan]
+    Mode -->|full| Both[Opus 4.6: Plan → Execute]
 
     Planning --> Store[Store Plan in Redis]
     Store --> PostPlan[Post to Linear]
@@ -747,7 +760,14 @@ Value: StoredPlan (JSON)
 TTL: 7 days (configurable)
 ```
 
-**3. Configuration Cache**
+**3. Account Pool Rate-Limit Tracking**
+```
+Key: ralph:account:ratelimited:{accountId}
+Value: "1"
+TTL: retryAfterMs from CLI output, or CLAUDE_RATE_LIMIT_TTL_MINUTES * 60 (default: 3600s)
+```
+
+**4. Configuration Cache**
 ```
 Key: ralph:config:repos
 Value: Team → Repo mappings (JSON)
