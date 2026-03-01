@@ -353,8 +353,8 @@ Validation failures are captured in the output and provided as feedback to the a
 
 ### BullMQ Configuration
 Worker (src/platform/worker.ts):
-- Concurrency: 2 parallel jobs per worker pod
-- Rate limiter: 5 jobs per 60 seconds (Anthropic API protection)
+- Concurrency: 1 parallel job per worker pod
+- Rate limiter: 10 jobs per 60 seconds (Anthropic API protection)
 - Retry strategy: 3 attempts with exponential backoff (2s base delay)
 - Job retention: Completed jobs auto-removed, failed jobs kept for inspection
 
