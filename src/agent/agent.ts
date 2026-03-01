@@ -30,11 +30,11 @@ async function summarizeFailurePhase(task: Task, _homeDir: string, errors: strin
     try {
         const { b } = await import('../infra/baml');
         // Redaction is handled by the BAML proxy before the prompt reaches Claude CLI.
-        const result = await b.SummarizeFailure({
-            validationOutput: errors.substring(0, 2000),
-            attempt: task.attempt,
-            maxAttempts: task.maxAttempts,
-        });
+        const result = await b.SummarizeFailure(
+            errors.substring(0, 2000),
+            task.attempt,
+            task.maxAttempts,
+        );
         return result.summary;
     } catch (e) {
         if (e instanceof Error && e.name === 'RateLimitError') throw e;
@@ -152,12 +152,12 @@ async function planPhase(_workDir: string, _homeDir: string, task: Task, availab
     const { b } = await import('../infra/baml');
     // User-provided fields (title, description) are clean from the queue boundary (server.ts).
     // Runtime-generated fields (previousErrors) are redacted by the BAML proxy before reaching Claude CLI.
-    const result = await b.PlanTask({
-        title: task.title,
-        description: task.description ?? '',
-        skills: availableSkills,
-        previousErrors: previousErrors ? [previousErrors] : [],
-    });
+    const result = await b.PlanTask(
+        task.title,
+        task.description ?? '',
+        availableSkills,
+        previousErrors ? [previousErrors] : [],
+    );
     return result.plan;
 }
 
