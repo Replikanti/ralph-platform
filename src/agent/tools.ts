@@ -74,7 +74,7 @@ const DANGEROUS_PATTERNS = [
     /wget.*\|/,   // Piped downloads
 ];
 
-export async function runCommand(workDir: string, command: string): Promise<string> {
+async function runCommand(workDir: string, command: string): Promise<string> {
     // Security: Validate command against allowlist
     const isAllowed = ALLOWED_COMMAND_PATTERNS.some(pattern => pattern.test(command));
     const isDangerous = DANGEROUS_PATTERNS.some(pattern => pattern.test(command));
@@ -369,7 +369,7 @@ async function validateSecurity(workDir: string, changedFiles: string[]): Promis
     return { success, log: outputLog };
 }
 
-export interface ValidationResult {
+interface ValidationResult {
     success: boolean;
     output: string;
     languages: string[];
