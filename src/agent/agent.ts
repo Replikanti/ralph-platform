@@ -134,7 +134,7 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
     }
 }
 
-export { RateLimitError } from '../infra/claude-runner';
+export { RateLimitError };
 
 async function listAvailableSkills(workDir: string): Promise<string> {
     // List native commands from .claude/commands so the Planner knows what's available
