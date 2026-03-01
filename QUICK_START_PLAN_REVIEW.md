@@ -7,28 +7,29 @@
 # Required for plan review
 LINEAR_API_KEY=lin_api_xxxxxxxxxxxx
 
-# Optional - disable if you want old behavior
+# Optional - disable if you want legacy behavior (plan + execute in one go)
 PLAN_REVIEW_ENABLED=true
 
 # Optional - change plan storage duration
 PLAN_TTL_DAYS=7
 ```
 
-2. **Create "plan-review" state in Linear:**
-   - Go to your Linear workspace settings
-   - Navigate to States
-   - Add a new state called "plan-review" (or use synonyms: "pending review", "awaiting approval")
-   - Place it between "Todo" and "In Progress" in your workflow
+2. **Linear states** — Ralph uses standard Linear workflow states. No custom states required:
+   - `Todo` — awaiting human plan approval
+   - `In Progress` — Ralph is actively working
+   - `In Review` — PR created, awaiting merge
+   - `Done` — task completed
 
 ## Usage
 
 ### Creating a Task
 1. Create a Linear issue as normal
-2. Add the "Ralph" label
+2. Add the **"Ralph"** label
 3. Ralph will:
+   - Move issue to "In Progress"
    - Generate an implementation plan
    - Post it as a comment
-   - Move issue to "plan-review" state
+   - Move issue to **"Todo"** state (awaiting your approval)
 
 ### Approving a Plan
 Comment on the issue with any of:
@@ -37,7 +38,7 @@ Comment on the issue with any of:
 - `proceed`
 - `ship it`
 
-Ralph will execute the approved plan and create a PR.
+When you comment, the issue automatically moves back to "In Progress". Ralph will execute the approved plan and create a PR.
 
 ### Requesting Changes
 Comment with your feedback, e.g.:
@@ -48,24 +49,26 @@ Ralph will:
 - Incorporate your feedback
 - Generate a revised plan
 - Post it as a new comment
-- Keep issue in "plan-review" state
+- Move issue back to "Todo" (awaiting approval again)
 
 ### State Flow
 ```
-Todo 
+New Issue
   ↓
-Plan Review (human approval needed)
+In Progress  (Ralph planning)
   ↓
-In Progress (Ralph executing)
+Todo         (awaiting your approval)
   ↓
-In Review (PR created)
+In Progress  (Ralph executing — triggered by your comment)
   ↓
-Done
+In Review    (PR created)
+  ↓
+Done         (PR merged — manual)
 ```
 
 ## Disabling Plan Review
 
-To revert to the old behavior (plan + execute in one go):
+To revert to legacy behavior (plan + execute in one go):
 
 ```bash
 PLAN_REVIEW_ENABLED=false
@@ -79,10 +82,10 @@ PLAN_REVIEW_ENABLED=false
 - Check logs for Linear API errors
 
 **Comments not triggering execution:**
-- Ensure issue is in "plan-review" state
-- Check that plan exists in Redis (TTL is 7 days)
+- Ensure a stored plan exists in Redis (TTL is 7 days by default)
 - Verify webhook signature is valid
+- Check that the comment is not from Ralph itself (Ralph's own comments are filtered to prevent loops)
 
-**Want to skip plan review for specific issues:**
+**Want to skip plan review for a specific issue:**
 - Set `PLAN_REVIEW_ENABLED=false` temporarily
-- Or manually move issue to "In Progress" before commenting
+- Or manually move the issue to "In Progress" before commenting

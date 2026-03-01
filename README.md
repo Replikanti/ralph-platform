@@ -30,7 +30,7 @@ Unlike toy agents, Ralph is built with infrastructure primitives for production 
 - **Immutable Workflows** - Redis-based "Tombstone" locks prevent zombie tasks and accidental re-processing of completed issues.
 - **Graceful Lifecycle** - Full SIGTERM/SIGINT handling ensures workers finish active jobs before shutdown, crucial for K8s stability.
 - **Ephemeral Workspaces** - Strict UUID-based directory isolation for every job.
-- **Command Allowlists** - Regex-based syscall filtering to prevent destructive operations.
+- **Claude Code Sandbox** - All agent tool execution runs through Claude CLI's built-in security model.
 
 ## 🚀 Quick Start
 
@@ -150,6 +150,10 @@ LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_HOST=https://cloud.langfuse.com
 DEFAULT_REPO_URL=https://github.com/org/repo  # Fallback repo
 
+# BAML proxy (set automatically by worker, override only if needed)
+BAML_PROXY_PORT=3001                        # Port for BAML proxy server
+BAML_PROXY_URL=http://localhost:3001/v1     # URL for BAML clients
+
 # For multi-repo setup, use Helm values.yaml (see DEPLOYMENT.md)
 ```
 
@@ -174,8 +178,8 @@ See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for detailed component architecture
 
 Ralph implements multiple security layers:
 
-- **Command Allowlist** - Only whitelisted commands can execute
-- **Sandbox Isolation** - Each task runs in isolated workspace
+- **Claude Code Sandbox** - Agent tool execution via Claude CLI's built-in security model
+- **Sandbox Isolation** - Each task runs in isolated UUID workspace
 - **Secret Scanning** - Trivy scans for exposed secrets
 - **Webhook Authentication** - HMAC SHA-256 signature verification
 - **Resource Limits** - Timeout, memory, and output size limits

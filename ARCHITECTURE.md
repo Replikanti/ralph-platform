@@ -96,9 +96,9 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 **Configuration**:
 ```typescript
 {
-  concurrency: 2,           // Parallel jobs per worker
+  concurrency: 1,           // Parallel jobs per worker
   rateLimiter: {
-    max: 5,                 // Max 5 jobs
+    max: 10,                // Max 10 jobs
     duration: 60000         // Per 60 seconds
   },
   retry: {
@@ -113,16 +113,44 @@ Ralph's plan comments contain approval keywords in instructions, which could tri
 **Purpose**: Job processing and orchestration
 
 **Responsibilities**:
+- Start BAML proxy server (port 3001) before processing jobs
 - Dequeue tasks from Redis
 - Initialize ephemeral workspaces
 - Orchestrate agent execution
-- Handle retry logic
+- Handle retry logic and rate-limit backpressure
 - Report failures to Linear
 
 **Job Types**:
 - `plan-only` - Generate implementation plan
 - `execute-only` - Execute approved plan
 - `full` - Plan + execute (legacy mode)
+
+### BAML Proxy (`src/infra/baml-proxy.ts`)
+
+**Purpose**: OpenAI-compatible HTTP proxy enabling typed LLM calls via Claude CLI
+
+**How it works**:
+```
+b.PlanTask() / b.SummarizeFailure()   ← typed BAML functions in agent.ts
+  → BAML openai-generic client         ← sends OpenAI-format request to BAML_PROXY_URL
+  → baml-proxy.ts (port 3001)          ← translates to runClaude() call
+  → src/infra/claude-runner.ts         ← spawns Claude CLI subprocess
+  → Claude CLI                         ← executes and returns text
+  → baml-proxy.ts                      ← wraps response in OpenAI format
+  → BAML parses typed TypeScript struct ← structured output in agent.ts
+```
+
+**Why**: Preserves flat-rate Claude Max subscription while getting BAML's typed outputs and structured `.baml` prompt files.
+
+**Key files**:
+- `src/infra/baml/baml_src/` — BAML source files (git-tracked)
+- `src/infra/baml/baml_client/` — generated TypeScript client (gitignored)
+- `src/infra/baml/index.ts` — re-exports `b` client
+- `src/infra/claude-runner.ts` — `runClaude()`, `runClaudeExecution()`, `RateLimitError`
+
+**Environment variables**:
+- `BAML_PROXY_PORT` — proxy port (default: 3001)
+- `BAML_PROXY_URL` — URL for BAML clients (default: `http://localhost:3001/v1`, set automatically by worker)
 
 ### Agent (`src/agent/agent.ts`)
 
@@ -532,47 +560,21 @@ graph TD
 
 ### Command Execution Security
 
-**1. Allowlist Validation**
+The agent uses **Claude Code (Claude CLI)** natively for all tool operations (Bash, Read, Edit, Glob, etc.). Claude Code has its own built-in security model enforced at the CLI level.
 
-Only whitelisted command patterns are permitted:
-```typescript
-const ALLOWED_PATTERNS = [
-  /^npm (test|run build|install)/,
-  /^npx /,
-  /^node /,
-  /^git (status|log|diff|show)/,
-  /^(ls|cat|pwd|echo) /,
-  /^(pytest|python -m pytest)/,
-  /^(ruff|mypy)/
-];
-```
+Validation tools (`src/agent/tools.ts`) run a fixed set of known-safe commands internally (e.g., `biome check`, `tsc --noEmit`, `ruff check`, `go build ./...`) — these are hardcoded, not user-supplied.
 
-**2. Dangerous Pattern Blocking**
-
-Commands containing these patterns are rejected:
-```typescript
-const DANGEROUS_PATTERNS = [
-  /[;&|`$()]/,        // Shell metacharacters
-  /rm\s+-rf/,          // Destructive operations
-  />\s*\/dev\//,       // Device manipulation
-  /(curl|wget).*\|/    // Piped downloads
-];
-```
-
-**3. Resource Limits**
-- **Timeout**: 60 seconds max execution
-- **Buffer**: 1MB max output size
-- **Output**: Truncated to 5000 chars (stdout) / 2000 chars (stderr)
-
-**4. Path Traversal Protection**
-
-All file operations validated:
+**Path Traversal Protection** applies to polyglot validation:
 ```typescript
 const resolvedPath = path.resolve(workDir, requestedPath);
 if (!resolvedPath.startsWith(workDir)) {
   throw new Error("Path traversal blocked");
 }
 ```
+
+**Resource limits** for validation tool execution:
+- Timeout: 60–300 seconds depending on tool
+- Buffer: 1MB max output size
 
 ### Trust Boundary
 
@@ -780,11 +782,9 @@ Value: ConfigMap mtime
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Backlog: Issue created
-    Backlog --> InProgress: Ralph starts planning
-    InProgress --> PlanReview: Plan ready
-    PlanReview --> InProgress: Plan approved
-    PlanReview --> PlanReview: Feedback → re-plan
+    [*] --> InProgress: Issue created (Ralph planning)
+    InProgress --> Todo: Plan posted (awaiting approval)
+    Todo --> InProgress: User comments (approval or feedback)
     InProgress --> InReview: PR created
     InReview --> InProgress: Iteration request
     InProgress --> Todo: Failure/No changes
@@ -792,8 +792,9 @@ stateDiagram-v2
     Todo --> [*]
     Done --> [*]
 
-    note right of PlanReview
+    note right of Todo
         Human approval loop
+        (standard Linear "Todo" state)
     end note
 
     note right of InReview
