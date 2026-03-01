@@ -1,28 +1,27 @@
-# Claude Skills
+# Claude Code Configuration
 
-This directory contains repository-specific instructions and skills for Claude Code.
+This directory contains Claude Code commands and settings for working on the Ralph Platform codebase.
 
-## How it Works
+## Claude Code Commands (`.claude/commands/`)
 
-1. **Discovery**: When Claude Code (or the Ralph agent) runs in this repository, it automatically identifies skills located in `.claude/skills/`.
-2. **Standard**: Each skill is a self-contained folder with a `SKILL.md` file containing metadata and instructions.
-3. **Usage**: The agent can invoke these skills using the `/skill-name` command during the execution phase.
-
-## Skill Structure
-
-Each skill must be in its own subdirectory under `.claude/skills/` and contain a `SKILL.md` file.
+Custom slash commands available when working in this repository:
 
 ```
-.claude/skills/
-└── <skill-name>/
-    └── SKILL.md
+.claude/commands/
+├── ralph-platform/SKILL.md   — project guidelines and common commands
+├── project-map/SKILL.md      — generate TOON-format project structure
+├── trace-deps/SKILL.md       — trace dependencies for a file
+├── test-filter/SKILL.md      — filter tests by pattern
+├── typescript/SKILL.md       — TypeScript best practices
+├── python/SKILL.md           — Python best practices
+├── golang/SKILL.md           — Go best practices
+└── terraform/SKILL.md        — Terraform best practices
 ```
 
-The `SKILL.md` must include YAML frontmatter with `name` and `description`.
+Use with `/ralph-platform`, `/project-map`, `/trace-deps`, `/test-filter` etc. during Claude Code sessions.
 
-## Verification
+## Agent Skills (`.ralph/skills/` in target repos)
 
-To verify that skills are being detected:
+When Ralph executes tasks on a **target repository**, it loads repo-specific instructions from `.ralph/skills/*.md` in that repository — not from this directory.
 
-1. Observe the Planning phase in the traces (e.g., in Langfuse). The prompt sent to the Planner should list the available native skills.
-2. Review the Agent's plan. It should mention invoking relevant skills (e.g., `/ralph-platform`) when appropriate.
+These per-repo skills provide mutable guidance (coding conventions, preferred libraries, etc.) while security guardrails remain hardcoded in `src/agent/agent.ts`.
