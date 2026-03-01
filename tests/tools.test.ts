@@ -32,7 +32,6 @@ mock.module('node:fs/promises', () => ({
 }));
 
 import { runPolyglotValidation, runCommand } from '../src/agent/tools';
-import path from 'node:path';
 import { createMockExecCallback } from './fixtures';
 
 const mockedExec = mockExec;
