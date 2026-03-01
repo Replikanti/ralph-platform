@@ -17,6 +17,7 @@ import fsPromises from 'node:fs/promises';
 import { logger } from './logger';
 import { runClaude, RateLimitError } from './claude-runner';
 import { redactText } from '../security/redactor';
+import { accountPool } from './account-pool';
 
 interface OpenAIMessage {
     role: 'system' | 'user' | 'assistant';
@@ -56,25 +57,34 @@ function openAiResponse(model: string, content: string) {
     };
 }
 
-async function setupTempHome(): Promise<{ homeDir: string; cleanup: () => Promise<void> }> {
+async function setupTempHome(): Promise<{ homeDir: string; accountPath: string; cleanup: () => Promise<void> }> {
     const homeDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'baml-proxy-'));
-    const claudeDir = path.join(homeDir, '.claude');
-    await fsPromises.mkdir(claudeDir, { recursive: true });
 
-    const systemClaudeDir = path.join(os.homedir(), '.claude');
-    for (const f of ['.credentials.json', 'settings.json']) {
-        const src = path.join(systemClaudeDir, f);
-        if (fs.existsSync(src)) {
-            try {
-                await fsPromises.copyFile(src, path.join(claudeDir, f));
-            } catch (e) {
-                logger.warn({ err: e }, `⚠️ BAML proxy: failed to copy ${f} — Claude CLI may lack credentials`);
+    let accountPath: string;
+    try {
+        accountPath = await accountPool.getCredentialsDir();
+        await accountPool.seedCredentials(homeDir);
+    } catch {
+        // No account pool configured — fall back to system HOME credentials
+        accountPath = '';
+        const claudeDir = path.join(homeDir, '.claude');
+        await fsPromises.mkdir(claudeDir, { recursive: true });
+        const systemClaudeDir = path.join(os.homedir(), '.claude');
+        for (const f of ['.credentials.json', 'settings.json']) {
+            const src = path.join(systemClaudeDir, f);
+            if (fs.existsSync(src)) {
+                try {
+                    await fsPromises.copyFile(src, path.join(claudeDir, f));
+                } catch (e) {
+                    logger.warn({ err: e }, `⚠️ BAML proxy: failed to copy ${f} — Claude CLI may lack credentials`);
+                }
             }
         }
     }
 
     return {
         homeDir,
+        accountPath,
         cleanup: () => fsPromises.rm(homeDir, { recursive: true, force: true }),
     };
 }
@@ -88,7 +98,7 @@ export async function startBamlProxy(port = 3001): Promise<void> {
         res.json({
             object: 'list',
             data: [
-                { id: 'claude-sonnet-4-5-20250929', object: 'model' },
+                { id: 'claude-opus-4-6', object: 'model' },
                 { id: 'claude-haiku-4-5-20251001', object: 'model' },
             ],
         });
@@ -96,10 +106,10 @@ export async function startBamlProxy(port = 3001): Promise<void> {
 
     app.post('/v1/chat/completions', async (req, res) => {
         const body = req.body as ChatCompletionRequest;
-        const model = body.model ?? 'claude-sonnet-4-5-20250929';
+        const model = body.model ?? 'claude-opus-4-6';
         const prompt = await redactText(buildPromptFromMessages(body.messages ?? []));
 
-        const { homeDir, cleanup } = await setupTempHome();
+        const { homeDir, accountPath, cleanup } = await setupTempHome();
         try {
             const { stdout } = await runClaude(
                 ['-p', prompt, '--model', model, '--tools', '', '--no-session-persistence'],
@@ -109,6 +119,9 @@ export async function startBamlProxy(port = 3001): Promise<void> {
             res.json(openAiResponse(model, stdout.trim()));
         } catch (err: any) {
             if (err instanceof RateLimitError) {
+                if (accountPath) {
+                    await accountPool.markRateLimited(accountPath, err.retryAfterMs).catch(() => {});
+                }
                 res.status(429).json({ error: { type: 'rate_limit_error', message: err.message } });
             } else {
                 logger.error({ err }, 'BAML proxy error');

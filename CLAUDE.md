@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ralph is an event-driven AI coding agent platform that receives tasks from Linear webhooks, processes them using Claude AI models (Sonnet 4.5 for planning and coding with budget limits, Haiku 4.5 for error summarization), validates the code with polyglot toolchains, and pushes changes to GitHub.
+Ralph is an event-driven AI coding agent platform that receives tasks from Linear webhooks, processes them using Claude AI models (Opus 4.6 for planning and coding, Haiku 4.5 for error summarization), validates the code with polyglot toolchains, and pushes changes to GitHub. Authentication uses Claude Max flat-rate subscriptions via an account pool (no API key required).
 
 **Self-Evolution**: Ralph is an evolving platform. When a task requires adding new capabilities, refactoring the agentic loop, or extending the API, Ralph IS authorized and expected to modify his own source code in `src/`.
 
@@ -48,7 +48,8 @@ src/
 **Key components:**
 - **API Server** (src/platform/server.ts): Receives Linear webhooks, validates signatures, enqueues tasks to Redis
 - **Worker** (src/platform/worker.ts): Dequeues tasks from Redis, starts BAML proxy, orchestrates agent execution
-- **Agent** (src/agent/agent.ts): Core AI workflow - planning (BAML→Claude CLI, $0.50), coding (Claude CLI direct, $2.00), error summarization (BAML→Claude CLI, $0.10), validation (polyglot tools)
+- **Agent** (src/agent/agent.ts): Core AI workflow - planning (BAML→Claude CLI, Opus 4.6), coding (Claude CLI direct, Opus 4.6), error summarization (BAML→Claude CLI, Haiku 4.5), validation (polyglot tools)
+- **Account Pool** (src/infra/account-pool.ts): Manages pool of Claude Max flat-rate accounts; rotates on rate-limit; tracks blocked accounts in Redis
 - **BAML** (src/infra/baml/): Typed LLM functions — `PlanTask` and `SummarizeFailure` defined in `.baml` source files, `baml_client/` is generated (gitignored)
 - **BAML Proxy** (src/infra/baml-proxy.ts): OpenAI-compatible HTTP proxy (port 3001) that translates BAML requests into `runClaude()` calls — preserves flat-rate Claude Max subscription
 - **Claude Runner** (src/infra/claude-runner.ts): `runClaude()` function + `RateLimitError` — spawns Claude CLI subprocess
@@ -67,13 +68,13 @@ src/
 
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
-3. Agent runs **plan-only mode** (Sonnet 4.5 generates implementation plan with $0.50 budget)
+3. Agent runs **plan-only mode** (Opus 4.6 generates implementation plan)
 4. Plan posted to Linear as comment, issue moved to **"Todo"** state (awaiting approval)
 5. **Human reviews plan**:
    - Comment "LGTM", "approved", "proceed", or "ship it" → Ticket moves to "In Progress" → Execution job queued
    - Comment with feedback → Ticket moves to "In Progress" → Re-planning job queued with feedback context
    - **Ralph's own comments are filtered to prevent auto-execution**
-6. On approval: Agent runs **execute-only mode** (Sonnet 4.5 implements approved plan, $2.00 budget)
+6. On approval: Agent runs **execute-only mode** (Opus 4.6 implements approved plan)
 7. Polyglot validation runs on generated code
 8. Push to GitHub (creates PR branch)
 9. Wait 3 seconds for Linear auto-switch to "In Review" (only manual update if needed)
@@ -84,8 +85,8 @@ src/
 1. Linear webhook → API validates signature → enqueues to Redis
 2. Worker dequeues → clones repo to ephemeral workspace
 3. Agent runs **full mode** (plan + execute in one go):
-   - Planning phase (Claude Sonnet 4.5, $0.50 budget)
-   - Execution phase (Claude Sonnet 4.5, $2.00 budget)
+   - Planning phase (Claude Opus 4.6)
+   - Execution phase (Claude Opus 4.6)
 4. Polyglot validation runs on generated code
 5. Push to GitHub (creates PR branch)
 6. Langfuse trace captures entire execution
@@ -97,7 +98,7 @@ Ralph supports **human-in-the-loop** plan review, allowing developers to approve
 ### How It Works
 
 **1. Plan Generation**
-- When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Sonnet 4.5
+- When a Linear issue with the "Ralph" label is created/updated, Ralph generates an implementation plan using Claude Opus 4.6
 - The plan is posted as a comment on the Linear issue
 - The issue is automatically moved to the **"Todo"** state (awaiting human approval)
 
@@ -107,7 +108,7 @@ Developers review the posted plan and can:
   - API filters Ralph's own comments to prevent auto-execution
   - Issue moves to "In Progress" state
   - Triggers execution job with the approved plan
-  - Ralph executes the plan using Claude Sonnet 4.5 ($2.00 budget)
+  - Ralph executes the plan using Claude Opus 4.6
 - **Request Changes**: Comment with specific feedback
   - Issue moves to "In Progress" state
   - Triggers re-planning job with feedback incorporated
@@ -150,7 +151,7 @@ Any other comment content is treated as revision feedback.
 ### Plan Storage
 
 Plans are stored in Redis with the key pattern `ralph:plan:{issueId}` and include:
-- Implementation plan (Sonnet 4.5 output)
+- Implementation plan (Opus 4.6 output)
 - Original task context (title, description, repo, branch)
 - Feedback history (accumulated revision requests)
 - Status (`pending-review`, `approved`, `needs-revision`)
@@ -225,7 +226,8 @@ bun run src/platform/worker.ts    # Background worker
 Copy `.env.example` to `.env` and configure:
 - `REDIS_URL`: Redis connection (default: redis://localhost:6379)
 - `GITHUB_TOKEN`: Requires 'repo' scope for cloning and pushing
-- `ANTHROPIC_API_KEY`: For Claude API access
+- `CLAUDE_ACCOUNTS_DIR`: Directory containing Claude Max account subdirectories (default: `/claude-accounts`)
+- `CLAUDE_RATE_LIMIT_TTL_MINUTES`: Fallback TTL (minutes) for rate-limited accounts (default: `60`)
 - `LINEAR_WEBHOOK_SECRET`: HMAC secret from Linear webhook settings
 - `LINEAR_API_KEY`: API key for posting comments and updating issue states (required for plan review)
 - `PLAN_REVIEW_ENABLED`: Enable human-in-the-loop planning (default: true)
@@ -292,11 +294,34 @@ Each job gets a UUID-based ephemeral workspace under `WORKSPACE_ROOT` (default `
 
 ### Agent Execution Modes
 The agent (src/agent/agent.ts) supports three execution modes controlled by `task.mode`:
-1. **plan-only**: Sonnet 4.5 generates implementation plan ($0.50 budget), posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
-2. **execute-only**: Sonnet 4.5 executes pre-approved plan from Redis ($2.00 budget) (triggered by approval comment)
-3. **full**: Legacy mode - Sonnet 4.5 plans then executes in one job (default when PLAN_REVIEW_ENABLED=false)
+1. **plan-only**: Opus 4.6 generates implementation plan, posts to Linear, stores in Redis (default when PLAN_REVIEW_ENABLED=true)
+2. **execute-only**: Opus 4.6 executes pre-approved plan from Redis (triggered by approval comment)
+3. **full**: Legacy mode - Opus 4.6 plans then executes in one job (default when PLAN_REVIEW_ENABLED=false)
 
 Mode is set by the webhook handler based on webhook type (issue vs comment) and plan review configuration.
+
+### Claude Max Account Pool
+
+Ralph uses Claude Max flat-rate subscriptions instead of API keys. The account pool (`src/infra/account-pool.ts`) manages multiple accounts and rotates on rate-limit.
+
+**Directory structure** (`CLAUDE_ACCOUNTS_DIR`, default `/claude-accounts`):
+```
+/claude-accounts/
+  account-0/
+    .credentials.json    ← from `claude login`
+    settings.json        ← optional
+  account-1/
+    .credentials.json
+```
+
+**Rate-limit tracking**: Blocked accounts are stored in Redis as `ralph:account:ratelimited:{id}` with TTL from CLI retry-after (or `CLAUDE_RATE_LIMIT_TTL_MINUTES`, default 60min).
+
+**Rotation flow** (worker.ts):
+1. RateLimitError caught → current account marked blocked in Redis
+2. If another account is available → job retried immediately with next account
+3. If all accounts blocked → job delayed by `retryAfterMs` (or 60s)
+
+**Credential seeding**: Both BAML proxy and execute phase seed credentials into temp HOME dirs (`/tmp/baml-proxy-*/` and workspace `home/`). The `readOnlyRootFilesystem: true` K8s constraint is handled — accounts are read from Secret volumes, seeded into emptyDir `/tmp`.
 
 ### Agent Security Layer
 The agent has a two-tier prompt system:
@@ -354,14 +379,15 @@ Validation failures are captured in the output and provided as feedback to the a
 ### BullMQ Configuration
 Worker (src/platform/worker.ts):
 - Concurrency: 1 parallel job per worker pod
-- Rate limiter: 10 jobs per 60 seconds (Anthropic API protection)
+- Rate limiter: 10 jobs per 60 seconds
 - Retry strategy: 3 attempts with exponential backoff (2s base delay)
 - Job retention: All jobs (completed and failed) auto-removed immediately to allow re-runs
+- **RateLimitError handling**: marks current account as blocked → rotates to next available account (immediate retry) → if all blocked, delays by `retryAfterMs` or 60s
 
 ### Langfuse Tracing
 All agent executions are traced hierarchically:
 - Top-level trace: "Ralph-Task" with ticketId
-- Spans: "Planning" (Sonnet 4.5, $0.50), "Coding" (Sonnet 4.5, $2.00), "Error Summary" (Haiku 4.5, $0.10), "Validation" (polyglot)
+- Spans: "Planning-Opus-*" (Opus 4.6), "Execution-Opus-*" (Opus 4.6), "Error Summary" (Haiku 4.5), "Validation" (polyglot)
 - Errors automatically captured in trace metadata
 
 ### Token Optimization (TOON)

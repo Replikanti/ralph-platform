@@ -25,12 +25,15 @@ services:
     command: npm run start:worker
     environment:
       - REDIS_URL=redis://redis:6379
+      - CLAUDE_ACCOUNTS_DIR=/claude-accounts
+      - CLAUDE_RATE_LIMIT_TTL_MINUTES=60
     env_file:
       - .env
     depends_on:
       - redis
     volumes:
       - /tmp/ralph-workspaces:/tmp/ralph-workspaces
+      - /opt/ralph/claude-accounts:/claude-accounts:ro
 
 volumes:
   redis_data:
