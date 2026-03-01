@@ -12,6 +12,7 @@ on:
       - '.github/workflows/**'
       - 'LICENSE'
       - '.gitignore'
+  workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
