@@ -356,7 +356,7 @@ Worker (src/platform/worker.ts):
 - Concurrency: 1 parallel job per worker pod
 - Rate limiter: 10 jobs per 60 seconds (Anthropic API protection)
 - Retry strategy: 3 attempts with exponential backoff (2s base delay)
-- Job retention: Completed jobs auto-removed, failed jobs kept for inspection
+- Job retention: All jobs (completed and failed) auto-removed immediately to allow re-runs
 
 ### Langfuse Tracing
 All agent executions are traced hierarchically:
