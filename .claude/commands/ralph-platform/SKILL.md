@@ -32,8 +32,9 @@ b.PlanTask() / b.SummarizeFailure()
 - `src/infra/baml/baml_src/` — BAML source files (git-tracked)
 - `src/infra/baml/baml_client/` — generated TypeScript client (gitignored, regenerate with `bun run build`)
 - `src/infra/baml/index.ts` — re-exports `b` from generated client
-- `src/infra/baml-proxy.ts` — OpenAI-compatible HTTP proxy to Claude CLI
-- `src/infra/claude-runner.ts` — `runClaude()` + `RateLimitError`
+- `src/infra/baml-proxy.ts` — OpenAI-compatible HTTP proxy to Claude CLI (uses account pool for credentials)
+- `src/infra/claude-runner.ts` — `runClaude()` + `RateLimitError` (with `retryAfterMs`)
+- `src/infra/account-pool.ts` — account pool for Claude Max flat-rate credentials rotation
 
 **Regenerate BAML client after editing `.baml` files:**
 ```bash
@@ -43,6 +44,10 @@ node_modules/.bin/baml-cli generate --from src/infra/baml/baml_src
 **Environment variables for BAML:**
 - `BAML_PROXY_PORT` — port for the proxy server (default: 3001)
 - `BAML_PROXY_URL` — base URL for BAML clients (default: `http://localhost:3001/v1`)
+
+**Environment variables for Claude Max auth:**
+- `CLAUDE_ACCOUNTS_DIR` — directory of account subdirectories with `.credentials.json` (default: `/claude-accounts`)
+- `CLAUDE_RATE_LIMIT_TTL_MINUTES` — fallback TTL for rate-limited accounts (default: 60)
 
 **Execute phase** still uses `runClaudeExecution()` directly (needs Claude Code tools).
 

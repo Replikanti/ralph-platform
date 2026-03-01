@@ -162,13 +162,16 @@ async function planPhase(_workDir: string, _homeDir: string, task: Task, availab
 }
 
 async function executePhase(workDir: string, homeDir: string, plan: string) {
+    const { accountPool } = await import('../infra/account-pool');
+    await accountPool.seedCredentials(homeDir).catch((e: any) => {
+        logger.warn('⚠️ executePhase: credential seeding failed — ' + e.message);
+    });
     const prompt = "You are the Executor. Implement this plan strictly: " + plan + "\n" +
         "RULES: No secrets, stay in sandbox, only necessary files, do not commit.";
     return runClaudeExecution({
         prompt,
-        model: 'sonnet',
+        model: 'claude-opus-4-6',
         tools: 'Bash,Read,Edit,FileSearch,Glob',
-        maxBudgetUsd: 2,
         timeoutMs: 900_000,
         allowPermissionBypass: true,
     }, workDir, homeDir);
@@ -258,7 +261,7 @@ async function runIteration(iteration: number, ctx: IterationContext, previousEr
     });
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
 
-    await ctx.tracer.span("Execution-Sonnet-Iter-" + iteration, { iteration }, async () => {
+    await ctx.tracer.span("Execution-Opus-Iter-" + iteration, { iteration }, async () => {
         await executePhase(ctx.workDir, ctx.homeDir, plan);
     });
 
@@ -436,7 +439,7 @@ async function handlePlanOnlyMode(
 ): Promise<AgentResult> {
     // additionalFeedback is already redacted at the queue boundary (server.ts).
     const previousErrors = task.additionalFeedback || "";
-    const rawPlan = await tracer.span("Planning-Sonnet-Plan-Review", { mode: 'plan-only' }, async () => {
+    const rawPlan = await tracer.span("Planning-Opus-Plan-Review", { mode: 'plan-only' }, async () => {
         return planPhase(workDir, homeDir, task, availableSkills, previousErrors);
     });
     const plan = rawPlan.replaceAll('<plan>', '').replaceAll('</plan>', '').trim();
@@ -452,7 +455,7 @@ async function handleExecuteOnlyMode(
     tracer: ITracer,
     plan: string,
 ): Promise<AgentResult> {
-    await tracer.span("Execution-Sonnet-Approved-Plan", { mode: 'execute-only' }, async () => {
+    await tracer.span("Execution-Opus-Approved-Plan", { mode: 'execute-only' }, async () => {
         await executePhase(workDir, homeDir, plan);
     });
 

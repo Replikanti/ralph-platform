@@ -1,5 +1,14 @@
 import { mock, jest, describe, it, expect, beforeEach } from 'bun:test';
 
+mock.module('../src/infra/account-pool', () => ({
+    accountPool: {
+        getCredentialsDir: mock().mockResolvedValue('/fake-accounts/account-0'),
+        markRateLimited: mock().mockResolvedValue(undefined),
+        seedCredentials: mock().mockResolvedValue(undefined),
+        hasAvailableAccount: mock().mockResolvedValue(true),
+    },
+    initAccountPool: mock(),
+}));
 mock.module('../src/agent/workspace', () => ({
     setupWorkspace: mock(),
     parseRepoUrl: mock(),

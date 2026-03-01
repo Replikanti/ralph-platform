@@ -30,6 +30,13 @@ spec:
             - name: claude-cache
               mountPath: /app/claude-cache
             {{- end }}
+            {{- if .Values.claudeAccounts.enabled }}
+            {{- range $i, $account := .Values.claudeAccounts.accounts }}
+            - name: claude-account-{{ $i }}
+              mountPath: {{ $.Values.claudeAccounts.mountPath }}/{{ $account.id }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.worker.requests.cpu }}
@@ -56,11 +63,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.githubToken }}
                   key: token
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.anthropicKey }}
-                  key: key
+            {{- if .Values.claudeAccounts.enabled }}
+            - name: CLAUDE_ACCOUNTS_DIR
+              value: {{ .Values.claudeAccounts.mountPath }}
+            - name: CLAUDE_RATE_LIMIT_TTL_MINUTES
+              value: {{ .Values.claudeAccounts.rateLimitTtlMinutes | quote }}
+            {{- end }}
             - name: LANGFUSE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -97,4 +105,16 @@ spec:
         - name: repo-config
           configMap:
             name: {{ .Release.Name }}-repo-config
+        {{- if .Values.claudeAccounts.enabled }}
+        {{- range $i, $account := .Values.claudeAccounts.accounts }}
+        - name: claude-account-{{ $i }}
+          secret:
+            secretName: {{ $account.secretName }}
+            items:
+              - key: credentials.json
+                path: .credentials.json
+              - key: settings.json
+                path: settings.json
+        {{- end }}
+        {{- end }}
 

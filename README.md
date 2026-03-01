@@ -5,9 +5,9 @@ Ralph is an event-driven AI coding agent that automatically processes Linear iss
 ## 🎯 What is Ralph?
 
 Ralph automates the software development workflow by:
-- **Planning** with Claude Sonnet 4.5 (implementation plans with $0.50 budget limit)
-- **Coding** with Claude Sonnet 4.5 (code execution with $2.00 budget limit)
-- **Error Summarization** with Claude Haiku 4.5 (cost-efficient failure analysis with $0.10 budget)
+- **Planning** with Claude Opus 4.6 (implementation plans)
+- **Coding** with Claude Opus 4.6 (code execution)
+- **Error Summarization** with Claude Haiku 4.5 (lightweight failure analysis)
 - **Validating** with polyglot tools (Biome, TSC, Ruff, Mypy, goimports, staticcheck, terraform, tflint, Trivy)
 - **Iterating** based on human feedback and CI results
 
@@ -17,7 +17,8 @@ Ralph automates the software development workflow by:
 - **PR Iteration Workflow** - Continuously improve PRs with CI/SonarQube feedback
 - **Multi-Repository Support** - Map Linear teams to different GitHub repositories
 - **Polyglot Validation** - Auto-detect and validate TypeScript, JavaScript, Python, Go, and Terraform projects
-- **Cost-Optimized** - Budget limits per phase, Haiku for summaries, TOON format for token reduction
+- **Flat-Rate Auth** - Claude Max account pool with automatic rotation on rate-limit, no per-token billing
+- **Token-Efficient** - Haiku for summaries, TOON format for token reduction
 - **Security-First** - Command allowlists, sandbox isolation, secret scanning
 - **Observable** - Full tracing with Langfuse
 
@@ -134,8 +135,11 @@ bun run src/platform/worker.ts    # Background worker
 # Required
 REDIS_URL=redis://localhost:6379
 GITHUB_TOKEN=ghp_xxx                    # Requires 'repo' scope
-ANTHROPIC_API_KEY=sk-ant-xxx
 LINEAR_WEBHOOK_SECRET=xxx               # From Linear webhook settings
+
+# Claude Max flat-rate auth
+CLAUDE_ACCOUNTS_DIR=/claude-accounts    # Dir with account subdirs (each has .credentials.json)
+CLAUDE_RATE_LIMIT_TTL_MINUTES=60        # Fallback block TTL when rate-limited (default: 60)
 
 # Required for Plan Review
 LINEAR_API_KEY=lin_api_xxx              # Write access to Linear
@@ -164,12 +168,12 @@ graph LR
     Linear[Linear Webhook] -->|POST| API[API Server]
     API -->|Enqueue| Redis[(Redis)]
     Redis -->|Dequeue| Worker[Worker]
-    Worker -->|Plan $0.50| Sonnet[Claude Sonnet 4.5]
-    Worker -->|Code $2.00| Sonnet
-    Worker -->|Summarize $0.10| Haiku[Claude Haiku 4.5]
+    Worker -->|Plan + Code| Opus[Claude Opus 4.6]
+    Worker -->|Summarize| Haiku[Claude Haiku 4.5]
     Worker -->|Validate| Tools[Polyglot Tools]
     Worker -->|Push| GitHub[GitHub PR]
     Worker -->|Trace| Langfuse[Langfuse]
+    Accounts[/claude-accounts/] -->|Credentials| Worker
 ```
 
 See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for detailed component architecture.

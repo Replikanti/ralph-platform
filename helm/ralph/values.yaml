@@ -12,9 +12,21 @@ redis:
 secrets:
   # Map these to your existing K8s secrets
   githubToken: "ralph-github-token"
-  anthropicKey: "ralph-anthropic-key"
   langfuse: "ralph-langfuse"
   linearWebhook: "ralph-linear-secret"
+
+# Claude Max flat-rate account pool
+claudeAccounts:
+  enabled: true
+  mountPath: /claude-accounts
+  rateLimitTtlMinutes: 60
+  accounts:
+    - id: account-0
+      secretName: ralph-claude-account-0
+  # For ESO (GCP Secret Manager) — add entries matching accounts above:
+  externalSecrets:
+    - gcpSecretName: ralph-claude-credentials-0
+      k8sSecretName: ralph-claude-account-0
 
 admin:
   user: "admin"

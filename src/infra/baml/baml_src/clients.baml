@@ -13,7 +13,7 @@ client<llm> ClaudeSonnet {
   provider openai-generic
   options {
     base_url env.BAML_PROXY_URL
-    model "claude-sonnet-4-5-20250929"
+    model "claude-opus-4-6"
     api_key "ralph-internal"
     supports_streaming false
   }

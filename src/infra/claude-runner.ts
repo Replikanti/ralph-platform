@@ -2,9 +2,11 @@ import { logger } from './logger';
 import { spawn } from 'node:child_process';
 
 export class RateLimitError extends Error {
-    constructor(message: string) {
+    retryAfterMs?: number;
+    constructor(message: string, retryAfterMs?: number) {
         super(message);
         this.name = 'RateLimitError';
+        this.retryAfterMs = retryAfterMs;
     }
 }
 
@@ -12,7 +14,6 @@ export interface ClaudeRunConfig {
     prompt: string;
     model?: string;
     tools?: string;
-    maxBudgetUsd?: number;
     timeoutMs?: number;
     allowPermissionBypass?: boolean;
 }
@@ -21,7 +22,6 @@ export function runClaudeExecution(config: ClaudeRunConfig, workDir: string, hom
     const args: string[] = ['-p', config.prompt];
     if (config.model) args.push('--model', config.model);
     if (config.tools) args.push('--tools', config.tools);
-    if (config.maxBudgetUsd !== undefined) args.push('--max-budget-usd', String(config.maxBudgetUsd));
     if (config.allowPermissionBypass) {
         args.push('--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions');
     }
@@ -40,7 +40,6 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             env: {
                 ...process.env,
                 HOME: homeDir,
-                ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
                 CI: 'true',
                 DEBUG: 'true',
                 TERM: 'dumb',
@@ -80,7 +79,9 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             clearTimeout(timeout);
 
             if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
-                reject(new RateLimitError("Anthropic Rate Limit Exceeded"));
+                const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(stderr + ' ' + stdout);
+                const retryAfterMs = retryMatch ? Number.parseInt(retryMatch[1], 10) * 1000 : undefined;
+                reject(new RateLimitError("Claude Rate Limit Exceeded", retryAfterMs));
                 return;
             }
 

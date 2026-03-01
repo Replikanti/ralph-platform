@@ -3,7 +3,7 @@ import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Langfuse } from 'langfuse';
 import { startBamlProxy } from '../infra/baml-proxy';
-import { runAgent } from '../agent/agent';
+import { runAgent, RateLimitError } from '../agent/agent';
 import { storePlan, deletePlan, StoredPlan } from '../infra/plan-store';
 import { formatPlanForLinear } from '../infra/plan-formatter';
 import { LinearClient as RalphLinearClient } from '../infra/linear-client';
@@ -11,6 +11,7 @@ import { resolvePlatformAction } from '../domain/agent-outcomes';
 import type { Task, AgentResult } from '../domain/types';
 import type { ITracer } from '../domain/tracer-contract';
 import { redactText } from '../security/redactor';
+import { initAccountPool, accountPool } from '../infra/account-pool';
 
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
@@ -158,9 +159,24 @@ export const jobProcessor = async (job: Job) => {
     try {
         result = await runAgent(taskData, tracer);
     } catch (e: any) {
-        if (e.name === 'RateLimitError') {
-            logger.warn(`⏳ [Worker] Rate Limit hit for job ${job.id}. Backing off for 60s...`);
-            await job.moveToDelayed(Date.now() + 60000, job.token);
+        if (e instanceof RateLimitError || e.name === 'RateLimitError') {
+            const rateLimitErr = e as RateLimitError;
+            try {
+                const currentAccountPath = await accountPool.getCredentialsDir();
+                await accountPool.markRateLimited(currentAccountPath, rateLimitErr.retryAfterMs);
+
+                if (await accountPool.hasAvailableAccount()) {
+                    logger.info(`🔄 [Worker] Rate limit hit — rotating to next account, immediate retry for job ${job.id}`);
+                    await job.retry();
+                    return;
+                }
+            } catch {
+                // accountPool not configured or other error — fall through to delay
+            }
+
+            const delayMs = rateLimitErr.retryAfterMs ?? 60000;
+            logger.warn(`⏳ [Worker] All accounts rate-limited for job ${job.id}. Backing off for ${delayMs}ms...`);
+            await job.moveToDelayed(Date.now() + delayMs, job.token);
             return;
         }
         throw e;
@@ -245,6 +261,13 @@ export const createWorker = () => {
 if (require.main === module) {
     const proxyPort = Number.parseInt(process.env.BAML_PROXY_PORT ?? '3001');
     process.env.BAML_PROXY_URL = process.env.BAML_PROXY_URL ?? `http://localhost:${proxyPort}/v1`;
+
+    // Initialize account pool before starting the BAML proxy (proxy uses it for credential seeding)
+    initAccountPool(
+        process.env.CLAUDE_ACCOUNTS_DIR ?? '/claude-accounts',
+        redisConnection,
+    );
+
     await startBamlProxy(proxyPort);
     createWorker();
 }
