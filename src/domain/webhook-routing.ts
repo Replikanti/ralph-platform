@@ -1,7 +1,7 @@
 import type { WebhookComment, WebhookIssue, CommentRouting, StoredPlanContext } from './types';
 
 /** Schválení plánu uživatelem */
-export function isApprovalComment(body: string): boolean {
+function isApprovalComment(body: string): boolean {
   const patterns = [/\blgtm\b/i, /\bapproved\b/i, /\bproceed\b/i, /\bship it\b/i];
   return patterns.some(p => p.test(body));
 }
@@ -19,7 +19,7 @@ export function hasRalphLabel(issue: WebhookIssue): boolean {
 }
 
 /** Je komentář od Ralpha samotného? (zabraňuje auto-execution smyčce) */
-export function isRalphOwnComment(comment: WebhookComment): boolean {
+function isRalphOwnComment(comment: WebhookComment): boolean {
   const author = (comment.author.name ?? comment.author.displayName ?? '').toLowerCase();
   return (
     author.includes('ralph') ||
@@ -30,12 +30,12 @@ export function isRalphOwnComment(comment: WebhookComment): boolean {
 }
 
 /** Je issue v "In Review" stavu? */
-export function isInReviewState(stateName: string): boolean {
+function isInReviewState(stateName: string): boolean {
   return stateName.toLowerCase().includes('review');
 }
 
 /** Je issue v aktivním stavu (schválení by bylo duplicitní)? */
-export function isAlreadyProcessing(stateName: string): boolean {
+function isAlreadyProcessing(stateName: string): boolean {
   const normalized = stateName.toLowerCase();
   return normalized === 'in progress' || normalized === 'in review';
 }
