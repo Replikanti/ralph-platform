@@ -157,7 +157,7 @@ describe('runAgent', () => {
         const task = { ticketId: '123', title: 'Test', description: 'Desc', repoUrl: 'https://github.com/owner/repo', branchName: 'b' };
         const result = await runAgent(task);
 
-        expect(mockPlanTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Test', description: 'Desc' }));
+        expect(mockPlanTask).toHaveBeenCalledWith('Test', 'Desc', expect.any(String), expect.any(Array));
         expect(mockSpawn).toHaveBeenCalled();
         expect(mockPullsCreate).toHaveBeenCalled();
         expect(result).toMatchObject({ status: 'executed', prUrl: expect.stringContaining('github.com') });
@@ -212,7 +212,7 @@ describe('runAgent', () => {
         const result = await runAgent(task);
 
         expect(result).toMatchObject({ status: 'plan-generated', plan: expect.stringContaining('Step 1') });
-        expect(mockPlanTask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Plan Task' }));
+        expect(mockPlanTask).toHaveBeenCalledWith('Plan Task', expect.any(String), expect.any(String), expect.any(Array));
         process.env.PLAN_REVIEW_ENABLED = 'false';
     });
 });
