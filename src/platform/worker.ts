@@ -97,8 +97,12 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
         };
         await storePlan(redis, ticketId, storedPlan);
         const formattedPlan = formatPlanForLinear(action.plan, task.title);
-        await linearClient.postComment(ticketId, formattedPlan);
-        await linearClient.updateIssueState(ticketId, "Todo");
+        try {
+            await linearClient.postComment(ticketId, formattedPlan);
+            await linearClient.updateIssueState(ticketId, "Todo");
+        } catch (e) {
+            logger.error({ err: e }, `❌ [Worker] Failed to notify Linear of plan for ${ticketId} — plan is stored in Redis, retry will re-post`);
+        }
         logger.info("✅ Plan posted to Linear, awaiting human approval");
         return;
     }

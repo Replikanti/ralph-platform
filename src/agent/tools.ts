@@ -44,31 +44,6 @@ export async function detectProjectLanguages(workDir: string): Promise<string[]>
     return languages;
 }
 
-export async function listFiles(workDir: string, dirPath: string = "."): Promise<string> {
-    const fullPath = path.resolve(workDir, dirPath);
-    if (!fullPath.startsWith(workDir)) throw new Error("Access denied");
-    
-    const entries = await fsPromises.readdir(fullPath, { withFileTypes: true });
-    return entries.map((e: fs.Dirent) => e.isDirectory() ? `${e.name}/` : e.name).join("\n");
-}
-
-export async function readFile(workDir: string, filePath: string): Promise<string> {
-    const fullPath = path.resolve(workDir, filePath);
-    if (!fullPath.startsWith(workDir)) throw new Error("Access denied");
-    
-    const content = await fsPromises.readFile(fullPath, "utf-8");
-    return await redactText(content);
-}
-
-export async function writeFile(workDir: string, filePath: string, content: string): Promise<string> {
-    const fullPath = path.resolve(workDir, filePath);
-    if (!fullPath.startsWith(workDir)) throw new Error("Access denied");
-    
-    await fsPromises.mkdir(path.dirname(fullPath), { recursive: true });
-    await fsPromises.writeFile(fullPath, content, "utf-8");
-    return `Wrote to ${filePath}`;
-}
-
 // Allowlist of safe command patterns for agent execution
 const ALLOWED_COMMAND_PATTERNS = [
     /^npm\s+(test|run|install|ci|build|lint)/,
