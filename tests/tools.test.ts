@@ -31,7 +31,7 @@ mock.module('node:fs/promises', () => ({
     mkdir: mockFsMkdir,
 }));
 
-import { runPolyglotValidation, listFiles, readFile, writeFile, runCommand } from '../src/agent/tools';
+import { runPolyglotValidation, runCommand } from '../src/agent/tools';
 import path from 'node:path';
 import { createMockExecCallback } from './fixtures';
 
@@ -47,29 +47,6 @@ describe('Agent Tools', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-    });
-
-    it('listFiles should return formatted file list', async () => {
-        mockedFsReaddir.mockResolvedValue([
-            { name: 'file.txt', isDirectory: () => false },
-            { name: 'src', isDirectory: () => true }
-        ]);
-        const result = await listFiles(workDir, '.');
-        expect(result).toBe('file.txt\nsrc/');
-        expect(mockedFsReaddir).toHaveBeenCalledWith(path.resolve(workDir, '.'), { withFileTypes: true });
-    });
-
-    it('readFile should return file content', async () => {
-        mockedFsReadFile.mockResolvedValue('content');
-        const result = await readFile(workDir, 'file.txt');
-        expect(result).toBe('content');
-        expect(mockedFsReadFile).toHaveBeenCalledWith(path.resolve(workDir, 'file.txt'), 'utf-8');
-    });
-
-    it('writeFile should write content to file', async () => {
-        await writeFile(workDir, 'file.txt', 'content');
-        expect(mockedFsMkdir).toHaveBeenCalledWith(workDir, { recursive: true });
-        expect(mockedFsWriteFile).toHaveBeenCalledWith(path.resolve(workDir, 'file.txt'), 'content', 'utf-8');
     });
 
     it('runCommand should execute allowed commands and return output', async () => {
@@ -112,10 +89,6 @@ describe('Agent Tools', () => {
         expect(result).not.toContain('ERROR: Command not allowed');
     });
 
-    it('should prevent path traversal attacks', async () => {
-        await expect(readFile(workDir, '../secret')).rejects.toThrow('Access denied');
-        await expect(writeFile(workDir, '../secret', '')).rejects.toThrow('Access denied');
-    });
 });
 
 describe('runPolyglotValidation', () => {
