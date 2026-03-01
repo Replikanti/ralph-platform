@@ -79,8 +79,8 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             clearTimeout(timeout);
 
             if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
-                const retryMatch = (stderr + ' ' + stdout).match(/retry.{0,20}?(\d+)\s*second/i);
-                const retryAfterMs = retryMatch ? parseInt(retryMatch[1], 10) * 1000 : undefined;
+                const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(stderr + ' ' + stdout);
+                const retryAfterMs = retryMatch ? Number.parseInt(retryMatch[1], 10) * 1000 : undefined;
                 reject(new RateLimitError("Claude Rate Limit Exceeded", retryAfterMs));
                 return;
             }

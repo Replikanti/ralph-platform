@@ -29,9 +29,9 @@ interface ClaudeAccount {
 const REDIS_KEY_PREFIX = 'ralph:account:ratelimited:';
 
 export class AccountPool {
-    private accounts: ClaudeAccount[];
-    private redis: IORedis;
-    private rateLimitTtlMs: number;
+    private readonly accounts: ClaudeAccount[];
+    private readonly redis: IORedis;
+    private readonly rateLimitTtlMs: number;
 
     constructor(accountsDir: string, redis: IORedis) {
         this.redis = redis;
@@ -156,8 +156,15 @@ export class AccountPool {
     }
 }
 
-export let accountPool: AccountPool;
+const _state: { pool: AccountPool | undefined } = { pool: undefined };
+
+export const accountPool: Pick<AccountPool, 'getCredentialsDir' | 'markRateLimited' | 'hasAvailableAccount' | 'seedCredentials'> = {
+    getCredentialsDir: (...args) => _state.pool!.getCredentialsDir(...args),
+    markRateLimited: (...args) => _state.pool!.markRateLimited(...args),
+    hasAvailableAccount: (...args) => _state.pool!.hasAvailableAccount(...args),
+    seedCredentials: (...args) => _state.pool!.seedCredentials(...args),
+};
 
 export function initAccountPool(accountsDir: string, redis: IORedis): void {
-    accountPool = new AccountPool(accountsDir, redis);
+    _state.pool = new AccountPool(accountsDir, redis);
 }

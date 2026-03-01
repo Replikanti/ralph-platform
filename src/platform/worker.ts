@@ -3,7 +3,7 @@ import { Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Langfuse } from 'langfuse';
 import { startBamlProxy } from '../infra/baml-proxy';
-import { runAgent } from '../agent/agent';
+import { runAgent, RateLimitError } from '../agent/agent';
 import { storePlan, deletePlan, StoredPlan } from '../infra/plan-store';
 import { formatPlanForLinear } from '../infra/plan-formatter';
 import { LinearClient as RalphLinearClient } from '../infra/linear-client';
@@ -12,7 +12,6 @@ import type { Task, AgentResult } from '../domain/types';
 import type { ITracer } from '../domain/tracer-contract';
 import { redactText } from '../security/redactor';
 import { initAccountPool, accountPool } from '../infra/account-pool';
-import { RateLimitError } from '../agent/agent';
 
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
