@@ -20,7 +20,7 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          command: ["node", "dist/server.js"]
+          command: ["bun", "run", "dist/server.js"]
           ports:
             - containerPort: 3000
           livenessProbe:

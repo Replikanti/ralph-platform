@@ -260,7 +260,9 @@ export const createWorker = () => {
     return worker;
 };
 
-if (require.main === module) {
+// import.meta.main is true when this file is the entry point (works in both Bun and Node ESM)
+// require.main === module is the CJS equivalent but unreliable in Bun bundles
+if (import.meta.main) {
     const proxyPort = Number.parseInt(process.env.BAML_PROXY_PORT ?? '3001');
     process.env.BAML_PROXY_URL = process.env.BAML_PROXY_URL ?? `http://localhost:${proxyPort}/v1`;
 

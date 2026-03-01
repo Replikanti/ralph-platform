@@ -420,7 +420,7 @@ app.get('/health', (_req, res) => {
     res.status(200).send({ status: 'ok' });
 });
 
-if (require.main === module) {
+if (import.meta.main) {
     const server = app.listen(3000, () => logger.info('🚀 API listening on 3000'));
 
     // Graceful Shutdown
