@@ -12,6 +12,7 @@ import type { Task, AgentResult } from '../domain/types';
 import type { ITracer } from '../domain/tracer-contract';
 import { redactText } from '../security/redactor';
 import { initAccountPool, accountPool } from '../infra/account-pool';
+import { killActiveProcesses } from '../infra/claude-runner';
 
 const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
@@ -241,6 +242,7 @@ export const createWorker = () => {
 
     const shutdown = async (signal: string) => {
         logger.info(`🛑 ${signal} received. Shutting down worker...`);
+        killActiveProcesses();
         try {
             await worker.close();
             await connection.quit();

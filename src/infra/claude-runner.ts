@@ -1,5 +1,16 @@
 import { logger } from './logger';
 import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+
+const activeProcesses = new Set<ChildProcess>();
+
+export function killActiveProcesses(): void {
+    for (const child of activeProcesses) {
+        logger.info(`🛑 Killing active Claude CLI process PID ${child.pid}`);
+        child.kill('SIGTERM');
+    }
+    activeProcesses.clear();
+}
 
 export class RateLimitError extends Error {
     retryAfterMs?: number;
@@ -54,6 +65,8 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             return;
         }
 
+        activeProcesses.add(child);
+
         let stdout = '';
         let stderr = '';
 
@@ -77,6 +90,7 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
 
         child.on('close', (code: number) => {
             clearTimeout(timeout);
+            activeProcesses.delete(child);
 
             if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
                 const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(stderr + ' ' + stdout);
