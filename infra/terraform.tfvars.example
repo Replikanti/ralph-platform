@@ -10,7 +10,8 @@ github_token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Application secrets (optional - leave empty to use placeholders)
 # You can update these values later in GCP Secret Manager
-anthropic_api_key     = "sk-ant-xxxxx"  # or leave empty
+# NOTE: No Anthropic API key needed — Ralph uses Claude Max flat-rate auth via account pool.
+# Add CLAUDE_CREDENTIALS_N secrets in GitHub Actions UI to activate accounts.
 langfuse_public_key   = "pk-lf-xxxxx"   # or leave empty
 langfuse_secret_key   = "sk-lf-xxxxx"   # or leave empty
 linear_webhook_secret = "xxxxx"         # or leave empty
