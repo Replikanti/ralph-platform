@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { redactText } from "../security/redactor";
 
 // Lazy wrapper: evaluates promisify(exec) at call time so mocks are effective in tests
 const execAsync = (cmd: string, opts?: Parameters<typeof exec>[1]) =>
@@ -42,71 +41,6 @@ export async function detectProjectLanguages(workDir: string): Promise<string[]>
     } catch { /* ignore */ }
 
     return languages;
-}
-
-// Allowlist of safe command patterns for agent execution
-const ALLOWED_COMMAND_PATTERNS = [
-    /^npm\s+(test|run|install|ci|build|lint)/,
-    /^npx\s+[a-zA-Z0-9@/-]+/,
-    /^node\s+[a-zA-Z0-9./_-]+/,
-    /^ls\s+(-[a-zA-Z]+\s+)?[a-zA-Z0-9./_-]*$/,
-    /^cat\s+[a-zA-Z0-9./_-]+$/,
-    /^pwd$/,
-    /^echo\s+/,
-    /^git\s+(status|log|diff|show)/,
-    /^python3?\s+-m\s+pytest/,
-    /^pytest/,
-    /^ruff\s+/,
-    /^mypy\s+/,
-    /^go\s+(build|test|mod|vet|run|fmt)/,
-    /^gofmt\s+/,
-    /^goimports\s+/,
-    /^staticcheck\s+/,
-    /^terraform\s+(init|fmt|validate|plan)/,
-    /^tflint\s+/,
-];
-
-const DANGEROUS_PATTERNS = [
-    /[;&|`$()]/,  // Shell metacharacters
-    /rm\s+-rf/,   // Destructive commands
-    />\s*\/dev/,  // Device manipulation
-    /curl.*\|/,   // Piped downloads
-    /wget.*\|/,   // Piped downloads
-];
-
-async function runCommand(workDir: string, command: string): Promise<string> {
-    // Security: Validate command against allowlist
-    const isAllowed = ALLOWED_COMMAND_PATTERNS.some(pattern => pattern.test(command));
-    const isDangerous = DANGEROUS_PATTERNS.some(pattern => pattern.test(command));
-
-    if (!isAllowed || isDangerous) {
-        return `ERROR: Command not allowed for security reasons. Only whitelisted commands (npm, git, test tools) are permitted.`;
-    }
-
-    const sanitize = async (str: string, maxLen = 5000): Promise<string> => {
-        if (!str) return '';
-        const truncated = str.length > maxLen ? str.substring(0, maxLen) + '\n... (truncated)' : str;
-        return await redactText(truncated);
-    };
-
-    try {
-        const { stdout, stderr } = await execAsync(command, {
-            cwd: workDir,
-            timeout: 60000, // 60s timeout
-            maxBuffer: 1024 * 1024 // 1MB max output
-        });
-
-        const safeStdout = await sanitize(stdout);
-        const safeStderr = await sanitize(stderr);
-
-        return `STDOUT:\n${safeStdout}\n\nSTDERR:\n${safeStderr}`;
-    } catch (e: unknown) {
-        const error = e as { stdout?: string, stderr?: string };
-        const safeStdout = await sanitize(error.stdout || '', 2000);
-        const safeStderr = await sanitize(error.stderr || '', 2000);
-
-        return `ERROR: Command failed\n${safeStdout}\n${safeStderr}`;
-    }
 }
 
 // --- EXISTING VALIDATION LOGIC ---
