@@ -16,19 +16,19 @@ This document provides a deep dive into Ralph's technical architecture, componen
 ```mermaid
 graph TB
     subgraph "External Services"
-        Linear[Linear<br/>Issue Tracker]
-        GitHub[GitHub<br/>Version Control]
-        Langfuse[Langfuse<br/>Observability]
+        Linear[Linear Issue Tracker]
+        GitHub[GitHub Version Control]
+        Langfuse[Langfuse Observability]
     end
 
     subgraph "Ralph Platform - GKE"
         subgraph "API Layer"
-            API[API Server<br/>Express.js<br/>:3000]
-            Ingress[GKE Ingress<br/>Load Balancer]
+            API[API Server :3000]
+            Ingress[GKE Ingress]
         end
 
         subgraph "Queue Layer"
-            Redis[(Redis<br/>BullMQ)]
+            Redis[(Redis BullMQ)]
         end
 
         subgraph "Worker Layer"
@@ -37,14 +37,14 @@ graph TB
         end
 
         subgraph "Persistent Storage"
-            Cache[/Persistent Cache<br/>Claude Projects/]
+            Cache["Persistent Cache - Claude Projects"]
         end
 
         subgraph "Worker Execution Context"
-            Workspace[/Ephemeral Workspace<br/>/tmp/ralph-workspaces/]
-            ClaudeCLI[Claude CLI<br/>Opus 4.6 / Haiku 4.5]
-            Tools[Polyglot Tools<br/>Biome, TSC, Ruff, Mypy, goimports, staticcheck, terraform, tflint]
-            Accounts[/claude-accounts/<br/>Account Pool]
+            Workspace["Ephemeral Workspace /tmp/ralph-workspaces"]
+            ClaudeCLI[Claude CLI - Opus 4.6 / Haiku 4.5]
+            Tools[Polyglot Tools]
+            Accounts["Account Pool /claude-accounts"]
         end
     end
 
@@ -538,21 +538,21 @@ Ralph is designed for zero-downtime deployments in Kubernetes. Both the API and 
 
 ```mermaid
 graph TD
-    Input[User Input] --> Webhook[Webhook Validation<br/>HMAC SHA-256]
-    Webhook --> Queue[Queue Isolation<br/>BullMQ]
-    Queue --> Worker[Worker Isolation<br/>UUID Workspaces]
+    Input[User Input] --> Webhook[Webhook Validation HMAC SHA-256]
+    Webhook --> Queue[Queue Isolation BullMQ]
+    Queue --> Worker[Worker Isolation UUID Workspaces]
 
     Worker --> Commands[Command Allowlist]
     Worker --> Patterns[Dangerous Pattern Blocking]
     Worker --> Resources[Resource Limits]
     Worker --> Paths[Path Traversal Protection]
 
-    Commands --> Validation[Code Validation<br/>Linters + Type Checkers]
+    Commands --> Validation[Code Validation - Linters + Type Checkers]
     Patterns --> Validation
     Resources --> Validation
     Paths --> Validation
 
-    Validation --> Scanning[Security Scanning<br/>Trivy]
+    Validation --> Scanning[Security Scanning Trivy]
     Scanning --> GitHub[GitHub PR]
 
     style Webhook fill:#e1bee7,stroke:#333,color:#000
@@ -626,18 +626,18 @@ Ralph runs on Claude Max flat-rate subscriptions — there are no per-token cost
 ```mermaid
 flowchart LR
     Worker -->|getCredentialsDir| Pool[Account Pool]
-    Pool -->|available?| Redis[(Redis\nrate-limit keys)]
-    Redis -->|not blocked| Creds[/account-0\n.credentials.json/]
-    Redis -->|blocked| Creds2[/account-1\n.credentials.json/]
-    Creds -->|seed into| TempHome[/tmp/baml-proxy-xxx/\n.claude/]
+    Pool -->|check blocked?| Redis[(Redis)]
+    Redis -->|not blocked| Creds["account-0 credentials"]
+    Redis -->|blocked| Creds2["account-1 credentials"]
+    Creds -->|seed into| TempHome["tmp home .claude/"]
     Creds2 -->|seed into| TempHome
     TempHome -->|HOME=| ClaudeCLI[Claude CLI]
 
     ClaudeCLI -->|429 rate limit| Pool
     Pool -->|markRateLimited| Redis
-    Pool -->|hasAvailableAccount?| Decision{next\naccount?}
+    Pool -->|hasAvailableAccount?| Decision{rotate?}
     Decision -->|yes| Retry[immediate retry]
-    Decision -->|no| Delay[delayed queue\nretryAfterMs]
+    Decision -->|no| Delay[delayed queue]
 ```
 
 **Key**: each worker pod reads credentials from a read-only volume mount (`/claude-accounts`). Redis tracks blocked accounts across all replicas.
