@@ -1,7 +1,7 @@
 import { logger } from '../infra/logger';
 import { setupWorkspace, parseRepoUrl } from "./workspace";
 import { runPolyglotValidation, detectProjectLanguages } from "./tools";
-import { runClaudeExecution, RateLimitError } from '../infra/claude-runner';
+import { runClaudeExecution } from '../infra/claude-runner';
 import fsPromises from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,7 +37,7 @@ async function summarizeFailurePhase(task: Task, _homeDir: string, errors: strin
         });
         return result.summary;
     } catch (e) {
-        if (e instanceof RateLimitError) throw e;
+        if (e instanceof Error && e.name === 'RateLimitError') throw e;
         logger.warn({ err: e }, "⚠️ summarizeFailurePhase failed, using fallback message");
         return "Task failed due to persistent validation errors.";
     }
@@ -134,7 +134,7 @@ async function createPullRequest(repoUrl: string, branchName: string, title: str
     }
 }
 
-export { RateLimitError };
+export { RateLimitError } from '../infra/claude-runner';
 
 async function listAvailableSkills(workDir: string): Promise<string> {
     // List native commands from .claude/commands so the Planner knows what's available

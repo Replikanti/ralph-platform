@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { redactText } from "../security/redactor";
 
 // Lazy wrapper: evaluates promisify(exec) at call time so mocks are effective in tests
 const execAsync = (cmd: string, opts?: Parameters<typeof exec>[1]) =>
