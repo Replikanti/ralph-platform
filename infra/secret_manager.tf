@@ -15,19 +15,6 @@ resource "google_secret_manager_secret_version" "github_token" {
   secret_data = var.github_token
 }
 
-# Anthropic API Key
-resource "google_secret_manager_secret" "anthropic_key" {
-  secret_id = "ralph-anthropic-key"
-
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "anthropic_key" {
-  secret      = google_secret_manager_secret.anthropic_key.id
-  secret_data = var.anthropic_api_key != "" ? var.anthropic_api_key : "sk-ant-PLACEHOLDER"
-}
 
 # Langfuse Public Key
 resource "google_secret_manager_secret" "langfuse_public_key" {
@@ -125,4 +112,17 @@ resource "google_secret_manager_secret" "redis_url" {
 resource "google_secret_manager_secret_version" "redis_url" {
   secret      = google_secret_manager_secret.redis_url.id
   secret_data = "redis://${google_redis_instance.cache.host}:${google_redis_instance.cache.port}"
+}
+
+# Claude Max Account Pool — credential slots
+# 4 slots pre-created; values are pushed by CI/CD from GitHub Actions secrets.
+# To use slot N: add CLAUDE_CREDENTIALS_N secret in GitHub UI, then add account-N
+# to claudeAccounts.accounts and claudeAccounts.externalSecrets in values.yaml.
+resource "google_secret_manager_secret" "claude_credentials" {
+  count     = 4
+  secret_id = "ralph-claude-credentials-${count.index}"
+
+  replication {
+    auto {}
+  }
 }

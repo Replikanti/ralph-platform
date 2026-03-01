@@ -7,10 +7,11 @@ resource "google_service_account" "github_actions" {
 # IAM Roles for GitHub Actions SA
 resource "google_project_iam_member" "github_deployer_roles" {
   for_each = toset([
-    "roles/container.developer",      # Access to GKE
-    "roles/storage.admin",            # Push to GCR (includes bucket creation)
-    "roles/artifactregistry.writer",  # Push to Artifact Registry
-    "roles/artifactregistry.repoAdmin" # Create Artifact Registry repositories on push
+    "roles/container.developer",             # Access to GKE
+    "roles/storage.admin",                   # Push to GCR (includes bucket creation)
+    "roles/artifactregistry.writer",         # Push to Artifact Registry
+    "roles/artifactregistry.repoAdmin",      # Create Artifact Registry repositories on push
+    "roles/secretmanager.secretVersionAdder" # Push Claude credentials to GCP Secret Manager
   ])
   role    = each.key
   member  = "serviceAccount:${google_service_account.github_actions.email}"
