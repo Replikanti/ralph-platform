@@ -110,11 +110,10 @@ spec:
         - name: claude-account-{{ $i }}
           secret:
             secretName: {{ $account.secretName }}
+            optional: true
             items:
               - key: credentials.json
                 path: .credentials.json
-              - key: settings.json
-                path: settings.json
         {{- end }}
         {{- end }}
 
