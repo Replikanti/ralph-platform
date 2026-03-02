@@ -39,25 +39,21 @@ export function parseClaudeRateLimit(stderr: string, stdout: string): number | u
 
     const resetMatch = /resets (.*?) \(UTC\)/i.exec(combinedOutput);
     if (resetMatch) {
-        try {
-            const dateStr = resetMatch[1];
-            let formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
-            formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear()}`);
-            
-            const targetTime = Date.parse(`${formattedDate} UTC`);
-            if (Number.isNaN(targetTime)) return undefined;
+        const dateStr = resetMatch[1];
+        let formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+        formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear()}`);
+        
+        const targetTime = Date.parse(`${formattedDate} UTC`);
+        if (Number.isNaN(targetTime)) return undefined;
 
-            let delay = targetTime - Date.now();
-            if (delay < 0) {
-                formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
-                formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear() + 1}`);
-                delay = Date.parse(`${formattedDate} UTC`) - Date.now();
-            }
-            
-            return delay > 0 ? delay : undefined;
-        } catch (e) {
-            return undefined;
+        let delay = targetTime - Date.now();
+        if (delay < 0) {
+            formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+            formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear() + 1}`);
+            delay = Date.parse(`${formattedDate} UTC`) - Date.now();
         }
+        
+        return delay > 0 ? delay : undefined;
     }
 
     return undefined;
