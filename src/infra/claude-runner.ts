@@ -29,6 +29,36 @@ export interface ClaudeRunConfig {
     allowPermissionBypass?: boolean;
 }
 
+export function parseClaudeRateLimit(stderr: string, stdout: string): number | undefined {
+    const combinedOutput = stderr + ' ' + stdout;
+    
+    const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(combinedOutput);
+    if (retryMatch) {
+        return Number.parseInt(retryMatch[1], 10) * 1000;
+    }
+
+    const resetMatch = /resets (.*?) \(UTC\)/i.exec(combinedOutput);
+    if (resetMatch) {
+        const dateStr = resetMatch[1];
+        let formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+        formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear()}`);
+        
+        const targetTime = Date.parse(`${formattedDate} UTC`);
+        if (Number.isNaN(targetTime)) return undefined;
+
+        let delay = targetTime - Date.now();
+        if (delay < 0) {
+            formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+            formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear() + 1}`);
+            delay = Date.parse(`${formattedDate} UTC`) - Date.now();
+        }
+        
+        return delay > 0 ? delay : undefined;
+    }
+
+    return undefined;
+}
+
 export function runClaudeExecution(config: ClaudeRunConfig, workDir: string, homeDir: string): Promise<{ stdout: string; stderr: string }> {
     const args: string[] = ['-p', config.prompt];
     if (config.model) args.push('--model', config.model);
@@ -92,9 +122,8 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             clearTimeout(timeout);
             activeProcesses.delete(child);
 
-            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
-                const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(stderr + ' ' + stdout);
-                const retryAfterMs = retryMatch ? Number.parseInt(retryMatch[1], 10) * 1000 : undefined;
+            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit') || stderr.toLowerCase().includes('hit your limit') || stdout.toLowerCase().includes('hit your limit')) {
+                const retryAfterMs = parseClaudeRateLimit(stderr, stdout);
                 reject(new RateLimitError("Claude Rate Limit Exceeded", retryAfterMs));
                 return;
             }
