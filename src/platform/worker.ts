@@ -60,7 +60,7 @@ async function notifyLinearJobStarted(task: Task): Promise<void> {
         const linearClient = new RalphLinearClient();
         
         const currentState = await linearClient.getIssueState(task.ticketId);
-        if (currentState && currentState.toLowerCase() === 'in progress') {
+        if (currentState?.toLowerCase() === 'in progress') {
             return;
         }
 
@@ -144,6 +144,35 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
     await updateLinearIssue(ticketId, "Todo", failComment);
 }
 
+async function handleRateLimitError(job: Job, rateLimitErr: RateLimitError): Promise<void> {
+    try {
+        const currentAccountPath = await accountPool.getCredentialsDir();
+        await accountPool.markRateLimited(currentAccountPath, rateLimitErr.retryAfterMs);
+
+        if (await accountPool.hasAvailableAccount()) {
+            logger.info(`🔄 [Worker] Rate limit hit — rotating to next account, immediate retry for job ${job.id}`);
+            await job.retry();
+            return;
+        }
+    } catch {
+        // accountPool not configured or other error — fall through to delay
+    }
+
+    let delayMs = rateLimitErr.retryAfterMs ?? 60000;
+    try {
+        const shortestWait = await accountPool.getShortestWaitTimeMs();
+        if (shortestWait !== undefined && shortestWait > 0) {
+            delayMs = shortestWait;
+            logger.info(`🔄 [Worker] All accounts rate-limited. Shortest wait time among pool: ${delayMs}ms`);
+        }
+    } catch {
+        // ignore
+    }
+
+    logger.warn(`⏳ [Worker] All accounts rate-limited for job ${job.id}. Backing off for ${delayMs}ms...`);
+    await job.moveToDelayed(Date.now() + delayMs, job.token);
+}
+
 // --- Job processor ---
 
 export const jobProcessor = async (job: Job) => {
@@ -178,33 +207,7 @@ export const jobProcessor = async (job: Job) => {
         result = await runAgent(taskData, tracer);
     } catch (e: any) {
         if (e instanceof RateLimitError || e.name === 'RateLimitError') {
-            const rateLimitErr = e as RateLimitError;
-            try {
-                const currentAccountPath = await accountPool.getCredentialsDir();
-                await accountPool.markRateLimited(currentAccountPath, rateLimitErr.retryAfterMs);
-
-                if (await accountPool.hasAvailableAccount()) {
-                    logger.info(`🔄 [Worker] Rate limit hit — rotating to next account, immediate retry for job ${job.id}`);
-                    await job.retry();
-                    return;
-                }
-            } catch {
-                // accountPool not configured or other error — fall through to delay
-            }
-
-            let delayMs = rateLimitErr.retryAfterMs ?? 60000;
-            try {
-                const shortestWait = await accountPool.getShortestWaitTimeMs();
-                if (shortestWait !== undefined && shortestWait > 0) {
-                    delayMs = shortestWait;
-                    logger.info(`🔄 [Worker] All accounts rate-limited. Shortest wait time among pool: ${delayMs}ms`);
-                }
-            } catch {
-                // ignore
-            }
-
-            logger.warn(`⏳ [Worker] All accounts rate-limited for job ${job.id}. Backing off for ${delayMs}ms...`);
-            await job.moveToDelayed(Date.now() + delayMs, job.token);
+            await handleRateLimitError(job, e as RateLimitError);
             return;
         }
         throw e;
