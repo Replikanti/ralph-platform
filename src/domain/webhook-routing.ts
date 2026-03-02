@@ -9,7 +9,8 @@ export function isApprovalComment(body: string): boolean {
 /** Má být issue webhook ignorován? */
 export function shouldSkipIssueWebhook(action: string, stateName: string): boolean {
   if (action !== 'update') return false;
-  const terminal = ['in progress', 'in review', 'completed', 'canceled', 'done'];
+  // 'todo' = awaiting plan approval — re-entry via comment webhook, not issue webhook
+  const terminal = ['in progress', 'in review', 'completed', 'canceled', 'done', 'todo', 'triage', 'backlog', 'unstarted', 'ready'];
   return terminal.includes(stateName.toLowerCase().trim());
 }
 
