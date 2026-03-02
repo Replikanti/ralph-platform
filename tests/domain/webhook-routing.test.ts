@@ -24,8 +24,12 @@ describe('webhook-routing', () => {
     });
 
     it('does not skip update in non-terminal states', () => {
-      expect(shouldSkipIssueWebhook('update', 'Todo')).toBe(false);
-      expect(shouldSkipIssueWebhook('update', 'Backlog')).toBe(false);
+      expect(shouldSkipIssueWebhook('update', 'New')).toBe(false);
+    });
+
+    it('skips update when state is Todo (awaiting plan approval — handled by comment webhook)', () => {
+      expect(shouldSkipIssueWebhook('update', 'Todo')).toBe(true);
+      expect(shouldSkipIssueWebhook('update', 'Backlog')).toBe(true);
     });
   });
 
