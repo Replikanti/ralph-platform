@@ -197,7 +197,7 @@ async function handlePlanApproval(issueId: string, storedPlan: StoredPlanContext
         description: storedPlan.taskContext.description,
         repoUrl: storedPlan.taskContext.repoUrl,
         branchName: storedPlan.taskContext.branchName,
-        mode: 'execute-only',
+        mode: 'execute-only' as const,
         existingPlan: storedPlan.plan,
         isIteration: storedPlan.taskContext.isIteration
     };
@@ -223,7 +223,7 @@ async function handlePlanRevisionFeedback(issueId: string, storedPlan: StoredPla
         description: storedPlan.taskContext.description,
         repoUrl: storedPlan.taskContext.repoUrl,
         branchName: storedPlan.taskContext.branchName,
-        mode: 'plan-only',
+        mode: 'plan-only' as const,
         additionalFeedback: safeCommentBody
     };
 
@@ -262,7 +262,7 @@ async function handleIterationRequest(routing: { issueId: string; issueTitle: st
         description: safeDescription,
         repoUrl,
         branchName: `ralph/feat-${identifier || issueId}`,
-        mode: 'plan-only',
+        mode: 'plan-only' as const,
         additionalFeedback: safeFeedback,
         isIteration: true
     };

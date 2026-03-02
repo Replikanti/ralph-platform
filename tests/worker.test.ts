@@ -10,7 +10,13 @@ mock.module('bullmq', () => ({
     Job: mock(),
 }));
 mock.module('ioredis', () => ({
-    default: mock().mockImplementation(() => ({ on: mock() })),
+    default: mock().mockImplementation(() => ({ 
+        on: mock(),
+        get: mock().mockResolvedValue(null),
+        set: mock().mockResolvedValue('OK'),
+        quit: mock().mockResolvedValue('OK'),
+        disconnect: mock()
+    })),
 }));
 mock.module('../src/agent/agent', () => ({
     runAgent: mock(),

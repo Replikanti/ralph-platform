@@ -128,6 +128,35 @@ export class AccountPool {
     }
 
     /**
+     * Returns the shortest wait time in milliseconds until an account becomes available.
+     * If an account is already available, returns 0.
+     * If no accounts are configured, returns undefined.
+     */
+    async getShortestWaitTimeMs(): Promise<number | undefined> {
+        if (this.accounts.length === 0) return undefined;
+
+        let shortestWait: number | undefined;
+
+        for (const account of this.accounts) {
+            const key = REDIS_KEY_PREFIX + account.id;
+            const pttl = await this.redis.pttl(key);
+            
+            if (pttl === -2) {
+                // -2 means key does not exist (account is available)
+                return 0;
+            }
+
+            if (pttl > 0) {
+                if (shortestWait === undefined || pttl < shortestWait) {
+                    shortestWait = pttl;
+                }
+            }
+        }
+
+        return shortestWait;
+    }
+
+    /**
      * Seeds Claude credentials from the active account into destDir/.claude/.
      * Copies .credentials.json and settings.json if present.
      */
@@ -158,11 +187,12 @@ export class AccountPool {
 
 const _state: { pool: AccountPool | undefined } = { pool: undefined };
 
-export const accountPool: Pick<AccountPool, 'getCredentialsDir' | 'markRateLimited' | 'hasAvailableAccount' | 'seedCredentials'> = {
+export const accountPool: Pick<AccountPool, 'getCredentialsDir' | 'markRateLimited' | 'hasAvailableAccount' | 'seedCredentials' | 'getShortestWaitTimeMs'> = {
     getCredentialsDir: (...args) => _state.pool!.getCredentialsDir(...args),
     markRateLimited: (...args) => _state.pool!.markRateLimited(...args),
     hasAvailableAccount: (...args) => _state.pool!.hasAvailableAccount(...args),
     seedCredentials: (...args) => _state.pool!.seedCredentials(...args),
+    getShortestWaitTimeMs: (...args) => _state.pool!.getShortestWaitTimeMs(...args),
 };
 
 export function initAccountPool(accountsDir: string, redis: IORedis): void {

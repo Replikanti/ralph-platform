@@ -92,9 +92,38 @@ export function runClaude(args: string[], cwd: string, homeDir: string, timeoutM
             clearTimeout(timeout);
             activeProcesses.delete(child);
 
-            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit')) {
-                const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(stderr + ' ' + stdout);
-                const retryAfterMs = retryMatch ? Number.parseInt(retryMatch[1], 10) * 1000 : undefined;
+            if (stderr.includes('429') || stderr.toLowerCase().includes('rate limit') || stderr.toLowerCase().includes('hit your limit') || stdout.toLowerCase().includes('hit your limit')) {
+                const combinedOutput = stderr + ' ' + stdout;
+                let retryAfterMs: number | undefined;
+
+                const retryMatch = /retry.{0,20}?(\d+)\s*second/i.exec(combinedOutput);
+                if (retryMatch) {
+                    retryAfterMs = Number.parseInt(retryMatch[1], 10) * 1000;
+                } else {
+                    const resetMatch = /resets (.*?) \(UTC\)/i.exec(combinedOutput);
+                    if (resetMatch) {
+                        try {
+                            const dateStr = resetMatch[1];
+                            let formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+                            formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear()}`);
+                            const targetTime = Date.parse(`${formattedDate} UTC`);
+                            if (!Number.isNaN(targetTime)) {
+                                let delay = targetTime - Date.now();
+                                if (delay < 0) {
+                                    formattedDate = dateStr.replace(/am/i, ':00 AM').replace(/pm/i, ':00 PM');
+                                    formattedDate = formattedDate.replace(',', `, ${new Date().getUTCFullYear() + 1}`);
+                                    delay = Date.parse(`${formattedDate} UTC`) - Date.now();
+                                }
+                                if (delay > 0) {
+                                    retryAfterMs = delay;
+                                }
+                            }
+                        } catch (e) {
+                            // ignore parsing errors
+                        }
+                    }
+                }
+
                 reject(new RateLimitError("Claude Rate Limit Exceeded", retryAfterMs));
                 return;
             }

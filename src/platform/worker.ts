@@ -58,6 +58,12 @@ async function notifyLinearJobStarted(task: Task): Promise<void> {
     if (!process.env.LINEAR_API_KEY) return;
     try {
         const linearClient = new RalphLinearClient();
+        
+        const currentState = await linearClient.getIssueState(task.ticketId);
+        if (currentState && currentState.toLowerCase() === 'in progress') {
+            return;
+        }
+
         const { ticketId, jobId, mode, isIteration } = task;
 
         if (mode === 'plan-only') {
@@ -143,6 +149,17 @@ async function handleAgentResult(result: AgentResult, task: Task, redis: IORedis
 export const jobProcessor = async (job: Job) => {
     logger.info(`🔨 [Worker] Processing ${job.id} (mode: ${job.data.mode || 'full'})`);
 
+    const linearClient = new RalphLinearClient();
+    const currentState = await linearClient.getIssueState(job.data.ticketId);
+    
+    if (currentState) {
+        const lowerState = currentState.toLowerCase();
+        if (['canceled', 'done', 'rejected', 'duplicate'].includes(lowerState)) {
+            logger.warn(`🛑 [Worker] Job ${job.id} skipped. Linear issue ${job.data.ticketId} is in terminal state: ${currentState}`);
+            return;
+        }
+    }
+
     const taskData: Task = {
         ...job.data,
         jobId: job.id as string,
@@ -175,7 +192,17 @@ export const jobProcessor = async (job: Job) => {
                 // accountPool not configured or other error — fall through to delay
             }
 
-            const delayMs = rateLimitErr.retryAfterMs ?? 60000;
+            let delayMs = rateLimitErr.retryAfterMs ?? 60000;
+            try {
+                const shortestWait = await accountPool.getShortestWaitTimeMs();
+                if (shortestWait !== undefined && shortestWait > 0) {
+                    delayMs = shortestWait;
+                    logger.info(`🔄 [Worker] All accounts rate-limited. Shortest wait time among pool: ${delayMs}ms`);
+                }
+            } catch {
+                // ignore
+            }
+
             logger.warn(`⏳ [Worker] All accounts rate-limited for job ${job.id}. Backing off for ${delayMs}ms...`);
             await job.moveToDelayed(Date.now() + delayMs, job.token);
             return;
