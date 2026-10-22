@@ -9,7 +9,7 @@
     "test": "bun test tests/domain/ tests/plan-formatter.test.ts tests/plan-store.test.ts tests/workspace.test.ts tests/linear-client.test.ts tests/security-architecture.test.ts && bun test tests/tools.test.ts && bun test tests/server.test.ts && bun test tests/worker.test.ts && bun test tests/agent.test.ts"
   },
   "dependencies": {
-    "@boundaryml/baml": "^0.219.0",
+    "@boundaryml/baml": "^0.226.0",
     "@bull-board/api": "^6.16.4",
     "@bull-board/express": "^6.16.4",
     "@linear/sdk": "^76.0.0",
